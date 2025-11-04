@@ -1,0 +1,123 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  min-width: 220px;
+  padding: 16px;
+  background-color: #f9fafb;
+  color: #202124;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.color-picker label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  margin-bottom: 8px;
+  gap: 12px;
+}
+
+.color-picker input[type="color"] {
+  appearance: none;
+  border: none;
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.color-picker input[type="color"]::-webkit-color-swatch {
+  border-radius: 6px;
+  border: 1px solid #d0d7de;
+}
+
+.quick-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.quick-swatches button {
+  width: 100%;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  height: 28px;
+  cursor: pointer;
+}
+
+.quick-swatches button:focus-visible,
+.quick-swatches button:hover {
+  border-color: #1a73e8;
+}
+
+.quick-swatches button[data-color="#ffeb3b"] {
+  background-color: #ffeb3b;
+}
+
+.quick-swatches button[data-color="#ffa726"] {
+  background-color: #ffa726;
+}
+
+.quick-swatches button[data-color="#81c784"] {
+  background-color: #81c784;
+}
+
+.quick-swatches button[data-color="#64b5f6"] {
+  background-color: #64b5f6;
+}
+
+.quick-swatches button[data-color="#f48fb1"] {
+  background-color: #f48fb1;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.actions button {
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #1a73e8;
+  background-color: #1a73e8;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.actions button:disabled {
+  background-color: #c6dafc;
+  border-color: #c6dafc;
+  cursor: not-allowed;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  color: #5f6368;
+  text-align: center;
+}
+
+.status {
+  min-height: 18px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #1a73e8;
+  text-align: center;
+}

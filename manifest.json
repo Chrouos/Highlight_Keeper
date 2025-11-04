@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Highlight Keeper",
+  "version": "1.0.0",
+  "description": "在任意網頁標註文字、挑選顏色，並在本機儲存與還原標記。",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Highlight Keeper"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"],
+      "css": ["contentStyles.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

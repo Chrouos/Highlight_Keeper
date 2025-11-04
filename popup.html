@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Highlight Keeper</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>頁面標註</h1>
+      <section class="color-picker">
+        <label for="color">
+          標註顏色
+          <input type="color" id="color" value="#ffeb3b" />
+        </label>
+        <div class="quick-swatches" aria-label="快速顏色選擇">
+          <button type="button" data-color="#ffeb3b" title="黃色"></button>
+          <button type="button" data-color="#ffa726" title="橘色"></button>
+          <button type="button" data-color="#81c784" title="綠色"></button>
+          <button type="button" data-color="#64b5f6" title="藍色"></button>
+          <button type="button" data-color="#f48fb1" title="粉色"></button>
+        </div>
+      </section>
+      <section class="actions">
+        <button id="highlightBtn" type="button">標註選取文字</button>
+        <p class="hint">先在網頁上選取文字，再按下按鈕。</p>
+      </section>
+      <section class="status" role="status" aria-live="polite"></section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
