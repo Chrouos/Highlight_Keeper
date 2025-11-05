@@ -1,10 +1,12 @@
 .hk-highlight {
-  background-color: #ffeb3b;
+  background-color: var(--hk-highlight-color, #ffeb3b) !important;
+  background-image: none !important;
   color: inherit !important;
   border-radius: 2px;
   padding: 0 0.1em;
   box-decoration-break: clone;
   cursor: pointer;
+  display: inline;
   transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
   transform-origin: center;
 }
