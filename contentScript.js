@@ -5,7 +5,16 @@ const pageKey = new URL(window.location.href).href;
 
 const storage = chrome.storage?.local;
 const DEFAULT_COLOR = "#ffeb3b";
-const COLOR_PALETTE = ["#ffeb3b", "#ffa726", "#81c784", "#64b5f6", "#f48fb1"];
+const DEFAULT_PALETTE = [
+  "#ffeb3b",
+  "#ffa726",
+  "#81c784",
+  "#64b5f6",
+  "#f48fb1",
+  "#c792ea",
+];
+const PAGE_META_KEY = "__hk_page_meta__";
+let colorPalette = [...DEFAULT_PALETTE];
 let currentColor = DEFAULT_COLOR;
 let floatingButton = null;
 const FLOATING_BUTTON_ID = "hk-floating-btn";
@@ -17,6 +26,22 @@ let highlightMenuEls = null;
 let activeHighlight = null;
 let activeHighlightId = null;
 let highlightMenuStatusTimer = null;
+const HIGHLIGHT_PANEL_ID = "hk-page-panel";
+let highlightPanel = null;
+let highlightPanelEls = null;
+let highlightPanelVisible = false;
+let highlightPanelPreferredSide = "right";
+const PANEL_ALL_KEY = "__all__";
+const highlightPanelState = {
+  side: "right",
+  activeKey: pageKey,
+  searchTerm: "",
+  activeTag: null,
+  allPages: {},
+  pageMeta: {},
+  allTags: [],
+};
+let panelPreferencesPromise;
 
 const ensureFloatingButton = () => {
   if (floatingButton) return floatingButton;
@@ -136,6 +161,885 @@ const toHexColor = (value) => {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 };
 
+const sanitizePalette = (input) => {
+  if (!Array.isArray(input)) {
+    return [...DEFAULT_PALETTE];
+  }
+  const seen = new Set();
+  const sanitized = [];
+  input.forEach((value) => {
+    if (typeof value !== "string") return;
+    const color = toHexColor(value.trim());
+    if (!seen.has(color)) {
+      seen.add(color);
+      sanitized.push(color);
+    }
+  });
+  return sanitized.length ? sanitized : [...DEFAULT_PALETTE];
+};
+
+const setColorPaletteState = (palette) => {
+  colorPalette = sanitizePalette(palette);
+  renderHighlightMenuSwatches();
+};
+
+const loadPalette = async () => {
+  if (!storage) return colorPalette;
+  try {
+    const stored = await storage.get("hkColorPalette");
+    const palette = sanitizePalette(stored?.hkColorPalette);
+    setColorPaletteState(palette);
+    return colorPalette;
+  } catch (error) {
+    console.debug("讀取顏色清單失敗", error);
+    setColorPaletteState(DEFAULT_PALETTE);
+    return colorPalette;
+  }
+};
+
+const refreshPaletteFromStorage = async () => {
+  const latest = await loadPalette();
+  return latest;
+};
+
+const renderHighlightMenuSwatches = () => {
+  if (!highlightMenuEls?.swatchGroup) return;
+  highlightMenuEls.swatchGroup.innerHTML = "";
+  colorPalette.forEach((color) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "hk-menu-swatch";
+    button.style.backgroundColor = color;
+    button.dataset.color = color;
+    button.title = color;
+    button.addEventListener("click", () => applyColorChange(color));
+    highlightMenuEls.swatchGroup.appendChild(button);
+  });
+};
+
+const formatTimestamp = (value) => {
+  if (!value) return "";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(value));
+  } catch (_error) {
+    return "";
+  }
+};
+
+const truncateText = (text, limit = 140) => {
+  if (!text) return "";
+  const normalized = text.trim().replace(/\s+/g, " ");
+  if (normalized.length <= limit) return normalized;
+  return `${normalized.slice(0, limit)}…`;
+};
+
+const parseTags = (input) => {
+  if (typeof input !== "string") return [];
+  return Array.from(
+    new Set(
+      input
+        .split(/[,\s]+/)
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+    )
+  );
+};
+
+const isValidPageKey = (key) => {
+  if (typeof key !== "string") return false;
+  try {
+    const url = new URL(key);
+    return ["http:", "https:"].includes(url.protocol);
+  } catch (_error) {
+    return false;
+  }
+};
+
+const getPageDisplayName = (url) => {
+  if (!url) return "未知頁面";
+  try {
+    const parsed = new URL(url);
+    const path =
+      parsed.pathname && parsed.pathname !== "/"
+        ? parsed.pathname.replace(/\/$/, "")
+        : "/";
+    return `${parsed.hostname}${path}`;
+  } catch (_error) {
+    return url;
+  }
+};
+
+const applyHighlightPanelSideClasses = () => {
+  if (!highlightPanel) return;
+  highlightPanel.classList.toggle(
+    "hk-panel-left",
+    highlightPanelState.side === "left"
+  );
+  highlightPanel.classList.toggle(
+    "hk-panel-right",
+    highlightPanelState.side !== "left"
+  );
+  if (highlightPanelEls?.sideButtons) {
+    highlightPanelEls.sideButtons.forEach((btn) => {
+      btn.classList.toggle(
+        "is-active",
+        btn.dataset.side === highlightPanelState.side
+      );
+    });
+  }
+};
+
+const setHighlightPanelSide = async (side, persist = true) => {
+  const resolved = side === "left" ? "left" : "right";
+  highlightPanelState.side = resolved;
+  highlightPanelPreferredSide = resolved;
+  applyHighlightPanelSideClasses();
+  if (persist && storage) {
+    try {
+      await storage.set({ hkPanelSide: resolved });
+    } catch (error) {
+      console.debug("儲存面板位置失敗", error);
+    }
+  }
+};
+
+const loadPanelPreferences = async () => {
+  if (!storage) return;
+  try {
+    const stored = await storage.get("hkPanelSide");
+    const side =
+      stored?.hkPanelSide === "left" || stored?.hkPanelSide === "right"
+        ? stored.hkPanelSide
+        : "right";
+    highlightPanelState.side = side;
+    highlightPanelPreferredSide = side;
+    applyHighlightPanelSideClasses();
+  } catch (error) {
+    console.debug("讀取面板設定失敗", error);
+  }
+};
+
+const updateHighlightPanelSelectOptions = () => {
+  if (!highlightPanelEls?.pageSelect) return;
+  const select = highlightPanelEls.pageSelect;
+  select.innerHTML = "";
+
+  const allOption = document.createElement("option");
+  allOption.value = PANEL_ALL_KEY;
+  allOption.textContent = "全部頁面";
+  select.appendChild(allOption);
+
+  const keys = Object.keys(highlightPanelState.allPages).sort((a, b) =>
+    getPageDisplayName(a).localeCompare(getPageDisplayName(b))
+  );
+
+  if (!keys.includes(pageKey)) {
+    keys.unshift(pageKey);
+  }
+
+  keys.forEach((key) => {
+    const option = document.createElement("option");
+    option.value = key;
+    const label = getPageDisplayName(key);
+    option.textContent = key === pageKey ? `${label}（本頁）` : label;
+    select.appendChild(option);
+  });
+
+  const activeValue =
+    highlightPanelState.activeKey === PANEL_ALL_KEY
+      ? PANEL_ALL_KEY
+      : highlightPanelState.activeKey;
+  select.value =
+    Array.from(select.options).some((opt) => opt.value === activeValue)
+      ? activeValue
+      : pageKey;
+};
+
+const updateHighlightPanelTagFilters = () => {
+  if (!highlightPanelEls?.tagsContainer) return;
+  const container = highlightPanelEls.tagsContainer;
+  container.innerHTML = "";
+
+  if (!highlightPanelState.allTags.length) {
+    const hint = document.createElement("span");
+    hint.className = "hk-panel-tags-empty";
+    hint.textContent = "尚未建立標籤";
+    container.appendChild(hint);
+    return;
+  }
+
+  const clearBtn = document.createElement("button");
+  clearBtn.type = "button";
+  clearBtn.className = "hk-panel-tag-chip hk-panel-tag-clear";
+  clearBtn.textContent = "全部";
+  clearBtn.classList.toggle("is-active", !highlightPanelState.activeTag);
+  clearBtn.addEventListener("click", () => {
+    highlightPanelState.activeTag = null;
+    updateHighlightPanelTagFilters();
+    renderHighlightPanel();
+  });
+  container.appendChild(clearBtn);
+
+  highlightPanelState.allTags.forEach((tag) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "hk-panel-tag-chip";
+    chip.textContent = tag;
+    chip.classList.toggle("is-active", highlightPanelState.activeTag === tag);
+    chip.addEventListener("click", () => {
+      highlightPanelState.activeTag =
+        highlightPanelState.activeTag === tag ? null : tag;
+      updateHighlightPanelTagFilters();
+      renderHighlightPanel();
+    });
+    container.appendChild(chip);
+  });
+};
+
+const updatePanelTagSuggestions = () => {
+  if (!highlightPanelEls?.tagDataList) return;
+  const datalist = highlightPanelEls.tagDataList;
+  datalist.innerHTML = "";
+  highlightPanelState.allTags.forEach((tag) => {
+    const option = document.createElement("option");
+    option.value = tag;
+    datalist.appendChild(option);
+  });
+};
+
+const updateTagSuggestionDropdown = () => {
+  if (!highlightPanelEls?.tagInput || !highlightPanelEls?.suggestionDropdown)
+    return;
+  const dropdown = highlightPanelEls.suggestionDropdown;
+  const value = highlightPanelEls.tagInput.value.trim().toLowerCase();
+  dropdown.innerHTML = "";
+  if (!value) {
+    dropdown.classList.remove("is-visible");
+    return;
+  }
+  const matches = highlightPanelState.allTags.filter((tag) =>
+    tag.toLowerCase().includes(value)
+  );
+  if (!matches.length) {
+    dropdown.classList.remove("is-visible");
+    return;
+  }
+  dropdown.classList.add("is-visible");
+  matches.slice(0, 6).forEach((tag) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "hk-panel-tag-suggestion";
+    item.textContent = tag;
+    item.addEventListener("click", () => {
+      highlightPanelEls.tagInput.value = tag;
+      dropdown.classList.remove("is-visible");
+      highlightPanelEls.addTagBtn?.click();
+    });
+    dropdown.appendChild(item);
+  });
+};
+
+const renderPageTagEditor = async () => {
+  if (!highlightPanelEls?.pageTagSection) return;
+  const {
+    pageTagSection,
+    pageTagHint,
+    pageTagList,
+    tagInput,
+    addTagBtn,
+    suggestionDropdown,
+  } = highlightPanelEls;
+  updatePanelTagSuggestions();
+
+  const activeKey = highlightPanelState.activeKey;
+  const meta = highlightPanelState.pageMeta || {};
+  const currentPageTags = Array.isArray(meta[activeKey]?.tags)
+    ? meta[activeKey].tags
+    : [];
+
+  const isAllView = activeKey === PANEL_ALL_KEY;
+  tagInput.disabled = isAllView;
+  addTagBtn.disabled = isAllView;
+  pageTagHint.textContent = isAllView
+    ? "切換到特定頁面後可編輯標籤"
+    : "輸入後按 Enter 或按新增；點擊標籤可移除";
+
+  pageTagList.innerHTML = "";
+  if (isAllView) {
+    pageTagList.classList.add("is-disabled");
+    tagInput.value = "";
+    addTagBtn.onclick = null;
+    tagInput.onkeydown = null;
+    return;
+  }
+  pageTagList.classList.remove("is-disabled");
+
+  if (!currentPageTags.length) {
+    const empty = document.createElement("span");
+    empty.className = "hk-panel-tags-empty";
+    empty.textContent = "尚未為此頁設定標籤";
+    pageTagList.appendChild(empty);
+  } else {
+    currentPageTags.forEach((tag) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "hk-panel-tag-chip";
+      chip.textContent = tag;
+      chip.title = "移除此標籤";
+      chip.addEventListener("click", async () => {
+        const nextTags = currentPageTags.filter((item) => item !== tag);
+        await setPageTags(activeKey, nextTags);
+        highlightPanelState.pageMeta[activeKey] = {
+          ...(highlightPanelState.pageMeta[activeKey] ?? {}),
+          tags: nextTags,
+        };
+        if (highlightPanelState.activeTag === tag) {
+          highlightPanelState.activeTag = null;
+        }
+        await refreshHighlightPanelData();
+        await renderHighlightPanel();
+      });
+      pageTagList.appendChild(chip);
+    });
+  }
+
+  const handleAddTag = async () => {
+    const value = tagInput.value.trim();
+    if (!value) return;
+    const tags = Array.from(new Set([...currentPageTags, value]));
+    await setPageTags(activeKey, tags);
+    highlightPanelState.pageMeta[activeKey] = {
+      ...(highlightPanelState.pageMeta[activeKey] ?? {}),
+      tags,
+    };
+    tagInput.value = "";
+    await refreshHighlightPanelData();
+    await renderHighlightPanel();
+  };
+
+  addTagBtn.onclick = handleAddTag;
+  tagInput.onkeydown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleAddTag();
+    }
+  };
+
+  const handleInput = () => {
+    updatePanelTagSuggestions();
+    updateTagSuggestionDropdown();
+  };
+
+  tagInput.addEventListener("input", handleInput);
+  tagInput.addEventListener("focus", handleInput);
+  tagInput.addEventListener("blur", () => {
+    setTimeout(() => {
+      highlightPanelEls?.suggestionDropdown?.classList.remove("is-visible");
+    }, 120);
+  });
+
+  highlightPanelEls.tagInput = tagInput;
+  highlightPanelEls.addTagBtn = addTagBtn;
+  highlightPanelEls.suggestionDropdown = suggestionDropdown;
+};
+
+const refreshHighlightPanelData = async () => {
+  if (!storage) {
+    highlightPanelState.allPages = { [pageKey]: [] };
+    highlightPanelState.pageMeta = {};
+    highlightPanelState.allTags = [];
+    return;
+  }
+  try {
+    const everything = await storage.get(null);
+    const storedMeta = await getPageMeta();
+    const pages = {};
+    Object.entries(everything).forEach(([key, value]) => {
+      if (isValidPageKey(key) && Array.isArray(value)) {
+        pages[key] = value;
+      }
+    });
+    if (!pages[pageKey]) {
+      pages[pageKey] = await getStoredHighlights(pageKey);
+    }
+
+    const allKeys = new Set([
+      ...Object.keys(pages),
+      ...Object.keys(storedMeta),
+    ]);
+    const combinedMeta = {};
+    const tagSet = new Set();
+    let metaChanged = false;
+
+    allKeys.forEach((url) => {
+      const existing = storedMeta[url];
+      const entryTags = (pages[url] ?? [])
+        .flatMap((entry) =>
+          Array.isArray(entry?.tags)
+            ? entry.tags
+            : parseTags(entry?.tags ?? "")
+        )
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+      const metaTags = Array.isArray(existing?.tags)
+        ? existing.tags.map((tag) => tag.trim()).filter(Boolean)
+        : [];
+      const merged = Array.from(new Set([...metaTags, ...entryTags])).sort((a, b) =>
+        a.localeCompare(b)
+      );
+      merged.forEach((tag) => tagSet.add(tag));
+      combinedMeta[url] = {
+        ...(existing ?? {}),
+        tags: merged,
+      };
+      if (
+        merged.length !== metaTags.length ||
+        merged.some((tag, idx) => tag !== metaTags[idx])
+      ) {
+        metaChanged = true;
+      }
+    });
+
+    if (metaChanged) {
+      await setPageMeta(combinedMeta);
+    }
+
+    highlightPanelState.allPages = pages;
+    highlightPanelState.pageMeta = combinedMeta;
+    highlightPanelState.allTags = Array.from(tagSet).sort((a, b) =>
+      a.localeCompare(b)
+    );
+    if (
+      highlightPanelState.activeTag &&
+      !tagSet.has(highlightPanelState.activeTag)
+    ) {
+      highlightPanelState.activeTag = null;
+    }
+    if (
+      highlightPanelState.activeKey !== PANEL_ALL_KEY &&
+      !pages[highlightPanelState.activeKey]
+    ) {
+      highlightPanelState.activeKey = pageKey;
+    }
+  } catch (error) {
+    console.debug("讀取所有標註資料失敗", error);
+    const fallbackEntries = await getStoredHighlights();
+    const fallbackMeta = await getPageMeta();
+    Object.entries(fallbackMeta).forEach(([url, meta]) => {
+      if (Array.isArray(meta?.tags)) {
+        fallbackMeta[url] = {
+          ...meta,
+          tags: Array.from(new Set(meta.tags.map((tag) => tag.trim()).filter(Boolean))).sort(
+            (a, b) => a.localeCompare(b)
+          ),
+        };
+      }
+    });
+    highlightPanelState.allPages = { [pageKey]: fallbackEntries };
+    highlightPanelState.pageMeta = fallbackMeta;
+    const entryTags = fallbackEntries
+      .flatMap((entry) =>
+        Array.isArray(entry?.tags) ? entry.tags : parseTags(entry?.tags ?? "")
+      )
+      .filter((tag) => tag.trim().length);
+    const metaTags = Object.values(fallbackMeta)
+      .flatMap((meta) => (Array.isArray(meta?.tags) ? meta.tags : []))
+      .filter((tag) => tag.trim().length);
+    highlightPanelState.allTags = Array.from(
+      new Set([...entryTags, ...metaTags])
+    ).sort((a, b) => a.localeCompare(b));
+    if (
+      highlightPanelState.activeTag &&
+      !highlightPanelState.allTags.includes(highlightPanelState.activeTag)
+    ) {
+      highlightPanelState.activeTag = null;
+    }
+  }
+  updateHighlightPanelSelectOptions();
+  updateHighlightPanelTagFilters();
+};
+
+const collectPanelEntries = () => {
+  const allPages = highlightPanelState.allPages;
+  if (!allPages) return [];
+  const pageMeta = highlightPanelState.pageMeta || {};
+  const fetchPageTags = (url) => {
+    const meta = pageMeta[url];
+    if (Array.isArray(meta?.tags)) {
+      return meta.tags;
+    }
+    return [];
+  };
+  if (highlightPanelState.activeKey === PANEL_ALL_KEY) {
+    return Object.entries(allPages).flatMap(([url, items]) =>
+      items.map((entry) => ({
+        ...entry,
+        pageUrl: url,
+        pageTags: fetchPageTags(url),
+      }))
+    );
+  }
+  const targetKey = highlightPanelState.activeKey || pageKey;
+  const entries = allPages[targetKey] ?? [];
+  const pageTags = fetchPageTags(targetKey);
+  return entries.map((entry) => ({
+    ...entry,
+    pageUrl: targetKey,
+    pageTags,
+  }));
+};
+
+const focusHighlightElement = (id) => {
+  if (!id) return;
+  const element = document.querySelector(`[${HIGHLIGHT_ATTR}="${id}"]`);
+  if (!element) return;
+  closeHighlightMenu();
+  element.scrollIntoView({ behavior: "smooth", block: "center" });
+  element.classList.add("hk-highlight-focus");
+  window.setTimeout(() => {
+    element.classList.remove("hk-highlight-focus");
+  }, 1600);
+};
+
+const ensureHighlightPanel = () => {
+  if (highlightPanel) return highlightPanel;
+  const panel = document.createElement("aside");
+  panel.id = HIGHLIGHT_PANEL_ID;
+  panel.className = "hk-page-panel";
+  panel.style.display = "none";
+
+  const header = document.createElement("div");
+  header.className = "hk-panel-header";
+
+  const title = document.createElement("h2");
+  title.className = "hk-panel-title";
+  title.textContent = "此頁標註";
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "hk-panel-close";
+  closeBtn.setAttribute("aria-label", "關閉標註面板");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", () => closeHighlightPanel());
+
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+
+  const controls = document.createElement("div");
+  controls.className = "hk-panel-controls";
+
+  const selectLabel = document.createElement("label");
+  selectLabel.className = "hk-panel-select-label";
+  selectLabel.textContent = "顯示標註來源";
+
+  const pageSelect = document.createElement("select");
+  pageSelect.className = "hk-panel-select";
+  pageSelect.addEventListener("change", (event) => {
+    const value = event.target.value;
+    highlightPanelState.activeKey =
+      value === PANEL_ALL_KEY ? PANEL_ALL_KEY : value;
+    renderHighlightPanel();
+  });
+  selectLabel.appendChild(pageSelect);
+
+  const searchWrapper = document.createElement("label");
+  searchWrapper.className = "hk-panel-search";
+  searchWrapper.textContent = "關鍵字搜尋";
+  const searchInput = document.createElement("input");
+  searchInput.type = "search";
+  searchInput.className = "hk-panel-search-input";
+  searchInput.placeholder = "輸入文字或標籤";
+  searchInput.addEventListener("input", (event) => {
+    highlightPanelState.searchTerm = event.target.value ?? "";
+    renderHighlightPanel();
+  });
+  searchWrapper.appendChild(searchInput);
+
+  const sideGroup = document.createElement("div");
+  sideGroup.className = "hk-panel-side-group";
+  const rightBtn = document.createElement("button");
+  rightBtn.type = "button";
+  rightBtn.dataset.side = "right";
+  rightBtn.className = "hk-panel-side-btn";
+  rightBtn.textContent = "右側";
+  rightBtn.addEventListener("click", () => setHighlightPanelSide("right"));
+
+  const leftBtn = document.createElement("button");
+  leftBtn.type = "button";
+  leftBtn.dataset.side = "left";
+  leftBtn.className = "hk-panel-side-btn";
+  leftBtn.textContent = "左側";
+  leftBtn.addEventListener("click", () => setHighlightPanelSide("left"));
+
+  sideGroup.appendChild(rightBtn);
+  sideGroup.appendChild(leftBtn);
+
+  controls.appendChild(selectLabel);
+  controls.appendChild(searchWrapper);
+  controls.appendChild(sideGroup);
+
+  const tagsContainer = document.createElement("div");
+  tagsContainer.className = "hk-panel-tags";
+  controls.appendChild(tagsContainer);
+
+  const pageTagSection = document.createElement("div");
+  pageTagSection.className = "hk-panel-page-tags";
+  const pageTagHeader = document.createElement("div");
+  pageTagHeader.className = "hk-panel-page-tags-header";
+  const pageTagTitle = document.createElement("span");
+  pageTagTitle.textContent = "頁面標籤";
+  pageTagHeader.appendChild(pageTagTitle);
+  const pageTagHint = document.createElement("span");
+  pageTagHint.className = "hk-panel-page-tags-hint";
+  pageTagHeader.appendChild(pageTagHint);
+  pageTagSection.appendChild(pageTagHeader);
+
+  const tagInputRow = document.createElement("div");
+  tagInputRow.className = "hk-panel-tag-input-row";
+  const tagInputWrapper = document.createElement("div");
+  tagInputWrapper.className = "hk-panel-tag-input-wrapper";
+
+  const tagInput = document.createElement("input");
+  tagInput.type = "text";
+  tagInput.className = "hk-panel-tag-input";
+  tagInput.placeholder = "輸入標籤後按 Enter";
+
+  const tagDataList = document.createElement("datalist");
+  tagDataList.id = "hk-panel-tag-suggestions";
+  tagInput.setAttribute("list", tagDataList.id);
+
+  const suggestionDropdown = document.createElement("div");
+  suggestionDropdown.className = "hk-panel-tag-suggestions";
+  suggestionDropdown.setAttribute("role", "listbox");
+  suggestionDropdown.setAttribute("aria-label", "標籤建議");
+
+  tagInputWrapper.appendChild(tagInput);
+  tagInputWrapper.appendChild(suggestionDropdown);
+  tagInputWrapper.appendChild(tagDataList);
+  tagInputRow.appendChild(tagInputWrapper);
+
+  const addTagBtn = document.createElement("button");
+  addTagBtn.type = "button";
+  addTagBtn.className = "hk-panel-tag-add";
+  addTagBtn.textContent = "新增";
+  tagInputRow.appendChild(addTagBtn);
+
+  pageTagSection.appendChild(tagInputRow);
+
+  const pageTagList = document.createElement("div");
+  pageTagList.className = "hk-panel-page-tag-list";
+  pageTagSection.appendChild(pageTagList);
+
+  const list = document.createElement("div");
+  list.className = "hk-panel-list";
+
+  const placeholder = document.createElement("p");
+  placeholder.className = "hk-panel-placeholder";
+  placeholder.textContent = "正在載入標註...";
+
+  panel.appendChild(header);
+  panel.appendChild(controls);
+  panel.appendChild(pageTagSection);
+  panel.appendChild(list);
+  panel.appendChild(placeholder);
+
+  highlightPanel = panel;
+  highlightPanelEls = {
+    container: panel,
+    list,
+    placeholder,
+    pageSelect,
+    sideButtons: [rightBtn, leftBtn],
+    searchInput,
+    tagsContainer,
+    pageTagSection,
+    pageTagHint,
+    tagInput,
+    tagDataList,
+    addTagBtn,
+    suggestionDropdown,
+    pageTagList,
+  };
+
+  applyHighlightPanelSideClasses();
+  document.body.appendChild(panel);
+  return panel;
+};
+
+const setHighlightPanelPlaceholder = (message) => {
+  ensureHighlightPanel();
+  if (highlightPanelEls?.placeholder) {
+    highlightPanelEls.placeholder.textContent = message;
+    highlightPanelEls.placeholder.style.display = "block";
+  }
+  if (highlightPanelEls?.list) {
+    highlightPanelEls.list.innerHTML = "";
+  }
+};
+
+const renderHighlightPanel = async () => {
+  ensureHighlightPanel();
+  if (!highlightPanelEls?.list) return;
+
+  await refreshHighlightPanelData();
+  applyHighlightPanelSideClasses();
+  updateHighlightPanelTagFilters();
+  await renderPageTagEditor();
+
+  const searchTerm = highlightPanelState.searchTerm.trim().toLowerCase();
+  const activeTag = highlightPanelState.activeTag;
+
+  const filtered = collectPanelEntries().filter((entry) => {
+    const tags = Array.isArray(entry.pageTags) ? entry.pageTags : [];
+    const matchesTag = !activeTag || tags.includes(activeTag);
+    if (!matchesTag) return false;
+    if (!searchTerm) return true;
+    const haystacks = [entry.text, entry.note, entry.pageUrl, tags.join(" ")]
+      .filter(Boolean)
+      .map((value) => String(value).toLowerCase());
+    return haystacks.some((text) => text.includes(searchTerm));
+  });
+
+  const entries = filtered.sort(
+    (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
+  );
+
+  highlightPanelEls.list.innerHTML = "";
+
+  if (!entries.length) {
+    const message =
+      highlightPanelState.activeKey === PANEL_ALL_KEY
+        ? "目前沒有任何標註。"
+        : "該頁面尚未建立標註。";
+    setHighlightPanelPlaceholder(message);
+    return;
+  }
+
+  if (highlightPanelEls.placeholder) {
+    highlightPanelEls.placeholder.style.display = "none";
+  }
+
+  entries.forEach((entry) => {
+    const item = document.createElement("article");
+    item.className = "hk-panel-item";
+    item.setAttribute("data-highlight-id", entry.id);
+
+    const meta = document.createElement("div");
+    meta.className = "hk-panel-meta";
+
+    const colorDot = document.createElement("span");
+    colorDot.className = "hk-panel-color";
+    colorDot.style.backgroundColor = entry.color ?? DEFAULT_COLOR;
+
+    const pageLabel = document.createElement("span");
+    pageLabel.className = "hk-panel-page";
+    pageLabel.textContent =
+      entry.pageUrl === pageKey ? "本頁" : getPageDisplayName(entry.pageUrl);
+
+    const timestamp = document.createElement("span");
+    timestamp.className = "hk-panel-time";
+    timestamp.textContent = formatTimestamp(entry.createdAt);
+
+    meta.appendChild(colorDot);
+    if (entry.note) {
+      const note = document.createElement("span");
+      note.className = "hk-panel-note";
+      note.textContent = entry.note;
+      meta.appendChild(note);
+    }
+    meta.appendChild(pageLabel);
+    meta.appendChild(timestamp);
+
+    const text = document.createElement("p");
+    text.className = "hk-panel-text";
+    text.textContent = truncateText(entry.text) || "(無文字)";
+
+    item.appendChild(meta);
+    item.appendChild(text);
+
+    if (entry.pageTags?.length) {
+      const tagsRow = document.createElement("div");
+      tagsRow.className = "hk-panel-tags-row";
+      entry.pageTags.forEach((tag) => {
+        const chip = document.createElement("span");
+        chip.className = "hk-panel-tag-chip";
+        chip.textContent = tag;
+        tagsRow.appendChild(chip);
+      });
+      item.appendChild(tagsRow);
+    }
+
+    if (entry.pageUrl === pageKey) {
+      item.addEventListener("click", () => focusHighlightElement(entry.id));
+    } else {
+      item.classList.add("is-external");
+      item.addEventListener("click", () => {
+        window.open(entry.pageUrl, "_blank", "noopener");
+      });
+    }
+
+    highlightPanelEls.list.appendChild(item);
+  });
+};
+
+const openHighlightPanel = async (options = {}) => {
+  ensureHighlightPanel();
+  if (panelPreferencesPromise) {
+    try {
+      await panelPreferencesPromise;
+    } catch (error) {
+      console.debug("載入面板設定失敗:", error);
+    }
+  }
+  const { side, pageKey: targetPage, view } = options ?? {};
+  if (typeof targetPage === "string") {
+    highlightPanelState.activeKey =
+      targetPage === PANEL_ALL_KEY ? PANEL_ALL_KEY : targetPage;
+  } else if (view === PANEL_ALL_KEY) {
+    highlightPanelState.activeKey = PANEL_ALL_KEY;
+  }
+  if (side) {
+    await setHighlightPanelSide(side);
+  } else if (highlightPanelState.side !== highlightPanelPreferredSide) {
+    await setHighlightPanelSide(highlightPanelPreferredSide, false);
+  } else {
+    applyHighlightPanelSideClasses();
+  }
+  highlightPanelVisible = true;
+  highlightPanel.style.display = "flex";
+  highlightPanel.setAttribute("aria-hidden", "false");
+  await renderHighlightPanel();
+  if (highlightPanelEls?.searchInput) {
+    highlightPanelEls.searchInput.value = highlightPanelState.searchTerm;
+  }
+  return true;
+};
+
+const closeHighlightPanel = () => {
+  if (!highlightPanel) return false;
+  highlightPanelVisible = false;
+  highlightPanel.style.display = "none";
+  highlightPanel.setAttribute("aria-hidden", "true");
+  return true;
+};
+
+const toggleHighlightPanel = async () => {
+  if (highlightPanelVisible) {
+    closeHighlightPanel();
+    return false;
+  }
+  await openHighlightPanel();
+  return true;
+};
+
+const refreshHighlightPanelIfVisible = async () => {
+  if (!highlightPanelVisible) return;
+  await renderHighlightPanel();
+};
+
 const applyColorChange = async (color) => {
   if (!activeHighlight || !activeHighlightId) return;
   const nextColor = (color || DEFAULT_COLOR).toLowerCase();
@@ -155,6 +1059,7 @@ const applyColorChange = async (color) => {
       console.debug("更新預設 highlight 顏色失敗", storageError);
     }
     setHighlightMenuStatus("顏色已更新");
+    await refreshHighlightPanelIfVisible();
   } catch (error) {
     console.debug("更新 highlight 顏色失敗", error);
     setHighlightMenuStatus("無法更新顏色", true);
@@ -174,10 +1079,11 @@ const handleSaveNote = async () => {
   setHighlightMetadata(activeHighlight, { color: normalizedColor, note: trimmedNote });
   try {
     await updateHighlightEntry(activeHighlightId, { note: trimmedNote });
-    if (highlightMenuEls?.noteField) {
+    if (highlightMenuEls.noteField) {
       highlightMenuEls.noteField.value = trimmedNote;
     }
     setHighlightMenuStatus("註解已儲存");
+    await refreshHighlightPanelIfVisible();
   } catch (error) {
     console.debug("儲存 highlight 註解失敗", error);
     setHighlightMenuStatus("無法儲存註解", true);
@@ -192,6 +1098,7 @@ const handleDeleteHighlight = async () => {
   unwrapHighlightElement(elementToRemove);
   try {
     await deleteHighlightEntry(idToRemove);
+    await refreshHighlightPanelIfVisible();
   } catch (error) {
     console.debug("刪除 highlight 失敗", error);
   }
@@ -225,17 +1132,6 @@ const ensureHighlightMenu = () => {
 
   const swatchGroup = document.createElement("div");
   swatchGroup.className = "hk-menu-swatches";
-  COLOR_PALETTE.forEach((color) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "hk-menu-swatch";
-    button.style.backgroundColor = color;
-    button.dataset.color = color;
-    button.title = color;
-    button.addEventListener("click", () => applyColorChange(color));
-    swatchGroup.appendChild(button);
-  });
-
   colorWrapper.appendChild(colorLabel);
   colorWrapper.appendChild(swatchGroup);
   container.appendChild(colorWrapper);
@@ -290,7 +1186,10 @@ const ensureHighlightMenu = () => {
     colorInput,
     noteField,
     status,
+    swatchGroup,
   };
+
+  renderHighlightMenuSwatches();
 
   document.body.appendChild(container);
   return container;
@@ -336,7 +1235,10 @@ const openHighlightMenu = async (highlightEl) => {
   const id = highlightEl.getAttribute(HIGHLIGHT_ATTR);
   if (!id) return;
 
+  await refreshPaletteFromStorage();
+
   ensureHighlightMenu();
+  renderHighlightMenuSwatches();
 
   activeHighlight = highlightEl;
   activeHighlightId = id;
@@ -376,23 +1278,41 @@ const updateCurrentColor = async () => {
     const stored = await storage.get("hkLastColor");
     const color = stored?.hkLastColor;
     if (typeof color === "string" && color.trim()) {
-      currentColor = color;
+      currentColor = toHexColor(color);
     }
   } catch (error) {
     console.debug("讀取預設顏色失敗", error);
   }
 };
 
+loadPalette();
 updateCurrentColor();
+panelPreferencesPromise = loadPanelPreferences();
 
 chrome.storage?.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
   if (changes.hkLastColor) {
     const nextColor = changes.hkLastColor.newValue;
     if (typeof nextColor === "string" && nextColor.trim()) {
-      currentColor = nextColor;
+      currentColor = toHexColor(nextColor);
     } else {
       currentColor = DEFAULT_COLOR;
+    }
+  }
+  if (changes.hkColorPalette) {
+    setColorPaletteState(changes.hkColorPalette.newValue);
+  }
+  if (highlightPanelVisible) {
+    const affectedKeys = Object.keys(changes);
+    const shouldRefresh =
+      highlightPanelState.activeKey === PANEL_ALL_KEY ||
+      affectedKeys.includes(highlightPanelState.activeKey) ||
+      affectedKeys.includes(pageKey) ||
+      affectedKeys.some((key) => isValidPageKey(key));
+    if (shouldRefresh) {
+      renderHighlightPanel().catch((error) =>
+        console.debug("重新整理標註面板失敗", error)
+      );
     }
   }
 });
@@ -554,26 +1474,54 @@ const wrapRangeWithHighlight = (range, color, id) => {
   return highlightEl;
 };
 
-const getStoredHighlights = async () => {
-  if (!storage) return;
-  const existing = await storage.get(pageKey);
-  return existing[pageKey] ?? [];
+const getStoredHighlights = async (key = pageKey) => {
+  if (!storage) return [];
+  const existing = await storage.get(key);
+  return existing[key] ?? [];
 };
 
-const setStoredHighlights = async (highlights) => {
+const setStoredHighlights = async (highlights, key = pageKey) => {
   if (!storage) return;
-  await storage.set({ [pageKey]: highlights });
+  await storage.set({ [key]: highlights });
+};
+
+const getPageMeta = async () => {
+  if (!storage) return {};
+  const stored = await storage.get(PAGE_META_KEY);
+  return stored[PAGE_META_KEY] ?? {};
+};
+
+const setPageMeta = async (meta) => {
+  if (!storage) return;
+  await storage.set({ [PAGE_META_KEY]: meta });
+};
+
+const getPageTags = async (key = pageKey) => {
+  const meta = await getPageMeta();
+  const tags = meta[key]?.tags;
+  if (!Array.isArray(tags)) return [];
+  return Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean)));
+};
+
+const setPageTags = async (key, tags) => {
+  const meta = await getPageMeta();
+  meta[key] = {
+    ...(meta[key] ?? {}),
+    tags: Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean))),
+    updatedAt: Date.now(),
+  };
+  await setPageMeta(meta);
 };
 
 const saveHighlight = async (entry) => {
   if (!storage) return;
-  const highlights = await getStoredHighlights();
-  await setStoredHighlights([...highlights, entry]);
+  const highlights = await getStoredHighlights(entry.url ?? pageKey);
+  await setStoredHighlights([...highlights, entry], entry.url ?? pageKey);
 };
 
-const updateHighlightEntry = async (id, partial) => {
+const updateHighlightEntry = async (id, partial, key = pageKey) => {
   if (!storage) return false;
-  const highlights = await getStoredHighlights();
+  const highlights = await getStoredHighlights(key);
   let updated = false;
   const next = highlights.map((item) => {
     if (item.id !== id) return item;
@@ -581,25 +1529,25 @@ const updateHighlightEntry = async (id, partial) => {
     return { ...item, ...partial };
   });
   if (updated) {
-    await setStoredHighlights(next);
+    await setStoredHighlights(next, key);
   }
   return updated;
 };
 
-const deleteHighlightEntry = async (id) => {
+const deleteHighlightEntry = async (id, key = pageKey) => {
   if (!storage) return false;
-  const highlights = await getStoredHighlights();
+  const highlights = await getStoredHighlights(key);
   const next = highlights.filter((item) => item.id !== id);
   if (next.length !== highlights.length) {
-    await setStoredHighlights(next);
+    await setStoredHighlights(next, key);
     return true;
   }
   return false;
 };
 
-const findHighlightEntry = async (id) => {
+const findHighlightEntry = async (id, key = pageKey) => {
   if (!storage) return null;
-  const highlights = await getStoredHighlights();
+  const highlights = await getStoredHighlights(key);
   return highlights.find((item) => item.id === id) ?? null;
 };
 
@@ -623,6 +1571,9 @@ const restoreHighlights = async () => {
         setHighlightMetadata(highlightEl, {
           color: highlight.color,
           note: highlight.note ?? "",
+          tags: Array.isArray(highlight.tags)
+            ? highlight.tags
+            : parseTags(highlight.tags ?? ""),
         });
       } catch (error) {
         // log to console for debugging but do not interrupt other highlights
@@ -667,6 +1618,7 @@ const applyHighlight = async (color) => {
     createdAt: Date.now(),
     note: "",
   });
+  await refreshHighlightPanelIfVisible();
 };
 
 const handleSelectionIntent = () => {
@@ -730,6 +1682,34 @@ const handleHighlightClick = (event) => {
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "OPEN_PAGE_PANEL") {
+    openHighlightPanel({
+      side: message.side,
+      pageKey: message.pageKey,
+      view: message.view,
+    })
+      .then(() => sendResponse({ success: true, visible: true }))
+      .catch((error) =>
+        sendResponse({ success: false, error: error?.message })
+      );
+    return true;
+  }
+  if (message?.type === "SET_PANEL_SIDE") {
+    setHighlightPanelSide(message.side)
+      .then(() => sendResponse({ success: true, side: highlightPanelState.side }))
+      .catch((error) =>
+        sendResponse({ success: false, error: error?.message })
+      );
+    return true;
+  }
+  if (message?.type === "TOGGLE_PAGE_PANEL") {
+    toggleHighlightPanel()
+      .then((visible) => sendResponse({ success: true, visible }))
+      .catch((error) =>
+        sendResponse({ success: false, error: error?.message })
+      );
+    return true;
+  }
   if (message?.type === "APPLY_HIGHLIGHT") {
     const color = message.color || "#ffeb3b";
     applyHighlight(color)
@@ -767,6 +1747,13 @@ document.addEventListener(
       hideFloatingButton();
     }
     if (
+      highlightPanelVisible &&
+      highlightPanel &&
+      !highlightPanel.contains(target)
+    ) {
+      closeHighlightPanel();
+    }
+    if (
       highlightMenu &&
       highlightMenu.style.display !== "none" &&
       !highlightMenu.contains(target) &&
@@ -789,6 +1776,11 @@ window.addEventListener(
   "resize",
   () => {
     closeHighlightMenu();
+    if (highlightPanelVisible) {
+      renderHighlightPanel().catch((error) =>
+        console.debug("重新渲染標註面板失敗", error)
+      );
+    }
   },
   true
 );
@@ -796,5 +1788,6 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closeHighlightMenu();
     hideFloatingButton();
+    closeHighlightPanel();
   }
 });

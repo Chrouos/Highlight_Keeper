@@ -13,17 +13,28 @@
           標註顏色
           <input type="color" id="color" value="#ffeb3b" />
         </label>
-        <div class="quick-swatches" aria-label="快速顏色選擇">
-          <button type="button" data-color="#ffeb3b" title="黃色"></button>
-          <button type="button" data-color="#ffa726" title="橘色"></button>
-          <button type="button" data-color="#81c784" title="綠色"></button>
-          <button type="button" data-color="#64b5f6" title="藍色"></button>
-          <button type="button" data-color="#f48fb1" title="粉色"></button>
-        </div>
+        <button type="button" id="addColorBtn" class="add-color-btn">
+          加入到色票
+        </button>
       </section>
-      <section class="actions">
-        <button id="highlightBtn" type="button">標註選取文字</button>
-        <p class="hint">先在網頁上選取文字，再按下按鈕。</p>
+      <section class="palette-management" aria-label="顏色色票">
+        <header class="palette-header">
+          <span>可用顏色</span>
+        </header>
+        <div id="paletteList" class="palette-list"></div>
+      </section>
+      <section class="panel-controls" aria-label="頁面標註面板">
+        <div class="panel-side-controls" role="group" aria-label="面板位置">
+          <button type="button" class="panel-side-btn is-active" data-side="right">
+            右側
+          </button>
+          <button type="button" class="panel-side-btn" data-side="left">
+            左側
+          </button>
+        </div>
+        <button type="button" id="openPanelBtn" class="panel-open-btn">
+          在頁面開啟面板
+        </button>
       </section>
       <section class="status" role="status" aria-live="polite"></section>
     </main>

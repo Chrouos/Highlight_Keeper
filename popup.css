@@ -5,8 +5,9 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  min-width: 220px;
-  padding: 16px;
+  min-width: 280px;
+  max-width: 360px;
+  padding: 20px;
   background-color: #f9fafb;
   color: #202124;
 }
@@ -42,72 +43,175 @@ h1 {
   border: 1px solid #d0d7de;
 }
 
-.quick-swatches {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 6px;
-  margin-bottom: 16px;
+.add-color-btn {
+  margin-top: 10px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px dashed #1a73e8;
+  background: rgba(26, 115, 232, 0.08);
+  color: #1a73e8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.quick-swatches button {
-  width: 100%;
-  padding: 0;
-  border: 2px solid transparent;
-  border-radius: 6px;
-  height: 28px;
+.add-color-btn:hover,
+.add-color-btn:focus-visible {
+  background: rgba(26, 115, 232, 0.16);
+  color: #0f4cbd;
+}
+
+.palette-management {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-controls {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #e0e3e8;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.panel-open-btn {
+  border: 1px solid #1a73e8;
+  background: #ffffff;
+  color: #1a73e8;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 13px;
   cursor: pointer;
 }
 
-.quick-swatches button:focus-visible,
-.quick-swatches button:hover {
-  border-color: #1a73e8;
+.panel-open-btn:hover,
+.panel-open-btn:focus-visible {
+  background: rgba(26, 115, 232, 0.1);
 }
 
-.quick-swatches button[data-color="#ffeb3b"] {
-  background-color: #ffeb3b;
-}
-
-.quick-swatches button[data-color="#ffa726"] {
-  background-color: #ffa726;
-}
-
-.quick-swatches button[data-color="#81c784"] {
-  background-color: #81c784;
-}
-
-.quick-swatches button[data-color="#64b5f6"] {
-  background-color: #64b5f6;
-}
-
-.quick-swatches button[data-color="#f48fb1"] {
-  background-color: #f48fb1;
-}
-
-.actions {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+.panel-side-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.actions button {
-  padding: 10px;
+.panel-side-btn {
+  border: 1px solid #d0d7de;
   border-radius: 6px;
-  border: 1px solid #1a73e8;
-  background-color: #1a73e8;
-  color: #fff;
-  font-size: 14px;
+  padding: 8px 0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #ffffff;
+  color: #5f6368;
+  transition: border-color 0.18s ease, color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.panel-side-btn.is-active {
+  border-color: #1a73e8;
+  color: #1a73e8;
+  background: rgba(26, 115, 232, 0.12);
+}
+
+.panel-side-btn:hover,
+.panel-side-btn:focus-visible {
+  border-color: #1a73e8;
+  color: #1a73e8;
+}
+
+.palette-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5f6368;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.palette-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background-color: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.palette-item.is-active {
+  border-color: #1a73e8;
+  background-color: rgba(26, 115, 232, 0.08);
+  box-shadow: 0 0 0 1px rgba(26, 115, 232, 0.32);
+}
+
+.palette-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+}
+
+.palette-swatch:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
+.palette-edit {
+  width: 42px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.palette-edit::-webkit-color-swatch {
+  border-radius: 6px;
+  border: 1px solid #d0d7de;
+}
+
+.palette-edit:focus-visible {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
+.palette-remove {
+  margin-left: auto;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #e57373;
+  background: #ffffff;
+  color: #d93025;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
 
-.actions button:disabled {
-  background-color: #c6dafc;
-  border-color: #c6dafc;
-  cursor: not-allowed;
+.palette-remove:hover,
+.palette-remove:focus-visible {
+  background: #fdecea;
 }
 
-.hint {
+.palette-empty {
   margin: 0;
   font-size: 12px;
   color: #5f6368;
