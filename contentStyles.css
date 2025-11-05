@@ -378,6 +378,46 @@
   padding: 10px 0;
 }
 
+.hk-panel-export-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.hk-panel-export-btn {
+  flex: 1;
+  border: 1px solid #1a73e8;
+  border-radius: 6px;
+  background: rgba(26, 115, 232, 0.12);
+  color: #1a73e8;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.hk-panel-export-btn:hover,
+.hk-panel-export-btn:focus-visible {
+  background: rgba(26, 115, 232, 0.2);
+}
+
+.hk-panel-export-btn.is-disabled,
+.hk-panel-export-btn:disabled {
+  border-color: #d0d7de;
+  background: #f2f4f8;
+  color: #a0a7b6;
+  cursor: not-allowed;
+}
+
+.hk-panel-export-status {
+  min-height: 16px;
+  font-size: 12px;
+  color: #1a73e8;
+}
+
+.hk-panel-export-status.is-error {
+  color: #d93025;
+}
+
 .hk-panel-page-tags-header {
   display: flex;
   align-items: baseline;
@@ -434,6 +474,19 @@
   flex-direction: column;
   gap: 4px;
   z-index: 2147483647;
+}
+
+.hk-panel-tag-suggestions::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: 24px;
+  width: 12px;
+  height: 12px;
+  background: #ffffff;
+  border-left: 1px solid rgba(15, 23, 42, 0.12);
+  border-top: 1px solid rgba(15, 23, 42, 0.12);
+  transform: rotate(45deg);
 }
 
 .hk-panel-tag-suggestions.is-visible {
@@ -513,6 +566,22 @@
   gap: 8px;
   font-size: 12px;
   color: #5f6368;
+}
+
+.hk-panel-delete-btn {
+  margin-left: 4px;
+  border: none;
+  background: transparent;
+  color: #d93025;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.hk-panel-delete-btn:hover,
+.hk-panel-delete-btn:focus-visible {
+  background: rgba(217, 48, 37, 0.12);
 }
 
 .hk-panel-page {

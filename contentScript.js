@@ -40,7 +40,9 @@ const highlightPanelState = {
   allPages: {},
   pageMeta: {},
   allTags: [],
+  currentEntries: [],
 };
+let panelStatusTimer = null;
 let panelPreferencesPromise;
 
 const ensureFloatingButton = () => {
@@ -399,17 +401,6 @@ const updateHighlightPanelTagFilters = () => {
   });
 };
 
-const updatePanelTagSuggestions = () => {
-  if (!highlightPanelEls?.tagDataList) return;
-  const datalist = highlightPanelEls.tagDataList;
-  datalist.innerHTML = "";
-  highlightPanelState.allTags.forEach((tag) => {
-    const option = document.createElement("option");
-    option.value = tag;
-    datalist.appendChild(option);
-  });
-};
-
 const updateTagSuggestionDropdown = () => {
   if (!highlightPanelEls?.tagInput || !highlightPanelEls?.suggestionDropdown)
     return;
@@ -442,6 +433,101 @@ const updateTagSuggestionDropdown = () => {
   });
 };
 
+const setPanelStatus = (message, isError = false) => {
+  if (!highlightPanelEls?.exportStatus) return;
+  const el = highlightPanelEls.exportStatus;
+  if (panelStatusTimer) {
+    window.clearTimeout(panelStatusTimer);
+    panelStatusTimer = null;
+  }
+  el.textContent = message || "";
+  el.classList.toggle("is-error", isError);
+  if (message) {
+    panelStatusTimer = window.setTimeout(() => {
+      if (highlightPanelEls?.exportStatus) {
+        highlightPanelEls.exportStatus.textContent = "";
+        highlightPanelEls.exportStatus.classList.remove("is-error");
+      }
+    }, 2400);
+  }
+};
+
+const updateExportButtonsState = () => {
+  const copyBtn = highlightPanelEls?.copyBtn;
+  const downloadBtn = highlightPanelEls?.downloadBtn;
+  if (!copyBtn || !downloadBtn) return;
+  const hasEntries = (highlightPanelState.currentEntries?.length ?? 0) > 0;
+  [copyBtn, downloadBtn].forEach((btn) => {
+    btn.disabled = !hasEntries;
+    btn.classList.toggle("is-disabled", !hasEntries);
+    btn.title = hasEntries
+      ? btn.textContent
+      : "無標註可匯出";
+  });
+};
+
+const deleteHighlightFromPanel = async (entry) => {
+  try {
+    const targetUrl = entry.pageUrl ?? pageKey;
+    await deleteHighlightEntry(entry.id, targetUrl);
+    if (targetUrl === pageKey) {
+      const targetEl = document.querySelector(
+        `[${HIGHLIGHT_ATTR}="${entry.id}"]`
+      );
+      if (targetEl) {
+        unwrapHighlightElement(targetEl);
+      }
+    }
+    setPanelStatus("已刪除標註");
+    await refreshHighlightPanelData();
+    await renderHighlightPanel();
+  } catch (error) {
+    console.debug("刪除標註失敗", error);
+    setPanelStatus("刪除失敗", true);
+  }
+};
+
+const getCurrentPanelEntries = () => highlightPanelState.currentEntries ?? [];
+
+const exportHighlights = async (mode) => {
+  const entries = getCurrentPanelEntries();
+  if (!entries.length) {
+    setPanelStatus("沒有可匯出的標註", true);
+    return;
+  }
+  const lines = entries.map(({ text, note }) => {
+    const trimmed = (text ?? "").trim();
+    const noteLine = note ? `（註解：${note.trim()}）` : "";
+    return [trimmed, noteLine].filter(Boolean).join(" ");
+  });
+  const payloadText = lines.join("\n\n");
+
+  if (mode === "copy" && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(payloadText);
+      setPanelStatus("已複製純文字");
+    } catch (error) {
+      console.debug("複製標註失敗", error);
+      setPanelStatus("複製失敗", true);
+    }
+    return;
+  }
+
+  const blob = new Blob([payloadText], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  const filenameBase = highlightPanelState.activeKey
+    ? getPageDisplayName(highlightPanelState.activeKey).replaceAll(/[\\/]+/g, "_")
+    : "highlights";
+  link.download = `${filenameBase}-highlights.txt`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  setPanelStatus("已下載純文字");
+};
+
 const renderPageTagEditor = async () => {
   if (!highlightPanelEls?.pageTagSection) return;
   const {
@@ -452,7 +538,7 @@ const renderPageTagEditor = async () => {
     addTagBtn,
     suggestionDropdown,
   } = highlightPanelEls;
-  updatePanelTagSuggestions();
+  updateTagSuggestionDropdown();
 
   const activeKey = highlightPanelState.activeKey;
   const meta = highlightPanelState.pageMeta || {};
@@ -471,6 +557,7 @@ const renderPageTagEditor = async () => {
   if (isAllView) {
     pageTagList.classList.add("is-disabled");
     tagInput.value = "";
+    suggestionDropdown.classList.remove("is-visible");
     addTagBtn.onclick = null;
     tagInput.onkeydown = null;
     return;
@@ -518,6 +605,7 @@ const renderPageTagEditor = async () => {
     tagInput.value = "";
     await refreshHighlightPanelData();
     await renderHighlightPanel();
+    updateTagSuggestionDropdown();
   };
 
   addTagBtn.onclick = handleAddTag;
@@ -529,21 +617,18 @@ const renderPageTagEditor = async () => {
   };
 
   const handleInput = () => {
-    updatePanelTagSuggestions();
     updateTagSuggestionDropdown();
   };
 
-  tagInput.addEventListener("input", handleInput);
-  tagInput.addEventListener("focus", handleInput);
-  tagInput.addEventListener("blur", () => {
-    setTimeout(() => {
+  tagInput.oninput = handleInput;
+  tagInput.onfocus = handleInput;
+  tagInput.onblur = () => {
+    window.setTimeout(() => {
       highlightPanelEls?.suggestionDropdown?.classList.remove("is-visible");
     }, 120);
-  });
+  };
 
-  highlightPanelEls.tagInput = tagInput;
-  highlightPanelEls.addTagBtn = addTagBtn;
-  highlightPanelEls.suggestionDropdown = suggestionDropdown;
+  updateTagSuggestionDropdown();
 };
 
 const refreshHighlightPanelData = async () => {
@@ -790,12 +875,34 @@ const ensureHighlightPanel = () => {
   const pageTagHeader = document.createElement("div");
   pageTagHeader.className = "hk-panel-page-tags-header";
   const pageTagTitle = document.createElement("span");
-  pageTagTitle.textContent = "頁面標籤";
+  pageTagTitle.textContent = "頁面工具";
   pageTagHeader.appendChild(pageTagTitle);
   const pageTagHint = document.createElement("span");
   pageTagHint.className = "hk-panel-page-tags-hint";
   pageTagHeader.appendChild(pageTagHint);
   pageTagSection.appendChild(pageTagHeader);
+
+  const exportActions = document.createElement("div");
+  exportActions.className = "hk-panel-export-actions";
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "hk-panel-export-btn";
+  copyBtn.textContent = "複製內容";
+  copyBtn.addEventListener("click", () => exportHighlights("copy"));
+  const downloadBtn = document.createElement("button");
+  downloadBtn.type = "button";
+  downloadBtn.className = "hk-panel-export-btn";
+  downloadBtn.textContent = "下載 JSON";
+  downloadBtn.addEventListener("click", () => exportHighlights("download"));
+  exportActions.appendChild(copyBtn);
+  exportActions.appendChild(downloadBtn);
+  pageTagSection.appendChild(exportActions);
+
+  const exportStatus = document.createElement("div");
+  exportStatus.className = "hk-panel-export-status";
+  exportStatus.setAttribute("role", "status");
+  exportStatus.setAttribute("aria-live", "polite");
+  pageTagSection.appendChild(exportStatus);
 
   const tagInputRow = document.createElement("div");
   tagInputRow.className = "hk-panel-tag-input-row";
@@ -807,10 +914,6 @@ const ensureHighlightPanel = () => {
   tagInput.className = "hk-panel-tag-input";
   tagInput.placeholder = "輸入標籤後按 Enter";
 
-  const tagDataList = document.createElement("datalist");
-  tagDataList.id = "hk-panel-tag-suggestions";
-  tagInput.setAttribute("list", tagDataList.id);
-
   const suggestionDropdown = document.createElement("div");
   suggestionDropdown.className = "hk-panel-tag-suggestions";
   suggestionDropdown.setAttribute("role", "listbox");
@@ -818,7 +921,6 @@ const ensureHighlightPanel = () => {
 
   tagInputWrapper.appendChild(tagInput);
   tagInputWrapper.appendChild(suggestionDropdown);
-  tagInputWrapper.appendChild(tagDataList);
   tagInputRow.appendChild(tagInputWrapper);
 
   const addTagBtn = document.createElement("button");
@@ -857,14 +959,17 @@ const ensureHighlightPanel = () => {
     tagsContainer,
     pageTagSection,
     pageTagHint,
+    copyBtn,
+    downloadBtn,
     tagInput,
-    tagDataList,
     addTagBtn,
     suggestionDropdown,
     pageTagList,
+    exportStatus,
   };
 
   applyHighlightPanelSideClasses();
+  updateExportButtonsState();
   document.body.appendChild(panel);
   return panel;
 };
@@ -907,7 +1012,9 @@ const renderHighlightPanel = async () => {
     (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
   );
 
+  highlightPanelState.currentEntries = entries;
   highlightPanelEls.list.innerHTML = "";
+  highlightPanelEls.list.dataset.entriesCount = String(entries.length);
 
   if (!entries.length) {
     const message =
@@ -915,12 +1022,17 @@ const renderHighlightPanel = async () => {
         ? "目前沒有任何標註。"
         : "該頁面尚未建立標註。";
     setHighlightPanelPlaceholder(message);
+    updateExportButtonsState();
+    setPanelStatus("");
     return;
   }
 
   if (highlightPanelEls.placeholder) {
     highlightPanelEls.placeholder.style.display = "none";
   }
+
+  updateExportButtonsState();
+  setPanelStatus("");
 
   entries.forEach((entry) => {
     const item = document.createElement("article");
@@ -952,6 +1064,16 @@ const renderHighlightPanel = async () => {
     }
     meta.appendChild(pageLabel);
     meta.appendChild(timestamp);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "hk-panel-delete-btn";
+    deleteBtn.textContent = "刪除";
+    deleteBtn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      await deleteHighlightFromPanel(entry);
+    });
+    meta.appendChild(deleteBtn);
 
     const text = document.createElement("p");
     text.className = "hk-panel-text";
@@ -1099,6 +1221,7 @@ const handleDeleteHighlight = async () => {
   try {
     await deleteHighlightEntry(idToRemove);
     await refreshHighlightPanelIfVisible();
+    updateTagSuggestionDropdown();
   } catch (error) {
     console.debug("刪除 highlight 失敗", error);
   }
