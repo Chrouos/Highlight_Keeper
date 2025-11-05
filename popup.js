@@ -5,6 +5,7 @@ const panelSideButtons = [
   ...document.querySelectorAll(".panel-side-btn[data-side]"),
 ];
 const openPanelBtn = document.getElementById("openPanelBtn");
+const openAiPanelBtn = document.getElementById("openAiPanelBtn");
 const statusEl = document.querySelector(".status");
 
 const DEFAULT_COLOR = "#ffeb3b";
@@ -270,6 +271,31 @@ openPanelBtn.addEventListener("click", async () => {
       chrome.runtime.lastError?.message ||
       error?.message ||
       "無法開啟頁面面板。";
+    setStatus(fallbackMessage, true);
+  }
+});
+
+openAiPanelBtn?.addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    setStatus("找不到目前的分頁，無法開啟 AI 面板。", true);
+    return;
+  }
+  try {
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: "OPEN_PAGE_PANEL",
+      side: panelSide,
+      view: "ai-note",
+    });
+    if (!response?.success) {
+      throw new Error(response?.error ?? "無法開啟 AI 面板");
+    }
+    setStatus("已開啟 AI 筆記面板");
+  } catch (error) {
+    const fallbackMessage =
+      chrome.runtime.lastError?.message ||
+      error?.message ||
+      "無法開啟 AI 筆記面板。";
     setStatus(fallbackMessage, true);
   }
 });

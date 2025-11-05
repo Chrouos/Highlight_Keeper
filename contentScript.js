@@ -14,6 +14,18 @@ const DEFAULT_PALETTE = [
   "#c792ea",
 ];
 const PAGE_META_KEY = "__hk_page_meta__";
+const DEFAULT_AI_PROMPT = `你是一位筆記整理助手，根據提供的網頁全文與標註內容，整理出淺顯易懂的筆記。優先考慮使用者標注段落，將重點控制在五百字以內，輸出內容需要像說故事一樣有脈絡的說明。`;
+const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
+const MODEL_OPTIONS = {
+  openai: [
+    { value: "gpt-4o-mini", label: "GPT-4o mini" },
+    { value: "gpt-4o", label: "GPT-4o" },
+  ],
+  gemini: [
+    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  ],
+};
 let colorPalette = [...DEFAULT_PALETTE];
 let currentColor = DEFAULT_COLOR;
 let floatingButton = null;
@@ -37,13 +49,24 @@ const highlightPanelState = {
   activeKey: pageKey,
   searchTerm: "",
   activeTag: null,
+  activeTab: "highlights",
   allPages: {},
   pageMeta: {},
   allTags: [],
   currentEntries: [],
+  notesByPage: {},
 };
 let panelStatusTimer = null;
 let panelPreferencesPromise;
+let aiSettings = {
+  provider: "openai",
+  openaiKey: "",
+  openaiModel: "gpt-4o-mini",
+  geminiKey: "",
+  geminiModel: DEFAULT_GEMINI_MODEL,
+  prompt: DEFAULT_AI_PROMPT,
+};
+let isGeneratingNote = false;
 
 const ensureFloatingButton = () => {
   if (floatingButton) return floatingButton;
@@ -219,6 +242,312 @@ const renderHighlightMenuSwatches = () => {
   });
 };
 
+const getPagePlainText = () => {
+  const raw = document.body?.innerText || "";
+  const normalized = raw.replace(/\n{3,}/g, "\n\n").trim();
+  return normalized.slice(0, 15000);
+};
+
+const collectPageHighlights = async () => {
+  const highlights = await getStoredHighlights();
+  return highlights.map((item) => ({
+    id: item.id,
+    text: item.text ?? "",
+    note: item.note ?? "",
+    color: item.color,
+    createdAt: item.createdAt,
+    url: item.url ?? pageKey,
+    range: item.range,
+  }));
+};
+
+const persistAISettings = async () => {
+  try {
+    await chrome.storage?.local.set({ hkAISettings: aiSettings });
+  } catch (error) {
+    console.debug("儲存 AI 設定失敗", error);
+  }
+};
+
+const updateAiKeyVisibility = () => {
+  const groups = highlightPanelEls?.aiKeyGroups ?? [];
+  groups.forEach((group) => {
+    const provider = group.dataset.provider;
+    const isVisible = provider === aiSettings.provider;
+    group.classList.toggle("is-visible", isVisible);
+    group.hidden = !isVisible;
+    if (!isVisible) {
+      const field = group.querySelector("input");
+      if (field) {
+        field.value = aiSettings[provider === "openai" ? "openaiKey" : "geminiKey"] ?? "";
+      }
+    }
+  });
+};
+
+const populateAiModelSelect = () => {
+  const select = highlightPanelEls?.aiModelSelect;
+  if (!select) return;
+  const provider = aiSettings.provider;
+  const options = MODEL_OPTIONS[provider] ?? [];
+  select.innerHTML = "";
+  options.forEach((option) => {
+    const opt = document.createElement("option");
+    opt.value = option.value;
+    opt.textContent = option.label;
+    select.appendChild(opt);
+  });
+  const currentValue =
+    provider === "openai" ? aiSettings.openaiModel : aiSettings.geminiModel;
+  if (options.some((option) => option.value === currentValue)) {
+    select.value = currentValue;
+  } else if (options.length) {
+    select.value = options[0].value;
+    if (provider === "openai") {
+      aiSettings.openaiModel = select.value;
+    } else {
+      aiSettings.geminiModel = select.value;
+    }
+    persistAISettings();
+  }
+};
+
+const setAiPanelStatus = (message, isError = false) => {
+  const statusEl = highlightPanelEls?.aiStatus;
+  if (!statusEl) return;
+  statusEl.textContent = message || "";
+  statusEl.classList.toggle("is-error", Boolean(isError));
+};
+
+const updateGenerateAvailability = () => {
+  const generateBtn = highlightPanelEls?.aiGenerateBtn;
+  if (!generateBtn) return;
+  const provider = aiSettings.provider;
+  const key = provider === "openai" ? aiSettings.openaiKey : aiSettings.geminiKey;
+  const hasKey = Boolean(key?.trim());
+  generateBtn.disabled = isGeneratingNote || !hasKey;
+  generateBtn.textContent = isGeneratingNote ? "產生中..." : "產生筆記";
+};
+
+const applyAiSettingsToUI = () => {
+  const providerSelect = highlightPanelEls?.aiProviderSelect;
+  const modelSelect = highlightPanelEls?.aiModelSelect;
+  const promptField = highlightPanelEls?.aiPromptField;
+  const openaiInput = highlightPanelEls?.aiOpenaiKeyInput;
+  const geminiInput = highlightPanelEls?.aiGeminiKeyInput;
+
+  if (providerSelect) {
+    providerSelect.value = aiSettings.provider;
+  }
+  populateAiModelSelect();
+  if (modelSelect) {
+    modelSelect.value =
+      aiSettings.provider === "openai"
+        ? aiSettings.openaiModel
+        : aiSettings.geminiModel;
+  }
+  if (promptField) {
+    promptField.value = aiSettings.prompt ?? DEFAULT_AI_PROMPT;
+  }
+  if (openaiInput) {
+    openaiInput.value = aiSettings.openaiKey ?? "";
+  }
+  if (geminiInput) {
+    geminiInput.value = aiSettings.geminiKey ?? "";
+  }
+  updateAiKeyVisibility();
+  updateGenerateAvailability();
+};
+
+const loadAISettings = async () => {
+  try {
+    const stored = await chrome.storage?.local.get("hkAISettings");
+    if (stored?.hkAISettings) {
+      aiSettings = {
+        ...aiSettings,
+        ...stored.hkAISettings,
+      };
+    }
+  } catch (error) {
+    console.debug("讀取 AI 設定失敗", error);
+  } finally {
+    applyAiSettingsToUI();
+  }
+};
+
+const buildNotePrompt = (pageData) => {
+  const basePrompt = aiSettings.prompt?.trim() || DEFAULT_AI_PROMPT;
+  const highlightLines = (pageData.highlights || [])
+    .map((item, idx) => {
+      const noteText = item.note ? `（註解：${item.note.trim()}）` : "";
+      return `${idx + 1}. ${item.text.trim()}${noteText}`;
+    })
+    .join("\n");
+
+  return `${basePrompt}
+
+### 網頁資訊
+- 標題：${pageData.title}
+- URL：${pageData.url}
+
+### 原文內容（可能已截斷）
+${pageData.pageText}
+
+### 使用者標註
+${highlightLines || "（尚未加入標註）"}
+`;
+};
+
+const callOpenAI = async (key, prompt) => {
+  const payload = {
+    model: aiSettings.openaiModel || "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a note-taking assistant who produces concise, easy-to-read study notes in Traditional Chinese.",
+      },
+      { role: "user", content: prompt },
+    ],
+    temperature: 0.4,
+  };
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI API 錯誤：${errorText}`);
+  }
+
+  const json = await response.json();
+  const text = json?.choices?.[0]?.message?.content;
+  if (!text) {
+    throw new Error("OpenAI 回傳內容為空");
+  }
+  return text.trim();
+};
+
+const callGemini = async (key, prompt) => {
+  const model = aiSettings.geminiModel || DEFAULT_GEMINI_MODEL;
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${encodeURIComponent(
+      key
+    )}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }],
+          },
+        ],
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    if (response.status === 404 && model !== DEFAULT_GEMINI_MODEL) {
+      aiSettings.geminiModel = DEFAULT_GEMINI_MODEL;
+      await persistAISettings();
+      return callGemini(key, prompt);
+    }
+    throw new Error(`Gemini API 錯誤：${errorText}`);
+  }
+
+  const json = await response.json();
+  const parts = json?.candidates?.[0]?.content?.parts;
+  const text = parts?.map((part) => part.text).join("\n");
+  if (!text) {
+    throw new Error("Gemini 回傳內容為空");
+  }
+  return text.trim();
+};
+
+const saveGeneratedNote = async (pageUrl, notePayload) => {
+  try {
+    const stored = await chrome.storage?.local.get("hkGeneratedNotes");
+    const nextNotes = {
+      ...(stored?.hkGeneratedNotes ?? {}),
+      [pageUrl]: notePayload,
+    };
+    await chrome.storage?.local.set({ hkGeneratedNotes: nextNotes });
+  } catch (error) {
+    console.debug("儲存筆記失敗", error);
+  }
+};
+
+const handleGenerateAiNote = async () => {
+  if (isGeneratingNote || !highlightPanelEls?.aiGenerateBtn) return;
+  const provider = aiSettings.provider;
+  const apiKey =
+    provider === "openai"
+      ? aiSettings.openaiKey?.trim()
+      : aiSettings.geminiKey?.trim();
+
+  if (!apiKey) {
+    setAiPanelStatus("請先輸入 API Key", true);
+    updateGenerateAvailability();
+    return;
+  }
+
+  try {
+    isGeneratingNote = true;
+    updateGenerateAvailability();
+    setAiPanelStatus("產生筆記中…");
+    const pageData = {
+      title: document.title,
+      url: pageKey,
+      pageText: getPagePlainText(),
+      highlights: await collectPageHighlights(),
+    };
+    const prompt = buildNotePrompt(pageData);
+    const noteText =
+      provider === "openai"
+        ? await callOpenAI(apiKey, prompt)
+        : await callGemini(apiKey, prompt);
+
+    const notePayload = {
+      note: noteText,
+      provider,
+      model: provider === "openai" ? aiSettings.openaiModel : aiSettings.geminiModel,
+      prompt,
+      generatedAt: Date.now(),
+      url: pageData.url,
+    };
+
+    highlightPanelState.notesByPage = {
+      ...highlightPanelState.notesByPage,
+      [pageData.url]: notePayload,
+    };
+    if (highlightPanelState.activeKey !== pageKey) {
+      highlightPanelState.activeKey = pageKey;
+    }
+    highlightPanelState.activeTab = "ai-note";
+    applyHighlightPanelTabState();
+    await saveGeneratedNote(pageData.url, notePayload);
+    updateAiNoteSection(notePayload);
+    setAiPanelStatus("已完成筆記產生");
+  } catch (error) {
+    console.debug("產生 AI 筆記失敗", error);
+    setAiPanelStatus(error?.message || "無法產生筆記", true);
+  } finally {
+    isGeneratingNote = false;
+    updateGenerateAvailability();
+  }
+};
+
 const formatTimestamp = (value) => {
   if (!value) return "";
   try {
@@ -305,6 +634,48 @@ const setHighlightPanelSide = async (side, persist = true) => {
     } catch (error) {
       console.debug("儲存面板位置失敗", error);
     }
+  }
+};
+
+const applyHighlightPanelTabState = () => {
+  const activeTab =
+    highlightPanelState.activeTab === "ai-note" ? "ai-note" : "highlights";
+  highlightPanelState.activeTab = activeTab;
+  const { tabButtons, tabPanels } = highlightPanelEls ?? {};
+  const highlightBtn = tabButtons?.highlights;
+  const aiBtn = tabButtons?.ai;
+  const highlightPanelContent = tabPanels?.highlights;
+  const aiPanelContent = tabPanels?.ai;
+
+  if (highlightBtn) {
+    const isActive = activeTab === "highlights";
+    highlightBtn.classList.toggle("is-active", isActive);
+    highlightBtn.setAttribute("aria-selected", isActive ? "true" : "false");
+    highlightBtn.setAttribute("tabindex", isActive ? "0" : "-1");
+  }
+
+  if (aiBtn) {
+    const isActive = activeTab === "ai-note";
+    aiBtn.classList.toggle("is-active", isActive);
+    aiBtn.setAttribute("aria-selected", isActive ? "true" : "false");
+    aiBtn.setAttribute("tabindex", isActive ? "0" : "-1");
+  }
+
+  if (highlightPanelContent) {
+    const showHighlights = activeTab === "highlights";
+    highlightPanelContent.classList.toggle("is-active", showHighlights);
+    highlightPanelContent.hidden = !showHighlights;
+    highlightPanelContent.setAttribute(
+      "aria-hidden",
+      showHighlights ? "false" : "true"
+    );
+  }
+
+  if (aiPanelContent) {
+    const showAi = activeTab === "ai-note";
+    aiPanelContent.classList.toggle("is-active", showAi);
+    aiPanelContent.hidden = !showAi;
+    aiPanelContent.setAttribute("aria-hidden", showAi ? "false" : "true");
   }
 };
 
@@ -484,6 +855,67 @@ const deleteHighlightFromPanel = async (entry) => {
   } catch (error) {
     console.debug("刪除標註失敗", error);
     setPanelStatus("刪除失敗", true);
+  }
+};
+
+const updateAiNoteSection = (noteData) => {
+  const {
+    aiNoteSection,
+    aiNoteContent,
+    aiNoteMeta,
+    aiNoteCopyBtn,
+    aiNoteEmpty,
+  } = highlightPanelEls ?? {};
+  if (!aiNoteSection || !aiNoteContent || !aiNoteMeta || !aiNoteCopyBtn) {
+    return;
+  }
+
+  if (aiNoteCopyBtn._hkResetTimer) {
+    window.clearTimeout(aiNoteCopyBtn._hkResetTimer);
+    aiNoteCopyBtn._hkResetTimer = null;
+  }
+  aiNoteCopyBtn.classList.remove("is-error");
+
+  if (noteData?.note) {
+    aiNoteContent.textContent = noteData.note;
+    aiNoteContent.style.display = "block";
+    aiNoteEmpty.style.display = "none";
+    const providerLabel = noteData.provider === "openai" ? "OpenAI" : "Gemini";
+    const modelLabel = noteData.model ? `${providerLabel} · ${noteData.model}` : providerLabel;
+    const generatedLabel = noteData.generatedAt
+      ? `${modelLabel} · ${formatTimestamp(noteData.generatedAt)}`
+      : modelLabel;
+    aiNoteMeta.textContent = generatedLabel;
+    aiNoteCopyBtn.disabled = false;
+    aiNoteCopyBtn.textContent = "複製";
+    aiNoteCopyBtn.onclick = async () => {
+      if (aiNoteCopyBtn._hkResetTimer) {
+        window.clearTimeout(aiNoteCopyBtn._hkResetTimer);
+        aiNoteCopyBtn._hkResetTimer = null;
+      }
+      try {
+        await navigator.clipboard.writeText(noteData.note);
+        aiNoteCopyBtn.textContent = "已複製";
+      } catch (error) {
+        console.debug("複製 AI 筆記失敗", error);
+        aiNoteCopyBtn.textContent = "複製失敗";
+        aiNoteCopyBtn.classList.add("is-error");
+      } finally {
+        aiNoteCopyBtn._hkResetTimer = window.setTimeout(() => {
+          aiNoteCopyBtn.textContent = "複製";
+          aiNoteCopyBtn.classList.remove("is-error");
+          aiNoteCopyBtn._hkResetTimer = null;
+        }, 1800);
+      }
+    };
+  } else {
+    aiNoteContent.textContent = "";
+    aiNoteContent.style.display = "none";
+    aiNoteEmpty.style.display = "block";
+    aiNoteMeta.textContent = "";
+    aiNoteCopyBtn.disabled = true;
+    aiNoteCopyBtn.onclick = null;
+    aiNoteCopyBtn.textContent = "複製";
   }
 };
 
@@ -697,6 +1129,13 @@ const refreshHighlightPanelData = async () => {
     highlightPanelState.allTags = Array.from(tagSet).sort((a, b) =>
       a.localeCompare(b)
     );
+    try {
+      const storedNotes = await chrome.storage?.local.get("hkGeneratedNotes");
+      highlightPanelState.notesByPage = storedNotes?.hkGeneratedNotes ?? {};
+    } catch (noteError) {
+      console.debug("讀取筆記快取失敗", noteError);
+      highlightPanelState.notesByPage = {};
+    }
     if (
       highlightPanelState.activeTag &&
       !tagSet.has(highlightPanelState.activeTag)
@@ -736,6 +1175,12 @@ const refreshHighlightPanelData = async () => {
     highlightPanelState.allTags = Array.from(
       new Set([...entryTags, ...metaTags])
     ).sort((a, b) => a.localeCompare(b));
+    try {
+      const storedNotes = await chrome.storage?.local.get("hkGeneratedNotes");
+      highlightPanelState.notesByPage = storedNotes?.hkGeneratedNotes ?? {};
+    } catch (noteError) {
+      highlightPanelState.notesByPage = {};
+    }
     if (
       highlightPanelState.activeTag &&
       !highlightPanelState.allTags.includes(highlightPanelState.activeTag)
@@ -812,6 +1257,59 @@ const ensureHighlightPanel = () => {
 
   header.appendChild(title);
   header.appendChild(closeBtn);
+
+  const tabs = document.createElement("div");
+  tabs.className = "hk-panel-tabs";
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "面板內容切換");
+
+  const highlightsTabBtn = document.createElement("button");
+  highlightsTabBtn.type = "button";
+  highlightsTabBtn.className = "hk-panel-tab-btn";
+  highlightsTabBtn.id = "hk-panel-tab-highlights";
+  highlightsTabBtn.setAttribute("role", "tab");
+  highlightsTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-highlights");
+  highlightsTabBtn.textContent = "標註";
+  highlightsTabBtn.addEventListener("click", () => {
+    if (highlightPanelState.activeTab === "highlights") return;
+    highlightPanelState.activeTab = "highlights";
+    applyHighlightPanelTabState();
+    renderHighlightPanel().catch((error) =>
+      console.debug("重新整理標註面板失敗", error)
+    );
+  });
+
+  const aiTabBtn = document.createElement("button");
+  aiTabBtn.type = "button";
+  aiTabBtn.className = "hk-panel-tab-btn";
+  aiTabBtn.id = "hk-panel-tab-ai-note";
+  aiTabBtn.setAttribute("role", "tab");
+  aiTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-ai-note");
+  aiTabBtn.textContent = "AI 筆記";
+  aiTabBtn.addEventListener("click", () => {
+    if (highlightPanelState.activeTab === "ai-note") return;
+    highlightPanelState.activeTab = "ai-note";
+    applyHighlightPanelTabState();
+    renderHighlightPanel().catch((error) =>
+      console.debug("重新整理標註面板失敗", error)
+    );
+  });
+
+  tabs.appendChild(highlightsTabBtn);
+  tabs.appendChild(aiTabBtn);
+
+  const highlightsTabPanel = document.createElement("div");
+  highlightsTabPanel.className =
+    "hk-panel-tab-content hk-panel-tab-content-highlights";
+  highlightsTabPanel.id = "hk-panel-tabpanel-highlights";
+  highlightsTabPanel.setAttribute("role", "tabpanel");
+  highlightsTabPanel.setAttribute("aria-labelledby", highlightsTabBtn.id);
+
+  const aiTabPanel = document.createElement("div");
+  aiTabPanel.className = "hk-panel-tab-content hk-panel-tab-content-ai";
+  aiTabPanel.id = "hk-panel-tabpanel-ai-note";
+  aiTabPanel.setAttribute("role", "tabpanel");
+  aiTabPanel.setAttribute("aria-labelledby", aiTabBtn.id);
 
   const controls = document.createElement("div");
   controls.className = "hk-panel-controls";
@@ -935,6 +1433,143 @@ const ensureHighlightPanel = () => {
   pageTagList.className = "hk-panel-page-tag-list";
   pageTagSection.appendChild(pageTagList);
 
+  const aiSettingsSection = document.createElement("section");
+  aiSettingsSection.className = "hk-panel-ai-settings";
+
+  const providerField = document.createElement("div");
+  providerField.className = "hk-panel-ai-field";
+  const providerLabel = document.createElement("label");
+  providerLabel.className = "hk-panel-ai-label";
+  const providerSelectId = "hk-panel-ai-provider";
+  providerLabel.setAttribute("for", providerSelectId);
+  providerLabel.textContent = "服務提供者";
+  const aiProviderSelect = document.createElement("select");
+  aiProviderSelect.id = providerSelectId;
+  aiProviderSelect.className = "hk-panel-ai-select";
+  [
+    ["openai", "OpenAI"],
+    ["gemini", "Google Gemini"],
+  ].forEach(([value, label]) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    aiProviderSelect.appendChild(option);
+  });
+  providerField.appendChild(providerLabel);
+  providerField.appendChild(aiProviderSelect);
+  aiSettingsSection.appendChild(providerField);
+
+  const modelField = document.createElement("div");
+  modelField.className = "hk-panel-ai-field";
+  const modelLabel = document.createElement("label");
+  const modelSelectId = "hk-panel-ai-model";
+  modelLabel.setAttribute("for", modelSelectId);
+  modelLabel.className = "hk-panel-ai-label";
+  modelLabel.textContent = "模型";
+  const aiModelSelect = document.createElement("select");
+  aiModelSelect.id = modelSelectId;
+  aiModelSelect.className = "hk-panel-ai-select";
+  modelField.appendChild(modelLabel);
+  modelField.appendChild(aiModelSelect);
+  aiSettingsSection.appendChild(modelField);
+
+  const aiKeyGroupsContainer = document.createElement("div");
+  aiKeyGroupsContainer.className = "hk-panel-ai-key-groups";
+
+  const openaiGroup = document.createElement("div");
+  openaiGroup.className = "hk-panel-ai-key-group";
+  openaiGroup.dataset.provider = "openai";
+  const openaiLabel = document.createElement("label");
+  const openaiInputId = "hk-panel-ai-openai-key";
+  openaiLabel.setAttribute("for", openaiInputId);
+  openaiLabel.textContent = "OpenAI API Key";
+  const openaiInput = document.createElement("input");
+  openaiInput.type = "password";
+  openaiInput.id = openaiInputId;
+  openaiInput.className = "hk-panel-ai-input";
+  openaiInput.placeholder = "sk-...";
+  openaiInput.autocomplete = "off";
+  openaiGroup.appendChild(openaiLabel);
+  openaiGroup.appendChild(openaiInput);
+  openaiGroup.hidden = true;
+
+  const geminiGroup = document.createElement("div");
+  geminiGroup.className = "hk-panel-ai-key-group";
+  geminiGroup.dataset.provider = "gemini";
+  const geminiLabel = document.createElement("label");
+  const geminiInputId = "hk-panel-ai-gemini-key";
+  geminiLabel.setAttribute("for", geminiInputId);
+  geminiLabel.textContent = "Gemini API Key";
+  const geminiInput = document.createElement("input");
+  geminiInput.type = "password";
+  geminiInput.id = geminiInputId;
+  geminiInput.className = "hk-panel-ai-input";
+  geminiInput.placeholder = "AIza...";
+  geminiInput.autocomplete = "off";
+  geminiGroup.appendChild(geminiLabel);
+  geminiGroup.appendChild(geminiInput);
+  geminiGroup.hidden = true;
+
+  aiKeyGroupsContainer.appendChild(openaiGroup);
+  aiKeyGroupsContainer.appendChild(geminiGroup);
+  aiSettingsSection.appendChild(aiKeyGroupsContainer);
+
+  const promptField = document.createElement("div");
+  promptField.className = "hk-panel-ai-field";
+  const promptLabel = document.createElement("label");
+  const promptTextareaId = "hk-panel-ai-prompt";
+  promptLabel.setAttribute("for", promptTextareaId);
+  promptLabel.className = "hk-panel-ai-label";
+  promptLabel.textContent = "自訂 Prompt";
+  const promptTextarea = document.createElement("textarea");
+  promptTextarea.id = promptTextareaId;
+  promptTextarea.className = "hk-panel-ai-textarea";
+  promptTextarea.rows = 4;
+  promptField.appendChild(promptLabel);
+  promptField.appendChild(promptTextarea);
+  aiSettingsSection.appendChild(promptField);
+
+  const aiActions = document.createElement("div");
+  aiActions.className = "hk-panel-ai-actions";
+  const aiStatus = document.createElement("span");
+  aiStatus.className = "hk-panel-ai-status";
+  aiStatus.setAttribute("role", "status");
+  aiStatus.setAttribute("aria-live", "polite");
+  const aiGenerateBtn = document.createElement("button");
+  aiGenerateBtn.type = "button";
+  aiGenerateBtn.className = "hk-panel-ai-generate";
+  aiGenerateBtn.textContent = "產生筆記";
+  aiActions.appendChild(aiStatus);
+  aiActions.appendChild(aiGenerateBtn);
+  aiSettingsSection.appendChild(aiActions);
+
+  const aiNoteSection = document.createElement("section");
+  aiNoteSection.className = "hk-panel-ai-note";
+  const aiNoteHeader = document.createElement("div");
+  aiNoteHeader.className = "hk-panel-ai-note-header";
+  const aiNoteTitle = document.createElement("span");
+  aiNoteTitle.className = "hk-panel-ai-note-title";
+  aiNoteTitle.textContent = "AI 筆記";
+  const aiNoteMeta = document.createElement("span");
+  aiNoteMeta.className = "hk-panel-ai-note-meta";
+  const aiNoteCopyBtn = document.createElement("button");
+  aiNoteCopyBtn.type = "button";
+  aiNoteCopyBtn.className = "hk-panel-ai-note-copy";
+  aiNoteCopyBtn.textContent = "複製";
+  aiNoteCopyBtn.disabled = true;
+  aiNoteHeader.appendChild(aiNoteTitle);
+  aiNoteHeader.appendChild(aiNoteMeta);
+  aiNoteHeader.appendChild(aiNoteCopyBtn);
+  const aiNoteContent = document.createElement("pre");
+  aiNoteContent.className = "hk-panel-ai-note-content";
+  aiNoteContent.textContent = "";
+  const aiNoteEmpty = document.createElement("div");
+  aiNoteEmpty.className = "hk-panel-ai-note-empty";
+  aiNoteEmpty.textContent = "尚未產生筆記。";
+  aiNoteSection.appendChild(aiNoteHeader);
+  aiNoteSection.appendChild(aiNoteContent);
+  aiNoteSection.appendChild(aiNoteEmpty);
+
   const list = document.createElement("div");
   list.className = "hk-panel-list";
 
@@ -943,14 +1578,20 @@ const ensureHighlightPanel = () => {
   placeholder.textContent = "正在載入標註...";
 
   panel.appendChild(header);
-  panel.appendChild(controls);
-  panel.appendChild(pageTagSection);
-  panel.appendChild(list);
-  panel.appendChild(placeholder);
+  panel.appendChild(tabs);
+  highlightsTabPanel.appendChild(controls);
+  highlightsTabPanel.appendChild(pageTagSection);
+  highlightsTabPanel.appendChild(list);
+  highlightsTabPanel.appendChild(placeholder);
+  aiTabPanel.appendChild(aiSettingsSection);
+  aiTabPanel.appendChild(aiNoteSection);
+  panel.appendChild(highlightsTabPanel);
+  panel.appendChild(aiTabPanel);
 
   highlightPanel = panel;
   highlightPanelEls = {
     container: panel,
+    tabs,
     list,
     placeholder,
     pageSelect,
@@ -966,10 +1607,72 @@ const ensureHighlightPanel = () => {
     suggestionDropdown,
     pageTagList,
     exportStatus,
+    aiSettingsSection,
+    aiNoteSection,
+    aiNoteContent,
+    aiNoteMeta,
+    aiNoteCopyBtn,
+    aiNoteEmpty,
+    aiProviderSelect,
+    aiModelSelect,
+    aiPromptField: promptTextarea,
+    aiOpenaiKeyInput: openaiInput,
+    aiGeminiKeyInput: geminiInput,
+    aiKeyGroups: [openaiGroup, geminiGroup],
+    aiGenerateBtn,
+    aiStatus,
+    tabButtons: {
+      highlights: highlightsTabBtn,
+      ai: aiTabBtn,
+    },
+    tabPanels: {
+      highlights: highlightsTabPanel,
+      ai: aiTabPanel,
+    },
   };
 
+  aiProviderSelect.addEventListener("change", (event) => {
+    const value = event.target.value === "gemini" ? "gemini" : "openai";
+    aiSettings.provider = value;
+    populateAiModelSelect();
+    updateAiKeyVisibility();
+    updateGenerateAvailability();
+    persistAISettings();
+  });
+
+  aiModelSelect.addEventListener("change", (event) => {
+    if (aiSettings.provider === "openai") {
+      aiSettings.openaiModel = event.target.value;
+    } else {
+      aiSettings.geminiModel = event.target.value;
+    }
+    persistAISettings();
+  });
+
+  openaiInput.addEventListener("input", (event) => {
+    aiSettings.openaiKey = event.target.value;
+    updateGenerateAvailability();
+    persistAISettings();
+  });
+
+  geminiInput.addEventListener("input", (event) => {
+    aiSettings.geminiKey = event.target.value;
+    updateGenerateAvailability();
+    persistAISettings();
+  });
+
+  promptTextarea.addEventListener("input", (event) => {
+    aiSettings.prompt = event.target.value;
+    persistAISettings();
+  });
+
+  aiGenerateBtn.addEventListener("click", handleGenerateAiNote);
+
   applyHighlightPanelSideClasses();
+  applyHighlightPanelTabState();
   updateExportButtonsState();
+  applyAiSettingsToUI();
+  setAiPanelStatus("");
   document.body.appendChild(panel);
   return panel;
 };
@@ -989,6 +1692,7 @@ const renderHighlightPanel = async () => {
   ensureHighlightPanel();
   if (!highlightPanelEls?.list) return;
 
+  applyHighlightPanelTabState();
   await refreshHighlightPanelData();
   applyHighlightPanelSideClasses();
   updateHighlightPanelTagFilters();
@@ -1017,6 +1721,11 @@ const renderHighlightPanel = async () => {
   highlightPanelEls.list.dataset.entriesCount = String(entries.length);
 
   if (!entries.length) {
+    const noteKey =
+      highlightPanelState.activeKey === PANEL_ALL_KEY
+        ? pageKey
+        : highlightPanelState.activeKey;
+    updateAiNoteSection(highlightPanelState.notesByPage[noteKey]);
     const message =
       highlightPanelState.activeKey === PANEL_ALL_KEY
         ? "目前沒有任何標註。"
@@ -1105,6 +1814,12 @@ const renderHighlightPanel = async () => {
 
     highlightPanelEls.list.appendChild(item);
   });
+
+  const noteKey =
+    highlightPanelState.activeKey === PANEL_ALL_KEY
+      ? pageKey
+      : highlightPanelState.activeKey;
+  updateAiNoteSection(highlightPanelState.notesByPage[noteKey]);
 };
 
 const openHighlightPanel = async (options = {}) => {
@@ -1123,6 +1838,9 @@ const openHighlightPanel = async (options = {}) => {
   } else if (view === PANEL_ALL_KEY) {
     highlightPanelState.activeKey = PANEL_ALL_KEY;
   }
+  if (view === "ai-note" || view === "highlights") {
+    highlightPanelState.activeTab = view;
+  }
   if (side) {
     await setHighlightPanelSide(side);
   } else if (highlightPanelState.side !== highlightPanelPreferredSide) {
@@ -1130,6 +1848,7 @@ const openHighlightPanel = async (options = {}) => {
   } else {
     applyHighlightPanelSideClasses();
   }
+  applyHighlightPanelTabState();
   highlightPanelVisible = true;
   highlightPanel.style.display = "flex";
   highlightPanel.setAttribute("aria-hidden", "false");
@@ -1411,6 +2130,7 @@ const updateCurrentColor = async () => {
 loadPalette();
 updateCurrentColor();
 panelPreferencesPromise = loadPanelPreferences();
+loadAISettings();
 
 chrome.storage?.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
@@ -1424,6 +2144,23 @@ chrome.storage?.onChanged.addListener((changes, areaName) => {
   }
   if (changes.hkColorPalette) {
     setColorPaletteState(changes.hkColorPalette.newValue);
+  }
+  if (changes.hkAISettings) {
+    aiSettings = {
+      ...aiSettings,
+      ...(changes.hkAISettings.newValue ?? {}),
+    };
+    applyAiSettingsToUI();
+  }
+  if (changes.hkGeneratedNotes) {
+    highlightPanelState.notesByPage = changes.hkGeneratedNotes.newValue ?? {};
+    if (highlightPanelVisible) {
+      const noteKey =
+        highlightPanelState.activeKey === PANEL_ALL_KEY
+          ? pageKey
+          : highlightPanelState.activeKey;
+      updateAiNoteSection(highlightPanelState.notesByPage[noteKey]);
+    }
   }
   if (highlightPanelVisible) {
     const affectedKeys = Object.keys(changes);
@@ -1805,6 +2542,44 @@ const handleHighlightClick = (event) => {
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "GET_PAGE_HIGHLIGHTS") {
+    (async () => {
+      try {
+        const highlights = await collectPageHighlights();
+        const payload = {
+          title: document.title,
+          url: pageKey,
+          pageText: getPagePlainText(),
+          highlights,
+        };
+        sendResponse({ success: true, data: payload });
+      } catch (error) {
+        console.debug("取得標註資料失敗", error);
+        sendResponse({ success: false, error: error?.message || "無法取得標註資料" });
+      }
+    })();
+    return true;
+  }
+  if (message?.type === "SHOW_AI_NOTE") {
+    const payload = message.payload || {};
+    const targetKey = payload.url || pageKey;
+    highlightPanelState.notesByPage = {
+      ...highlightPanelState.notesByPage,
+      [targetKey]: payload,
+    };
+    if (message.focusPanel) {
+      highlightPanelState.activeKey = targetKey;
+      highlightPanelState.activeTab = "ai-note";
+    }
+    openHighlightPanel({
+      pageKey: targetKey,
+      view: message.focusPanel ? "ai-note" : highlightPanelState.activeTab,
+    }).then(() => {
+      updateAiNoteSection(payload);
+    });
+    sendResponse?.({ success: true });
+    return true;
+  }
   if (message?.type === "OPEN_PAGE_PANEL") {
     openHighlightPanel({
       side: message.side,
