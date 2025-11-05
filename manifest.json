@@ -16,5 +16,11 @@
       "css": ["contentStyles.css"],
       "run_at": "document_idle"
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["Icon.png"],
+      "matches": ["<all_urls>"]
+    }
   ]
 }

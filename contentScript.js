@@ -74,8 +74,10 @@ const ensureFloatingButton = () => {
   floatingButton.type = "button";
   floatingButton.id = FLOATING_BUTTON_ID;
   floatingButton.className = "hk-floating-btn";
-  floatingButton.textContent = "HL";
+  floatingButton.setAttribute("aria-label", "標註選取文字");
   floatingButton.title = "標註選取文字";
+  const iconSrc = chrome.runtime?.getURL?.("Icon.png") ?? "Icon.png";
+  floatingButton.innerHTML = `<img src="${iconSrc}" class="hk-floating-btn-image" alt="" aria-hidden="true" />`;
   floatingButton.style.display = "none";
   floatingButton.addEventListener("mousedown", (event) => {
     // Prevent losing selection before highlight is applied.

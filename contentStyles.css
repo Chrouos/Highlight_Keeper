@@ -34,29 +34,34 @@
   position: fixed;
   top: 0;
   left: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
   border: none;
-  background-color: #1a73e8;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
+  background: #ffe066;
   display: none;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   z-index: 2147483647;
-  box-shadow: 0 4px 12px rgba(32, 33, 36, 0.24);
+  box-shadow: 0 6px 16px rgba(251, 192, 45, 0.32);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .hk-floating-btn:hover {
-  background-color: #185abc;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(251, 192, 45, 0.36);
 }
 
 .hk-floating-btn:focus-visible {
-  outline: 2px solid #fff;
+  outline: 2px solid rgba(255, 255, 255, 0.9);
   outline-offset: 2px;
+}
+
+.hk-floating-btn-image {
+  display: block;
+  width: 26px;
+  height: 26px;
 }
 
 .hk-highlight-menu {
