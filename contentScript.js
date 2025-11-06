@@ -2286,6 +2286,7 @@ const createHighlightElement = (color, id) => {
   mark.className = HIGHLIGHT_CLASS;
   mark.setAttribute(HIGHLIGHT_ATTR, id);
   mark.style.backgroundColor = color;
+  mark.style.setProperty("--hk-highlight-color", color);
   mark.style.padding = "0";
   mark.style.margin = "0";
   mark.style.color = "inherit";
@@ -2296,6 +2297,7 @@ const setHighlightMetadata = (element, { color, note }) => {
   if (!element) return;
   if (color) {
     element.style.backgroundColor = color;
+    element.style.setProperty("--hk-highlight-color", color);
     if (element.dataset) {
       element.dataset.hkColor = color;
     }
