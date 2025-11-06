@@ -7,7 +7,18 @@
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Highlight Keeper"
+    "default_title": "Highlight Keeper",
+    "default_icon": {
+      "16": "Icon.png",
+      "32": "Icon.png",
+      "48": "Icon.png"
+    }
+  },
+  "icons": {
+    "16": "Icon.png",
+    "32": "Icon.png",
+    "48": "Icon.png",
+    "128": "Icon.png"
   },
   "content_scripts": [
     {

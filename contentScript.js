@@ -218,6 +218,18 @@ const setColorPaletteState = (palette) => {
   renderHighlightMenuSwatches();
 };
 
+const persistColorPalette = async (nextPalette) => {
+  const sanitized = sanitizePalette(nextPalette);
+  colorPalette = sanitized;
+  renderHighlightMenuSwatches();
+  if (!storage) return;
+  try {
+    await storage.set({ hkColorPalette: sanitized });
+  } catch (error) {
+    console.debug("儲存顏色色票失敗", error);
+  }
+};
+
 const loadPalette = async () => {
   if (!storage) return colorPalette;
   try {
@@ -1379,8 +1391,9 @@ const ensureHighlightPanel = () => {
   leftBtn.textContent = "左側";
   leftBtn.addEventListener("click", () => setHighlightPanelSide("left"));
 
-  sideGroup.appendChild(leftBtn);
   sideGroup.appendChild(rightBtn);
+  sideGroup.appendChild(rightBtn);
+  sideGroup.appendChild(leftBtn);
 
   controls.appendChild(selectLabel);
   controls.appendChild(searchWrapper);
@@ -1905,7 +1918,7 @@ const refreshHighlightPanelIfVisible = async () => {
 
 const applyColorChange = async (color) => {
   if (!activeHighlight || !activeHighlightId) return;
-  const nextColor = (color || DEFAULT_COLOR).toLowerCase();
+  const nextColor = toHexColor(color || DEFAULT_COLOR);
   setHighlightMetadata(activeHighlight, {
     color: nextColor,
     note: activeHighlight.dataset.hkNote ?? "",
@@ -1913,6 +1926,9 @@ const applyColorChange = async (color) => {
   currentColor = nextColor;
   if (highlightMenuEls?.colorInput) {
     highlightMenuEls.colorInput.value = nextColor;
+  }
+  if (!colorPalette.includes(nextColor)) {
+    await persistColorPalette([...colorPalette, nextColor]);
   }
   try {
     await updateHighlightEntry(activeHighlightId, { color: nextColor });
@@ -2530,19 +2546,23 @@ const applyHighlight = async (color) => {
   const snapshot = serializeRange(range.cloneRange());
   const highlightId = `hk-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 
-  const highlightEl = wrapRangeWithHighlight(range, color, highlightId);
-  setHighlightMetadata(highlightEl, { color, note: "" });
+  const normalizedColor = toHexColor(color || DEFAULT_COLOR);
+  const highlightEl = wrapRangeWithHighlight(range, normalizedColor, highlightId);
+  setHighlightMetadata(highlightEl, { color: normalizedColor, note: "" });
   selection.removeAllRanges();
 
   await saveHighlight({
     id: highlightId,
-    color,
+    color: normalizedColor,
     text: snapshot.text,
     range: snapshot,
     url: pageKey,
     createdAt: Date.now(),
     note: "",
   });
+  if (!colorPalette.includes(normalizedColor)) {
+    await persistColorPalette([...colorPalette, normalizedColor]);
+  }
   await ensurePageMetaTitle(pageKey, document.title);
   await refreshHighlightPanelIfVisible();
 };
