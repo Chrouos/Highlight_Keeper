@@ -1598,7 +1598,7 @@ const ensureHighlightPanel = () => {
     list,
     placeholder,
     pageSelect,
-    sideButtons: [rightBtn, leftBtn],
+    sideButtons: [leftBtn, rightBtn],
     searchInput,
     tagsContainer,
     pageTagSection,

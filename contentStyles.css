@@ -298,6 +298,8 @@
   gap: 12px;
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .hk-panel-tab-content.is-active {
@@ -315,11 +317,6 @@
 
 .hk-panel-tab-content-ai .hk-panel-ai-note-content {
   flex: 1;
-}
-
-.hk-panel-tab-content-ai {
-  overflow-y: auto;
-  padding-right: 4px;
 }
 
 .hk-panel-controls {
