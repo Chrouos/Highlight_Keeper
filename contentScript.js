@@ -77,8 +77,15 @@ const ensureFloatingButton = () => {
   floatingButton.className = "hk-floating-btn";
   floatingButton.setAttribute("aria-label", "標註選取文字");
   floatingButton.title = "標註選取文字";
-  const iconSrc = chrome.runtime?.getURL?.("Icon.png") ?? "Icon.png";
-  floatingButton.innerHTML = `<img src="${iconSrc}" class="hk-floating-btn-image" alt="" aria-hidden="true" />`;
+  const iconSrc =
+    chrome?.runtime?.id && typeof chrome.runtime.getURL === "function"
+      ? chrome.runtime.getURL("Icon.png")
+      : null;
+  if (iconSrc) {
+    floatingButton.innerHTML = `<img src="${iconSrc}" class="hk-floating-btn-image" alt="" aria-hidden="true" />`;
+  } else {
+    floatingButton.textContent = "HL";
+  }
   floatingButton.style.display = "none";
   floatingButton.addEventListener("mousedown", (event) => {
     // Prevent losing selection before highlight is applied.
@@ -719,8 +726,11 @@ const updateHighlightPanelSelectOptions = () => {
   keys.forEach((key) => {
     const option = document.createElement("option");
     option.value = key;
-    const label = getPageDisplayName(key);
-    option.textContent = key === pageKey ? `${label}（本頁）` : label;
+    const metaTitle = highlightPanelState.pageMeta[key]?.title;
+    const displayName = getPageDisplayName(key);
+    const labelBase = metaTitle ? `${metaTitle} — ${displayName}` : displayName;
+    option.textContent =
+      key === pageKey ? `${labelBase}（本頁）` : labelBase;
     select.appendChild(option);
   });
 
@@ -1115,6 +1125,9 @@ const refreshHighlightPanelData = async () => {
         ...(existing ?? {}),
         tags: merged,
       };
+      if (!combinedMeta[url].title && url === pageKey) {
+        combinedMeta[url].title = document.title || "";
+      }
       if (
         merged.length !== metaTags.length ||
         merged.some((tag, idx) => tag !== metaTags[idx])
@@ -1167,6 +1180,12 @@ const refreshHighlightPanelData = async () => {
     });
     highlightPanelState.allPages = { [pageKey]: fallbackEntries };
     highlightPanelState.pageMeta = fallbackMeta;
+    if (!highlightPanelState.pageMeta[pageKey]) {
+      highlightPanelState.pageMeta[pageKey] = {};
+    }
+    if (!highlightPanelState.pageMeta[pageKey].title) {
+      highlightPanelState.pageMeta[pageKey].title = document.title || "";
+    }
     const entryTags = fallbackEntries
       .flatMap((entry) =>
         Array.isArray(entry?.tags) ? entry.tags : parseTags(entry?.tags ?? "")
@@ -1346,13 +1365,13 @@ const ensureHighlightPanel = () => {
 
   const sideGroup = document.createElement("div");
   sideGroup.className = "hk-panel-side-group";
+
   const rightBtn = document.createElement("button");
   rightBtn.type = "button";
   rightBtn.dataset.side = "right";
   rightBtn.className = "hk-panel-side-btn";
   rightBtn.textContent = "右側";
   rightBtn.addEventListener("click", () => setHighlightPanelSide("right"));
-
   const leftBtn = document.createElement("button");
   leftBtn.type = "button";
   leftBtn.dataset.side = "left";
@@ -1360,8 +1379,8 @@ const ensureHighlightPanel = () => {
   leftBtn.textContent = "左側";
   leftBtn.addEventListener("click", () => setHighlightPanelSide("left"));
 
-  sideGroup.appendChild(rightBtn);
   sideGroup.appendChild(leftBtn);
+  sideGroup.appendChild(rightBtn);
 
   controls.appendChild(selectLabel);
   controls.appendChild(searchWrapper);
@@ -2361,6 +2380,30 @@ const setPageMeta = async (meta) => {
   await storage.set({ [PAGE_META_KEY]: meta });
 };
 
+const ensurePageMetaTitle = async (url, title) => {
+  if (!storage) return;
+  if (typeof title !== "string" || !title.trim()) return;
+  try {
+    const meta = await getPageMeta();
+    const existing = meta[url] ?? {};
+    if (existing.title === title) return;
+    meta[url] = {
+      ...existing,
+      title: title.trim(),
+      updatedAt: Date.now(),
+    };
+    await setPageMeta(meta);
+    if (highlightPanelState.pageMeta[url]) {
+      highlightPanelState.pageMeta[url] = {
+        ...highlightPanelState.pageMeta[url],
+        title: title.trim(),
+      };
+    }
+  } catch (error) {
+    console.debug("更新頁面標題失敗", error);
+  }
+};
+
 const getPageTags = async (key = pageKey) => {
   const meta = await getPageMeta();
   const tags = meta[key]?.tags;
@@ -2459,6 +2502,7 @@ const restoreHighlights = async () => {
 };
 
 const attemptRestoreHighlights = async (attempt = 0) => {
+  await ensurePageMetaTitle(pageKey, document.title);
   const { total, visible } = await restoreHighlights();
   if (!total) return;
   if (visible >= total || attempt >= HIGHLIGHT_RETRY_DELAYS.length) return;
@@ -2499,6 +2543,7 @@ const applyHighlight = async (color) => {
     createdAt: Date.now(),
     note: "",
   });
+  await ensurePageMetaTitle(pageKey, document.title);
   await refreshHighlightPanelIfVisible();
 };
 
