@@ -67,6 +67,7 @@ let aiSettings = {
   prompt: DEFAULT_AI_PROMPT,
 };
 let isGeneratingNote = false;
+const HIGHLIGHT_RETRY_DELAYS = [450, 1500, 3500];
 
 const ensureFloatingButton = () => {
   if (floatingButton) return floatingButton;
@@ -2414,16 +2415,21 @@ const findHighlightEntry = async (id, key = pageKey) => {
 };
 
 const restoreHighlights = async () => {
-  if (!storage) return;
+  if (!storage) return { total: 0, visible: 0 };
   try {
     const saved = await storage.get(pageKey);
-    const highlights = saved[pageKey] ?? [];
+    const allHighlights = Array.isArray(saved[pageKey]) ? saved[pageKey] : [];
+    const highlights = allHighlights.filter((item) => Boolean(item?.range));
+    let visibleCount = 0;
+
     for (const highlight of highlights) {
-      if (!highlight?.range) continue;
       const alreadyExists = document.querySelector(
         `[${HIGHLIGHT_ATTR}="${highlight.id}"]`
       );
-      if (alreadyExists) continue;
+      if (alreadyExists) {
+        visibleCount += 1;
+        continue;
+      }
 
       const range = deserializeRange(highlight.range);
       if (!range || range.collapsed) continue;
@@ -2437,14 +2443,25 @@ const restoreHighlights = async () => {
             ? highlight.tags
             : parseTags(highlight.tags ?? ""),
         });
+        visibleCount += 1;
       } catch (error) {
-        // log to console for debugging but do not interrupt other highlights
         console.debug("無法還原 highlight:", highlight, error);
       }
     }
+
+    return { total: highlights.length, visible: visibleCount };
   } catch (error) {
     console.debug("載入 highlight 失敗:", error);
+    return { total: 0, visible: 0 };
   }
+};
+
+const attemptRestoreHighlights = async (attempt = 0) => {
+  const { total, visible } = await restoreHighlights();
+  if (!total) return;
+  if (visible >= total || attempt >= HIGHLIGHT_RETRY_DELAYS.length) return;
+  const nextDelay = HIGHLIGHT_RETRY_DELAYS[attempt] ?? 1200;
+  window.setTimeout(() => attemptRestoreHighlights(attempt + 1), nextDelay);
 };
 
 const applyHighlight = async (color) => {
@@ -2628,12 +2645,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", restoreHighlights, {
-    once: true,
-  });
+  document.addEventListener(
+    "DOMContentLoaded",
+    () => attemptRestoreHighlights(),
+    {
+      once: true,
+    }
+  );
 } else {
-  restoreHighlights();
+  attemptRestoreHighlights();
 }
+
+window.addEventListener("load", () => attemptRestoreHighlights(), {
+  once: true,
+});
 
 document.addEventListener("mouseup", handleSelectionIntent);
 document.addEventListener("keyup", handleSelectionIntent);
