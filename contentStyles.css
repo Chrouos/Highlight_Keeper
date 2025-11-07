@@ -474,6 +474,10 @@
   cursor: not-allowed;
 }
 
+.hk-panel-import-input {
+  display: none;
+}
+
 .hk-panel-export-status {
   min-height: 16px;
   font-size: 12px;

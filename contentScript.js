@@ -946,6 +946,37 @@ const updateAiNoteSection = (noteData) => {
 
 const getCurrentPanelEntries = () => highlightPanelState.currentEntries ?? [];
 
+const buildHighlightExportEntry = (entry) => {
+  if (!entry) return null;
+  const url = entry.pageUrl || entry.url || pageKey;
+  const range = entry.range;
+  if (!url || !range) return null;
+  const payload = {
+    id: entry.id,
+    url,
+    color: toHexColor(entry.color || DEFAULT_COLOR),
+    text: entry.text ?? "",
+    note: entry.note ?? "",
+    range,
+    createdAt: entry.createdAt ?? Date.now(),
+  };
+  const tags = Array.isArray(entry.tags)
+    ? entry.tags
+    : Array.isArray(entry.pageTags)
+    ? entry.pageTags
+    : null;
+  if (tags?.length) {
+    payload.tags = Array.from(
+      new Set(tags.map((tag) => String(tag).trim()).filter(Boolean))
+    );
+  }
+  const title = highlightPanelState.pageMeta[url]?.title;
+  if (title) {
+    payload.title = title;
+  }
+  return payload;
+};
+
 const exportHighlights = async (mode) => {
   const entries = getCurrentPanelEntries();
   if (!entries.length) {
@@ -970,19 +1001,164 @@ const exportHighlights = async (mode) => {
     return;
   }
 
-  const blob = new Blob([payloadText], { type: "text/plain;charset=utf-8" });
+  const exportEntries = entries
+    .map((entry) => buildHighlightExportEntry(entry))
+    .filter(Boolean);
+  if (!exportEntries.length) {
+    setPanelStatus("沒有可匯出的標註", true);
+    return;
+  }
+  const payload = {
+    type: "highlight-keeper",
+    version: 1,
+    exportedAt: Date.now(),
+    total: exportEntries.length,
+    entries: exportEntries,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   const filenameBase = highlightPanelState.activeKey
     ? getPageDisplayName(highlightPanelState.activeKey).replaceAll(/[\\/]+/g, "_")
     : "highlights";
-  link.download = `${filenameBase}-highlights.txt`;
+  link.download = `${filenameBase}-highlights.json`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
-  setPanelStatus("已下載純文字");
+  setPanelStatus("已下載 JSON");
+};
+
+const parseImportedHighlightsPayload = (rawText) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (_error) {
+    throw new Error("JSON 格式不正確");
+  }
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && Array.isArray(parsed.entries)) return parsed.entries;
+  if (parsed && typeof parsed === "object") return [parsed];
+  return [];
+};
+
+const normalizeImportedHighlightEntry = (entry, index) => {
+  if (!entry || typeof entry !== "object") return null;
+  const url =
+    typeof entry.url === "string"
+      ? entry.url
+      : typeof entry.pageUrl === "string"
+      ? entry.pageUrl
+      : null;
+  if (!url) return null;
+  const range = entry.range;
+  if (
+    !range ||
+    typeof range.startXPath !== "string" ||
+    typeof range.endXPath !== "string"
+  ) {
+    return null;
+  }
+  const color = toHexColor(entry.color || DEFAULT_COLOR);
+  const normalized = {
+    id: `hk-import-${Date.now()}-${Math.floor(
+      Math.random() * 100000
+    )}-${index}`,
+    color,
+    text: typeof entry.text === "string" ? entry.text : range.text ?? "",
+    note: typeof entry.note === "string" ? entry.note : "",
+    range: {
+      startXPath: range.startXPath,
+      startOffset: Number(range.startOffset) || 0,
+      endXPath: range.endXPath,
+      endOffset: Number(range.endOffset) || 0,
+      text: range.text ?? entry.text ?? "",
+    },
+    url,
+    createdAt:
+      typeof entry.createdAt === "number" && Number.isFinite(entry.createdAt)
+        ? entry.createdAt
+        : Date.now(),
+    tags: Array.isArray(entry.tags)
+      ? entry.tags.map((tag) => String(tag).trim()).filter(Boolean)
+      : parseTags(entry.tags ?? ""),
+    title:
+      typeof entry.title === "string" && entry.title.trim()
+        ? entry.title.trim()
+        : undefined,
+  };
+  return normalized;
+};
+
+const importHighlightsFromEntries = async (rawEntries) => {
+  if (!storage) throw new Error("無法存取瀏覽器儲存空間");
+  const normalized = rawEntries
+    .map((entry, index) => normalizeImportedHighlightEntry(entry, index))
+    .filter(Boolean);
+  if (!normalized.length) {
+    throw new Error("沒有可匯入的標註");
+  }
+  const grouped = new Map();
+  normalized.forEach((entry) => {
+    if (!grouped.has(entry.url)) {
+      grouped.set(entry.url, []);
+    }
+    grouped.get(entry.url).push(entry);
+  });
+  const urls = Array.from(grouped.keys());
+  const existing = await storage.get(urls);
+  const updates = {};
+  grouped.forEach((list, url) => {
+    const current = Array.isArray(existing[url]) ? existing[url] : [];
+    updates[url] = [
+      ...current,
+      ...list.map(({ title, ...rest }) => rest),
+    ];
+  });
+  if (Object.keys(updates).length) {
+    await storage.set(updates);
+  }
+  await Promise.all(
+    normalized
+      .filter((entry) => entry.title)
+      .map((entry) => ensurePageMetaTitle(entry.url, entry.title))
+  );
+  const newColors = Array.from(
+    new Set(
+      normalized
+        .map((entry) => entry.color)
+        .filter((color) => !colorPalette.includes(color))
+    )
+  );
+  if (newColors.length) {
+    await persistColorPalette([...colorPalette, ...newColors]);
+  }
+  return normalized.length;
+};
+
+const handleImportFileChange = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const rawEntries = parseImportedHighlightsPayload(text);
+    if (!rawEntries.length) {
+      throw new Error("檔案中沒有標註資料");
+    }
+    const importedCount = await importHighlightsFromEntries(rawEntries);
+    setPanelStatus(`已匯入 ${importedCount} 則標註`);
+    await refreshHighlightPanelData();
+    await renderHighlightPanel();
+    attemptRestoreHighlights();
+  } catch (error) {
+    console.debug("匯入標註失敗", error);
+    setPanelStatus(error.message || "匯入失敗", true);
+  } finally {
+    event.target.value = "";
+  }
 };
 
 const renderPageTagEditor = async () => {
@@ -1391,9 +1567,8 @@ const ensureHighlightPanel = () => {
   leftBtn.textContent = "左側";
   leftBtn.addEventListener("click", () => setHighlightPanelSide("left"));
 
-  sideGroup.appendChild(rightBtn);
-  sideGroup.appendChild(rightBtn);
   sideGroup.appendChild(leftBtn);
+  sideGroup.appendChild(rightBtn);
 
   controls.appendChild(selectLabel);
   controls.appendChild(searchWrapper);
@@ -1427,8 +1602,13 @@ const ensureHighlightPanel = () => {
   downloadBtn.className = "hk-panel-export-btn";
   downloadBtn.textContent = "下載 JSON";
   downloadBtn.addEventListener("click", () => exportHighlights("download"));
+  const importBtn = document.createElement("button");
+  importBtn.type = "button";
+  importBtn.className = "hk-panel-export-btn";
+  importBtn.textContent = "匯入 JSON";
   exportActions.appendChild(copyBtn);
   exportActions.appendChild(downloadBtn);
+  exportActions.appendChild(importBtn);
   pageTagSection.appendChild(exportActions);
 
   const exportStatus = document.createElement("div");
@@ -1436,6 +1616,17 @@ const ensureHighlightPanel = () => {
   exportStatus.setAttribute("role", "status");
   exportStatus.setAttribute("aria-live", "polite");
   pageTagSection.appendChild(exportStatus);
+
+  const importInput = document.createElement("input");
+  importInput.type = "file";
+  importInput.accept = "application/json";
+  importInput.className = "hk-panel-import-input";
+  importInput.addEventListener("change", handleImportFileChange);
+  importBtn.addEventListener("click", () => {
+    importInput.value = "";
+    importInput.click();
+  });
+  pageTagSection.appendChild(importInput);
 
   const tagInputRow = document.createElement("div");
   tagInputRow.className = "hk-panel-tag-input-row";
