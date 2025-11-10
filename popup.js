@@ -1,11 +1,8 @@
 const colorInput = document.getElementById("color");
 const addColorBtn = document.getElementById("addColorBtn");
 const paletteListEl = document.getElementById("paletteList");
-const panelSideButtons = [
-  ...document.querySelectorAll(".panel-side-btn[data-side]"),
-];
 const openPanelBtn = document.getElementById("openPanelBtn");
-const openAiPanelBtn = document.getElementById("openAiPanelBtn");
+const openManagerBtn = document.getElementById("openManagerBtn");
 const statusEl = document.querySelector(".status");
 
 const DEFAULT_COLOR = "#ffeb3b";
@@ -21,6 +18,7 @@ const DEFAULT_PALETTE = [
 let palette = [...DEFAULT_PALETTE];
 let isInitializing = true;
 let panelSide = "right";
+const RECEIVER_MISSING_ERROR = "Receiving end does not exist.";
 
 const normalizeColor = (value) => {
   if (typeof value !== "string") return DEFAULT_COLOR;
@@ -60,6 +58,40 @@ const normalizePalette = (input) => {
 const setStatus = (message, isError = false) => {
   statusEl.textContent = message;
   statusEl.style.color = isError ? "#d93025" : "#1a73e8";
+};
+
+const injectContentAssets = async (tabId) => {
+  try {
+    await chrome.scripting?.insertCSS({
+      target: { tabId },
+      files: ["contentStyles.css"],
+    });
+  } catch (error) {
+    console.debug("注入面板樣式失敗", error);
+  }
+  try {
+    await chrome.scripting?.executeScript({
+      target: { tabId },
+      files: ["contentScript.js"],
+    });
+  } catch (error) {
+    console.debug("注入內容腳本失敗", error);
+    throw error;
+  }
+};
+
+const sendMessageToTab = async (tabId, payload) => {
+  try {
+    return await chrome.tabs.sendMessage(tabId, payload);
+  } catch (error) {
+    const message =
+      chrome.runtime.lastError?.message || error?.message || "";
+    if (message.includes(RECEIVER_MISSING_ERROR)) {
+      await injectContentAssets(tabId);
+      return chrome.tabs.sendMessage(tabId, payload);
+    }
+    throw new Error(message || "無法傳送訊息");
+  }
 };
 
 const persistColor = async (color) => {
@@ -182,12 +214,6 @@ const handleAddColor = async () => {
   setStatus(`已新增顏色 ${color}`);
 };
 
-const updatePanelSideButtons = () => {
-  panelSideButtons.forEach((btn) => {
-    btn.classList.toggle("is-active", btn.dataset.side === panelSide);
-  });
-};
-
 const loadInitialState = async () => {
   try {
     const stored = await chrome.storage?.local.get([
@@ -206,14 +232,12 @@ const loadInitialState = async () => {
       stored?.hkPanelSide === "left" || stored?.hkPanelSide === "right"
         ? stored.hkPanelSide
         : "right";
-    updatePanelSideButtons();
   } catch (error) {
     console.debug("載入初始設定失敗", error);
     palette = [...DEFAULT_PALETTE];
     renderPalette();
     colorInput.value = DEFAULT_COLOR;
     panelSide = "right";
-    updatePanelSideButtons();
   } finally {
     isInitializing = false;
   }
@@ -226,31 +250,6 @@ colorInput.addEventListener("input", (event) => {
 
 addColorBtn.addEventListener("click", handleAddColor);
 
-panelSideButtons.forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const desired = btn.dataset.side === "left" ? "left" : "right";
-    if (panelSide === desired) return;
-    panelSide = desired;
-    updatePanelSideButtons();
-    try {
-      await chrome.storage?.local.set({ hkPanelSide: panelSide });
-    } catch (error) {
-      console.debug("儲存面板位置失敗", error);
-    }
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      try {
-        await chrome.tabs.sendMessage(tab.id, {
-          type: "SET_PANEL_SIDE",
-          side: panelSide,
-        });
-      } catch (_error) {
-        // 可能尚未載入內容腳本，忽略即可
-      }
-    }
-  });
-});
-
 openPanelBtn.addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
@@ -258,7 +257,7 @@ openPanelBtn.addEventListener("click", async () => {
     return;
   }
   try {
-    const response = await chrome.tabs.sendMessage(tab.id, {
+    const response = await sendMessageToTab(tab.id, {
       type: "OPEN_PAGE_PANEL",
       side: panelSide,
     });
@@ -267,37 +266,13 @@ openPanelBtn.addEventListener("click", async () => {
     }
     setStatus("已在頁面顯示面板");
   } catch (error) {
-    const fallbackMessage =
-      chrome.runtime.lastError?.message ||
-      error?.message ||
-      "無法開啟頁面面板。";
-    setStatus(fallbackMessage, true);
+    setStatus(error?.message || "無法開啟頁面面板。", true);
   }
 });
 
-openAiPanelBtn?.addEventListener("click", async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) {
-    setStatus("找不到目前的分頁，無法開啟 AI 面板。", true);
-    return;
-  }
-  try {
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      type: "OPEN_PAGE_PANEL",
-      side: panelSide,
-      view: "ai-note",
-    });
-    if (!response?.success) {
-      throw new Error(response?.error ?? "無法開啟 AI 面板");
-    }
-    setStatus("已開啟 AI 筆記面板");
-  } catch (error) {
-    const fallbackMessage =
-      chrome.runtime.lastError?.message ||
-      error?.message ||
-      "無法開啟 AI 筆記面板。";
-    setStatus(fallbackMessage, true);
-  }
+openManagerBtn?.addEventListener("click", () => {
+  const url = chrome.runtime.getURL("manager.html");
+  chrome.tabs.create({ url });
 });
 
 chrome.storage?.onChanged.addListener((changes, areaName) => {
@@ -314,7 +289,6 @@ chrome.storage?.onChanged.addListener((changes, areaName) => {
   if (changes.hkPanelSide) {
     panelSide =
       changes.hkPanelSide.newValue === "left" ? "left" : "right";
-    updatePanelSideButtons();
   }
 });
 

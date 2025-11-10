@@ -39,25 +39,35 @@ let activeHighlight = null;
 let activeHighlightId = null;
 let highlightMenuStatusTimer = null;
 const HIGHLIGHT_PANEL_ID = "hk-page-panel";
+const HIGHLIGHT_PANEL_POSITION_KEY = "hkPanelPosition";
+const HIGHLIGHT_PANEL_FONT_SCALE_KEY = "hkPanelFontScale";
+const PANEL_FONT_SCALE_MIN = 0.85;
+const PANEL_FONT_SCALE_MAX = 1.35;
+const PANEL_FONT_SCALE_STEP = 0.1;
+const PANEL_DRAG_MARGIN = 12;
 let highlightPanel = null;
 let highlightPanelEls = null;
 let highlightPanelVisible = false;
 let highlightPanelPreferredSide = "right";
-const PANEL_ALL_KEY = "__all__";
 const highlightPanelState = {
   side: "right",
   activeKey: pageKey,
   searchTerm: "",
   activeTag: null,
-  activeTab: "highlights",
+  activeTab: "page",
+  searchPageFilter: null,
   allPages: {},
   pageMeta: {},
   allTags: [],
   currentEntries: [],
   notesByPage: {},
+  position: null,
+  fontScale: 1,
 };
 let panelStatusTimer = null;
+let archiveStatusTimer = null;
 let panelPreferencesPromise;
+let panelDragState = null;
 let aiSettings = {
   provider: "openai",
   openaiKey: "",
@@ -627,28 +637,41 @@ const getPageDisplayName = (url) => {
 
 const applyHighlightPanelSideClasses = () => {
   if (!highlightPanel) return;
-  highlightPanel.classList.toggle(
-    "hk-panel-left",
-    highlightPanelState.side === "left"
-  );
-  highlightPanel.classList.toggle(
-    "hk-panel-right",
-    highlightPanelState.side !== "left"
-  );
-  if (highlightPanelEls?.sideButtons) {
-    highlightPanelEls.sideButtons.forEach((btn) => {
-      btn.classList.toggle(
-        "is-active",
-        btn.dataset.side === highlightPanelState.side
-      );
-    });
+  const panel = highlightPanel;
+  const hasCustomPosition = isValidPanelPosition(highlightPanelState.position);
+  if (hasCustomPosition) {
+    const clamped = clampHighlightPanelPosition(highlightPanelState.position);
+    if (clamped) {
+      highlightPanelState.position = clamped;
+      panel.classList.add("hk-panel-floating");
+      panel.classList.remove("hk-panel-left", "hk-panel-right");
+      panel.style.left = `${clamped.x}px`;
+      panel.style.top = `${clamped.y}px`;
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+    }
+  } else {
+    panel.classList.remove("hk-panel-floating");
+    panel.classList.toggle("hk-panel-left", highlightPanelState.side === "left");
+    panel.classList.toggle(
+      "hk-panel-right",
+      highlightPanelState.side !== "left"
+    );
+    panel.style.removeProperty("left");
+    panel.style.removeProperty("top");
+    panel.style.removeProperty("right");
+    panel.style.removeProperty("bottom");
   }
+  updateFontControlAvailability();
 };
 
 const setHighlightPanelSide = async (side, persist = true) => {
   const resolved = side === "left" ? "left" : "right";
   highlightPanelState.side = resolved;
   highlightPanelPreferredSide = resolved;
+  if (persist) {
+    await clearHighlightPanelPosition(true);
+  }
   applyHighlightPanelSideClasses();
   if (persist && storage) {
     try {
@@ -660,100 +683,266 @@ const setHighlightPanelSide = async (side, persist = true) => {
 };
 
 const applyHighlightPanelTabState = () => {
-  const activeTab =
-    highlightPanelState.activeTab === "ai-note" ? "ai-note" : "highlights";
-  highlightPanelState.activeTab = activeTab;
+  const allowedTabs = ["page", "archive", "search", "ai-note"];
+  const resolved = allowedTabs.includes(highlightPanelState.activeTab)
+    ? highlightPanelState.activeTab
+    : "page";
+  highlightPanelState.activeTab = resolved;
   const { tabButtons, tabPanels } = highlightPanelEls ?? {};
-  const highlightBtn = tabButtons?.highlights;
-  const aiBtn = tabButtons?.ai;
-  const highlightPanelContent = tabPanels?.highlights;
-  const aiPanelContent = tabPanels?.ai;
+  const buttonMap = {
+    page: tabButtons?.page,
+    archive: tabButtons?.archive,
+    search: tabButtons?.search,
+    "ai-note": tabButtons?.ai,
+  };
+  const panelMap = {
+    page: tabPanels?.page,
+    archive: tabPanels?.archive,
+    search: tabPanels?.search,
+    "ai-note": tabPanels?.ai,
+  };
 
-  if (highlightBtn) {
-    const isActive = activeTab === "highlights";
-    highlightBtn.classList.toggle("is-active", isActive);
-    highlightBtn.setAttribute("aria-selected", isActive ? "true" : "false");
-    highlightBtn.setAttribute("tabindex", isActive ? "0" : "-1");
+  allowedTabs.forEach((tab) => {
+    const isActive = resolved === tab;
+    const btn = buttonMap[tab];
+    if (btn) {
+      btn.classList.toggle("is-active", isActive);
+      btn.setAttribute("aria-selected", isActive ? "true" : "false");
+      btn.setAttribute("tabindex", isActive ? "0" : "-1");
+    }
+    const panel = panelMap[tab];
+    if (panel) {
+      panel.classList.toggle("is-active", isActive);
+      panel.hidden = !isActive;
+      panel.setAttribute("aria-hidden", isActive ? "false" : "true");
+    }
+  });
+};
+
+const isValidPanelPosition = (value) =>
+  !!value &&
+  typeof value.x === "number" &&
+  typeof value.y === "number" &&
+  Number.isFinite(value.x) &&
+  Number.isFinite(value.y);
+
+const clampHighlightPanelPosition = (position) => {
+  if (!position) return null;
+  const margin = PANEL_DRAG_MARGIN;
+  const panelRect = highlightPanel?.getBoundingClientRect();
+  const width = panelRect?.width || 320;
+  const height = panelRect?.height || 460;
+  const viewportWidth =
+    window.innerWidth || document.documentElement?.clientWidth || width;
+  const viewportHeight =
+    window.innerHeight || document.documentElement?.clientHeight || height;
+  const maxLeft = Math.max(margin, viewportWidth - width - margin);
+  const maxTop = Math.max(margin, viewportHeight - height - margin);
+  const sanitizedX = Number.isFinite(position.x) ? position.x : margin;
+  const sanitizedY = Number.isFinite(position.y) ? position.y : margin;
+  return {
+    x: Math.min(Math.max(margin, sanitizedX), maxLeft),
+    y: Math.min(Math.max(margin, sanitizedY), maxTop),
+  };
+};
+
+const updateFontControlAvailability = () => {
+  const controls = highlightPanelEls?.fontControls;
+  if (!controls) return;
+  const scale = highlightPanelState.fontScale ?? 1;
+  const minLocked = scale <= PANEL_FONT_SCALE_MIN + 0.005;
+  const maxLocked = scale >= PANEL_FONT_SCALE_MAX - 0.005;
+  if (controls.decrease) {
+    controls.decrease.disabled = minLocked;
   }
-
-  if (aiBtn) {
-    const isActive = activeTab === "ai-note";
-    aiBtn.classList.toggle("is-active", isActive);
-    aiBtn.setAttribute("aria-selected", isActive ? "true" : "false");
-    aiBtn.setAttribute("tabindex", isActive ? "0" : "-1");
+  if (controls.increase) {
+    controls.increase.disabled = maxLocked;
   }
+};
 
-  if (highlightPanelContent) {
-    const showHighlights = activeTab === "highlights";
-    highlightPanelContent.classList.toggle("is-active", showHighlights);
-    highlightPanelContent.hidden = !showHighlights;
-    highlightPanelContent.setAttribute(
-      "aria-hidden",
-      showHighlights ? "false" : "true"
-    );
+const applyHighlightPanelFontScale = () => {
+  if (!highlightPanel) return;
+  const scale = highlightPanelState.fontScale ?? 1;
+  highlightPanel.style.setProperty(
+    "--hk-panel-font-scale",
+    scale.toString()
+  );
+  updateFontControlAvailability();
+};
+
+const clampPanelFontScale = (value) =>
+  Math.min(
+    Math.max(value, PANEL_FONT_SCALE_MIN),
+    PANEL_FONT_SCALE_MAX
+  );
+
+const setHighlightPanelFontScale = async (scale, persist = true) => {
+  const numeric = Number(scale);
+  const clamped = clampPanelFontScale(Number.isFinite(numeric) ? numeric : 1);
+  highlightPanelState.fontScale = Number(clamped.toFixed(2));
+  applyHighlightPanelFontScale();
+  if (persist && storage) {
+    try {
+      await storage.set({
+        [HIGHLIGHT_PANEL_FONT_SCALE_KEY]: highlightPanelState.fontScale,
+      });
+    } catch (error) {
+      console.debug("儲存面板字級失敗", error);
+    }
   }
+};
 
-  if (aiPanelContent) {
-    const showAi = activeTab === "ai-note";
-    aiPanelContent.classList.toggle("is-active", showAi);
-    aiPanelContent.hidden = !showAi;
-    aiPanelContent.setAttribute("aria-hidden", showAi ? "false" : "true");
+const adjustHighlightPanelFontScale = (delta) => {
+  const current = highlightPanelState.fontScale ?? 1;
+  setHighlightPanelFontScale(current + delta);
+};
+
+const setHighlightPanelPosition = async (x, y, persist = true) => {
+  const clamped = clampHighlightPanelPosition({
+    x: Number(x),
+    y: Number(y),
+  });
+  if (!clamped) return;
+  highlightPanelState.position = clamped;
+  applyHighlightPanelSideClasses();
+  if (persist && storage) {
+    try {
+      await storage.set({
+        [HIGHLIGHT_PANEL_POSITION_KEY]: clamped,
+      });
+    } catch (error) {
+      console.debug("儲存面板座標失敗", error);
+    }
+  }
+};
+
+const clearHighlightPanelPosition = async (persist = true) => {
+  const hadPosition = Boolean(highlightPanelState.position);
+  highlightPanelState.position = null;
+  applyHighlightPanelSideClasses();
+  if (persist && storage) {
+    try {
+      if (typeof storage.remove === "function") {
+        await storage.remove(HIGHLIGHT_PANEL_POSITION_KEY);
+      } else {
+        await storage.set({ [HIGHLIGHT_PANEL_POSITION_KEY]: null });
+      }
+    } catch (error) {
+      console.debug("清除面板座標失敗", error);
+    }
+  }
+  return hadPosition;
+};
+
+const isPanelDragDisallowedTarget = (target) => {
+  if (!(target instanceof Element)) return false;
+  return Boolean(
+    target.closest(
+      "button, input, textarea, select, a, label, [role=\"button\"], [contenteditable=\"true\"]"
+    )
+  );
+};
+
+const handlePanelPointerDown = (event) => {
+  if (!highlightPanel || !highlightPanelEls?.dragHandle) return;
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  if (isPanelDragDisallowedTarget(event.target)) return;
+  event.preventDefault();
+  const rect = highlightPanel.getBoundingClientRect();
+  const initialPosition =
+    clampHighlightPanelPosition({ x: rect.left, y: rect.top }) || {
+      x: rect.left,
+      y: rect.top,
+    };
+  const existingPosition = isValidPanelPosition(highlightPanelState.position)
+    ? highlightPanelState.position
+    : null;
+  panelDragState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    originX: existingPosition?.x ?? initialPosition.x,
+    originY: existingPosition?.y ?? initialPosition.y,
+    initialized: Boolean(existingPosition),
+  };
+  highlightPanel.classList.add("is-dragging");
+  if (panelDragState.initialized) {
+    applyHighlightPanelSideClasses();
+  }
+  event.currentTarget?.setPointerCapture?.(event.pointerId);
+};
+
+const handlePanelPointerMove = (event) => {
+  if (!panelDragState || event.pointerId !== panelDragState.pointerId) return;
+  event.preventDefault();
+  if (!panelDragState.initialized) {
+    const starting = clampHighlightPanelPosition({
+      x: panelDragState.originX,
+      y: panelDragState.originY,
+    });
+    if (starting) {
+      highlightPanelState.position = starting;
+      panelDragState.originX = starting.x;
+      panelDragState.originY = starting.y;
+      panelDragState.initialized = true;
+      applyHighlightPanelSideClasses();
+    }
+  }
+  if (!panelDragState.initialized) return;
+  const deltaX = event.clientX - panelDragState.startX;
+  const deltaY = event.clientY - panelDragState.startY;
+  const nextX = panelDragState.originX + deltaX;
+  const nextY = panelDragState.originY + deltaY;
+  setHighlightPanelPosition(nextX, nextY, false);
+};
+
+const handlePanelPointerEnd = (event) => {
+  if (!panelDragState || event.pointerId !== panelDragState.pointerId) return;
+  event.preventDefault();
+  event.currentTarget?.releasePointerCapture?.(event.pointerId);
+  highlightPanel?.classList.remove("is-dragging");
+  const hasPosition = isValidPanelPosition(highlightPanelState.position);
+  const finalPos = hasPosition
+    ? highlightPanelState.position
+    : panelDragState.initialized
+      ? {
+          x: panelDragState.originX,
+          y: panelDragState.originY,
+        }
+      : null;
+  panelDragState = null;
+  if (finalPos) {
+    setHighlightPanelPosition(finalPos.x, finalPos.y, true);
   }
 };
 
 const loadPanelPreferences = async () => {
   if (!storage) return;
   try {
-    const stored = await storage.get("hkPanelSide");
+    const stored = await storage.get([
+      "hkPanelSide",
+      HIGHLIGHT_PANEL_POSITION_KEY,
+      HIGHLIGHT_PANEL_FONT_SCALE_KEY,
+    ]);
     const side =
       stored?.hkPanelSide === "left" || stored?.hkPanelSide === "right"
         ? stored.hkPanelSide
         : "right";
     highlightPanelState.side = side;
     highlightPanelPreferredSide = side;
+    const savedPosition = stored?.[HIGHLIGHT_PANEL_POSITION_KEY];
+    if (isValidPanelPosition(savedPosition)) {
+      highlightPanelState.position = savedPosition;
+    }
+    const savedScale = stored?.[HIGHLIGHT_PANEL_FONT_SCALE_KEY];
+    if (typeof savedScale === "number" && Number.isFinite(savedScale)) {
+      highlightPanelState.fontScale = clampPanelFontScale(savedScale);
+    }
     applyHighlightPanelSideClasses();
+    applyHighlightPanelFontScale();
   } catch (error) {
     console.debug("讀取面板設定失敗", error);
   }
-};
-
-const updateHighlightPanelSelectOptions = () => {
-  if (!highlightPanelEls?.pageSelect) return;
-  const select = highlightPanelEls.pageSelect;
-  select.innerHTML = "";
-
-  const allOption = document.createElement("option");
-  allOption.value = PANEL_ALL_KEY;
-  allOption.textContent = "全部頁面";
-  select.appendChild(allOption);
-
-  const keys = Object.keys(highlightPanelState.allPages).sort((a, b) =>
-    getPageDisplayName(a).localeCompare(getPageDisplayName(b))
-  );
-
-  if (!keys.includes(pageKey)) {
-    keys.unshift(pageKey);
-  }
-
-  keys.forEach((key) => {
-    const option = document.createElement("option");
-    option.value = key;
-    const metaTitle = highlightPanelState.pageMeta[key]?.title;
-    const displayName = getPageDisplayName(key);
-    const labelBase = metaTitle ? `${metaTitle} — ${displayName}` : displayName;
-    option.textContent =
-      key === pageKey ? `${labelBase}（本頁）` : labelBase;
-    select.appendChild(option);
-  });
-
-  const activeValue =
-    highlightPanelState.activeKey === PANEL_ALL_KEY
-      ? PANEL_ALL_KEY
-      : highlightPanelState.activeKey;
-  select.value =
-    Array.from(select.options).some((opt) => opt.value === activeValue)
-      ? activeValue
-      : pageKey;
 };
 
 const updateHighlightPanelTagFilters = () => {
@@ -795,6 +984,35 @@ const updateHighlightPanelTagFilters = () => {
     });
     container.appendChild(chip);
   });
+};
+
+const updateSearchPageFilterOptions = () => {
+  const select = highlightPanelEls?.searchPageSelect;
+  if (!select) return;
+  const options = [];
+  const addOption = (value, label) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    options.push(option);
+  };
+  addOption("__all__", "全部頁面");
+  const keys = Object.keys(highlightPanelState.allPages || {}).sort((a, b) =>
+    getPageDisplayName(a).localeCompare(getPageDisplayName(b))
+  );
+  keys.forEach((key) => {
+    const title = highlightPanelState.pageMeta?.[key]?.title?.trim();
+    addOption(key, title || getPageDisplayName(key));
+  });
+  select.innerHTML = "";
+  options.forEach((option) => select.appendChild(option));
+  const activeValue =
+    highlightPanelState.searchPageFilter && keys.includes(highlightPanelState.searchPageFilter)
+      ? highlightPanelState.searchPageFilter
+      : "__all__";
+  select.value = activeValue;
+  highlightPanelState.searchPageFilter =
+    activeValue === "__all__" ? null : activeValue;
 };
 
 const updateTagSuggestionDropdown = () => {
@@ -845,6 +1063,28 @@ const setPanelStatus = (message, isError = false) => {
         highlightPanelEls.exportStatus.classList.remove("is-error");
       }
     }, 2400);
+  }
+  if (highlightPanelState.activeTab === "archive") {
+    setArchiveStatus(message, isError);
+  }
+};
+
+const setArchiveStatus = (message, isError = false) => {
+  if (!highlightPanelEls?.archiveStatus) return;
+  const el = highlightPanelEls.archiveStatus;
+  if (archiveStatusTimer) {
+    window.clearTimeout(archiveStatusTimer);
+    archiveStatusTimer = null;
+  }
+  el.textContent = message || "";
+  el.classList.toggle("is-error", isError);
+  if (message) {
+    archiveStatusTimer = window.setTimeout(() => {
+      if (highlightPanelEls?.archiveStatus) {
+        highlightPanelEls.archiveStatus.textContent = "";
+        highlightPanelEls.archiveStatus.classList.remove("is-error");
+      }
+    }, 2600);
   }
 };
 
@@ -1173,28 +1413,18 @@ const renderPageTagEditor = async () => {
   } = highlightPanelEls;
   updateTagSuggestionDropdown();
 
-  const activeKey = highlightPanelState.activeKey;
+  highlightPanelState.activeKey = pageKey;
+  const activeKey = pageKey;
   const meta = highlightPanelState.pageMeta || {};
   const currentPageTags = Array.isArray(meta[activeKey]?.tags)
     ? meta[activeKey].tags
     : [];
 
-  const isAllView = activeKey === PANEL_ALL_KEY;
-  tagInput.disabled = isAllView;
-  addTagBtn.disabled = isAllView;
-  pageTagHint.textContent = isAllView
-    ? "切換到特定頁面後可編輯標籤"
-    : "輸入後按 Enter 或按新增；點擊標籤可移除";
+  tagInput.disabled = false;
+  addTagBtn.disabled = false;
+  pageTagHint.textContent = "輸入後按 Enter 或按新增；點擊標籤可移除";
 
   pageTagList.innerHTML = "";
-  if (isAllView) {
-    pageTagList.classList.add("is-disabled");
-    tagInput.value = "";
-    suggestionDropdown.classList.remove("is-visible");
-    addTagBtn.onclick = null;
-    tagInput.onkeydown = null;
-    return;
-  }
   pageTagList.classList.remove("is-disabled");
 
   if (!currentPageTags.length) {
@@ -1346,12 +1576,7 @@ const refreshHighlightPanelData = async () => {
     ) {
       highlightPanelState.activeTag = null;
     }
-    if (
-      highlightPanelState.activeKey !== PANEL_ALL_KEY &&
-      !pages[highlightPanelState.activeKey]
-    ) {
-      highlightPanelState.activeKey = pageKey;
-    }
+    highlightPanelState.activeKey = pageKey;
   } catch (error) {
     console.debug("讀取所有標註資料失敗", error);
     const fallbackEntries = await getStoredHighlights();
@@ -1397,12 +1622,12 @@ const refreshHighlightPanelData = async () => {
     ) {
       highlightPanelState.activeTag = null;
     }
+    highlightPanelState.activeKey = pageKey;
   }
-  updateHighlightPanelSelectOptions();
   updateHighlightPanelTagFilters();
 };
 
-const collectPanelEntries = () => {
+const collectPanelEntries = (scope = "current", opts = {}) => {
   const allPages = highlightPanelState.allPages;
   if (!allPages) return [];
   const pageMeta = highlightPanelState.pageMeta || {};
@@ -1413,16 +1638,23 @@ const collectPanelEntries = () => {
     }
     return [];
   };
-  if (highlightPanelState.activeKey === PANEL_ALL_KEY) {
-    return Object.entries(allPages).flatMap(([url, items]) =>
-      items.map((entry) => ({
-        ...entry,
-        pageUrl: url,
-        pageTags: fetchPageTags(url),
-      }))
-    );
+  const includeAll =
+    scope === "all" || (scope === "search-filter" && !opts.pageFilter);
+  if (includeAll) {
+    return Object.entries(allPages)
+      .filter(([url]) => (opts.pageFilter ? url === opts.pageFilter : true))
+      .flatMap(([url, items]) =>
+        items.map((entry) => ({
+          ...entry,
+          pageUrl: url,
+          pageTags: fetchPageTags(url),
+        }))
+      );
   }
-  const targetKey = highlightPanelState.activeKey || pageKey;
+  const targetKey =
+    scope === "current"
+      ? pageKey
+      : (typeof scope === "string" && isValidPageKey(scope) && scope) || pageKey;
   const entries = allPages[targetKey] ?? [];
   const pageTags = fetchPageTags(targetKey);
   return entries.map((entry) => ({
@@ -1430,6 +1662,142 @@ const collectPanelEntries = () => {
     pageUrl: targetKey,
     pageTags,
   }));
+};
+
+const createPanelEntryElement = (entry, options = {}) => {
+  const item = document.createElement("article");
+  item.className = "hk-panel-item";
+  item.setAttribute("data-highlight-id", entry.id);
+
+  const meta = document.createElement("div");
+  meta.className = "hk-panel-meta";
+
+  const colorDot = document.createElement("span");
+  colorDot.className = "hk-panel-color";
+  colorDot.style.backgroundColor = entry.color ?? DEFAULT_COLOR;
+
+  meta.appendChild(colorDot);
+
+  if (options.showTitle) {
+    const title = document.createElement("button");
+    title.type = "button";
+    title.className = "hk-panel-entry-title";
+    const pageTitle =
+      highlightPanelState.pageMeta?.[entry.pageUrl]?.title?.trim() || "";
+    title.textContent = pageTitle || getPageDisplayName(entry.pageUrl);
+    title.addEventListener("click", () => {
+      window.open(entry.pageUrl, "_blank", "noopener");
+    });
+    meta.appendChild(title);
+  } else {
+    const pageLabel = document.createElement("span");
+    pageLabel.className = "hk-panel-page";
+    pageLabel.textContent =
+      entry.pageUrl === pageKey ? "本頁" : getPageDisplayName(entry.pageUrl);
+    meta.appendChild(pageLabel);
+  }
+
+  if (options.showUrl) {
+    const permalink = document.createElement("a");
+    permalink.className = "hk-panel-entry-url";
+    permalink.href = entry.pageUrl;
+    permalink.target = "_blank";
+    permalink.rel = "noopener";
+    permalink.textContent = entry.pageUrl.replace(/^https?:\/\//, "");
+    meta.appendChild(permalink);
+  }
+
+  const timestamp = document.createElement("span");
+  timestamp.className = "hk-panel-time";
+  timestamp.textContent = formatTimestamp(entry.createdAt);
+  meta.appendChild(timestamp);
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "hk-panel-delete-btn";
+  deleteBtn.textContent = "刪除";
+  deleteBtn.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await deleteHighlightFromPanel(entry);
+  });
+  meta.appendChild(deleteBtn);
+
+  const text = document.createElement("p");
+  text.className = "hk-panel-text";
+  text.textContent = truncateText(entry.text) || "(無文字)";
+
+  item.appendChild(meta);
+  item.appendChild(text);
+
+  if (entry.pageTags?.length && !options.hideTags) {
+    const tagsRow = document.createElement("div");
+    tagsRow.className = "hk-panel-tags-row";
+    entry.pageTags.forEach((tag) => {
+      const chip = document.createElement("span");
+      chip.className = "hk-panel-tag-chip";
+      chip.textContent = tag;
+      tagsRow.appendChild(chip);
+    });
+    item.appendChild(tagsRow);
+  }
+
+  if (entry.pageUrl === pageKey) {
+    item.addEventListener("click", () => focusHighlightElement(entry.id));
+  } else {
+    item.classList.add("is-external");
+    item.addEventListener("click", () => {
+      window.open(entry.pageUrl, "_blank", "noopener");
+    });
+  }
+
+  return item;
+};
+
+const renderPageEntries = (entries) => {
+  const list = highlightPanelEls?.pageList;
+  const placeholder = highlightPanelEls?.pagePlaceholder;
+  if (!list || !placeholder) return;
+  highlightPanelState.currentEntries = entries;
+  list.innerHTML = "";
+  if (!entries.length) {
+    placeholder.style.display = "block";
+    updateExportButtonsState();
+    setPanelStatus("");
+    return;
+  }
+  placeholder.style.display = "none";
+  entries.forEach((entry) => {
+    list.appendChild(createPanelEntryElement(entry));
+  });
+  updateExportButtonsState();
+  setPanelStatus("");
+};
+
+const renderSearchEntries = (entries) => {
+  const list = highlightPanelEls?.searchList;
+  const placeholder = highlightPanelEls?.searchPlaceholder;
+  if (!list || !placeholder) return;
+  list.innerHTML = "";
+  const hasFilter =
+    Boolean(highlightPanelState.searchTerm.trim()) ||
+    Boolean(highlightPanelState.activeTag);
+  if (!entries.length) {
+    placeholder.textContent = hasFilter
+      ? "沒有符合搜尋條件的筆記。"
+      : "目前尚未有跨頁標註。";
+    placeholder.style.display = "block";
+    return;
+  }
+  placeholder.style.display = "none";
+  entries.forEach((entry) => {
+    list.appendChild(
+      createPanelEntryElement(entry, {
+        showTitle: true,
+        showUrl: true,
+        hideTags: true,
+      })
+    );
+  });
 };
 
 const focusHighlightElement = (id) => {
@@ -1458,6 +1826,32 @@ const ensureHighlightPanel = () => {
   title.className = "hk-panel-title";
   title.textContent = "此頁標註";
 
+  const fontControls = document.createElement("div");
+  fontControls.className = "hk-panel-font-controls";
+
+  const fontDecreaseBtn = document.createElement("button");
+  fontDecreaseBtn.type = "button";
+  fontDecreaseBtn.className = "hk-panel-font-btn";
+  fontDecreaseBtn.setAttribute("aria-label", "縮小文字");
+  fontDecreaseBtn.textContent = "A-";
+  fontDecreaseBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    adjustHighlightPanelFontScale(-PANEL_FONT_SCALE_STEP);
+  });
+
+  const fontIncreaseBtn = document.createElement("button");
+  fontIncreaseBtn.type = "button";
+  fontIncreaseBtn.className = "hk-panel-font-btn";
+  fontIncreaseBtn.setAttribute("aria-label", "放大文字");
+  fontIncreaseBtn.textContent = "A+";
+  fontIncreaseBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    adjustHighlightPanelFontScale(PANEL_FONT_SCALE_STEP);
+  });
+
+  fontControls.appendChild(fontDecreaseBtn);
+  fontControls.appendChild(fontIncreaseBtn);
+
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "hk-panel-close";
@@ -1466,23 +1860,60 @@ const ensureHighlightPanel = () => {
   closeBtn.addEventListener("click", () => closeHighlightPanel());
 
   header.appendChild(title);
+  header.appendChild(fontControls);
   header.appendChild(closeBtn);
+  header.addEventListener("pointerdown", handlePanelPointerDown);
+  header.addEventListener("pointermove", handlePanelPointerMove);
+  header.addEventListener("pointerup", handlePanelPointerEnd);
+  header.addEventListener("pointercancel", handlePanelPointerEnd);
 
   const tabs = document.createElement("div");
   tabs.className = "hk-panel-tabs";
   tabs.setAttribute("role", "tablist");
   tabs.setAttribute("aria-label", "面板內容切換");
 
-  const highlightsTabBtn = document.createElement("button");
-  highlightsTabBtn.type = "button";
-  highlightsTabBtn.className = "hk-panel-tab-btn";
-  highlightsTabBtn.id = "hk-panel-tab-highlights";
-  highlightsTabBtn.setAttribute("role", "tab");
-  highlightsTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-highlights");
-  highlightsTabBtn.textContent = "標註";
-  highlightsTabBtn.addEventListener("click", () => {
-    if (highlightPanelState.activeTab === "highlights") return;
-    highlightPanelState.activeTab = "highlights";
+  const pageTabBtn = document.createElement("button");
+  pageTabBtn.type = "button";
+  pageTabBtn.className = "hk-panel-tab-btn";
+  pageTabBtn.id = "hk-panel-tab-page";
+  pageTabBtn.setAttribute("role", "tab");
+  pageTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-page");
+  pageTabBtn.textContent = "標註";
+  pageTabBtn.addEventListener("click", () => {
+    if (highlightPanelState.activeTab === "page") return;
+    highlightPanelState.activeTab = "page";
+    applyHighlightPanelTabState();
+    renderHighlightPanel().catch((error) =>
+      console.debug("重新整理標註面板失敗", error)
+    );
+  });
+
+  const archiveTabBtn = document.createElement("button");
+  archiveTabBtn.type = "button";
+  archiveTabBtn.className = "hk-panel-tab-btn";
+  archiveTabBtn.id = "hk-panel-tab-archive";
+  archiveTabBtn.setAttribute("role", "tab");
+  archiveTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-archive");
+  archiveTabBtn.textContent = "存檔";
+  archiveTabBtn.addEventListener("click", () => {
+    if (highlightPanelState.activeTab === "archive") return;
+    highlightPanelState.activeTab = "archive";
+    applyHighlightPanelTabState();
+    renderHighlightPanel().catch((error) =>
+      console.debug("重新整理標註面板失敗", error)
+    );
+  });
+
+  const searchTabBtn = document.createElement("button");
+  searchTabBtn.type = "button";
+  searchTabBtn.className = "hk-panel-tab-btn";
+  searchTabBtn.id = "hk-panel-tab-search";
+  searchTabBtn.setAttribute("role", "tab");
+  searchTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-search");
+  searchTabBtn.textContent = "搜尋";
+  searchTabBtn.addEventListener("click", () => {
+    if (highlightPanelState.activeTab === "search") return;
+    highlightPanelState.activeTab = "search";
     applyHighlightPanelTabState();
     renderHighlightPanel().catch((error) =>
       console.debug("重新整理標註面板失敗", error)
@@ -1505,15 +1936,28 @@ const ensureHighlightPanel = () => {
     );
   });
 
-  tabs.appendChild(highlightsTabBtn);
+  tabs.appendChild(pageTabBtn);
+  tabs.appendChild(archiveTabBtn);
+  tabs.appendChild(searchTabBtn);
   tabs.appendChild(aiTabBtn);
 
-  const highlightsTabPanel = document.createElement("div");
-  highlightsTabPanel.className =
-    "hk-panel-tab-content hk-panel-tab-content-highlights";
-  highlightsTabPanel.id = "hk-panel-tabpanel-highlights";
-  highlightsTabPanel.setAttribute("role", "tabpanel");
-  highlightsTabPanel.setAttribute("aria-labelledby", highlightsTabBtn.id);
+  const pageTabPanel = document.createElement("div");
+  pageTabPanel.className = "hk-panel-tab-content hk-panel-tab-content-page";
+  pageTabPanel.id = "hk-panel-tabpanel-page";
+  pageTabPanel.setAttribute("role", "tabpanel");
+  pageTabPanel.setAttribute("aria-labelledby", pageTabBtn.id);
+
+  const archiveTabPanel = document.createElement("div");
+  archiveTabPanel.className = "hk-panel-tab-content hk-panel-tab-content-archive";
+  archiveTabPanel.id = "hk-panel-tabpanel-archive";
+  archiveTabPanel.setAttribute("role", "tabpanel");
+  archiveTabPanel.setAttribute("aria-labelledby", archiveTabBtn.id);
+
+  const searchTabPanel = document.createElement("div");
+  searchTabPanel.className = "hk-panel-tab-content hk-panel-tab-content-search";
+  searchTabPanel.id = "hk-panel-tabpanel-search";
+  searchTabPanel.setAttribute("role", "tabpanel");
+  searchTabPanel.setAttribute("aria-labelledby", searchTabBtn.id);
 
   const aiTabPanel = document.createElement("div");
   aiTabPanel.className = "hk-panel-tab-content hk-panel-tab-content-ai";
@@ -1521,62 +1965,36 @@ const ensureHighlightPanel = () => {
   aiTabPanel.setAttribute("role", "tabpanel");
   aiTabPanel.setAttribute("aria-labelledby", aiTabBtn.id);
 
-  const controls = document.createElement("div");
-  controls.className = "hk-panel-controls";
-
-  const selectLabel = document.createElement("label");
-  selectLabel.className = "hk-panel-select-label";
-  selectLabel.textContent = "顯示標註來源";
-
-  const pageSelect = document.createElement("select");
-  pageSelect.className = "hk-panel-select";
-  pageSelect.addEventListener("change", (event) => {
-    const value = event.target.value;
-    highlightPanelState.activeKey =
-      value === PANEL_ALL_KEY ? PANEL_ALL_KEY : value;
-    renderHighlightPanel();
-  });
-  selectLabel.appendChild(pageSelect);
+  const searchControls = document.createElement("div");
+  searchControls.className = "hk-panel-controls";
 
   const searchWrapper = document.createElement("label");
   searchWrapper.className = "hk-panel-search";
-  searchWrapper.textContent = "關鍵字搜尋";
+  searchWrapper.textContent = "搜尋筆記";
   const searchInput = document.createElement("input");
   searchInput.type = "search";
   searchInput.className = "hk-panel-search-input";
-  searchInput.placeholder = "輸入文字或標籤";
+  searchInput.placeholder = "輸入關鍵字或標籤";
   searchInput.addEventListener("input", (event) => {
     highlightPanelState.searchTerm = event.target.value ?? "";
     renderHighlightPanel();
   });
   searchWrapper.appendChild(searchInput);
-
-  const sideGroup = document.createElement("div");
-  sideGroup.className = "hk-panel-side-group";
-
-  const rightBtn = document.createElement("button");
-  rightBtn.type = "button";
-  rightBtn.dataset.side = "right";
-  rightBtn.className = "hk-panel-side-btn";
-  rightBtn.textContent = "右側";
-  rightBtn.addEventListener("click", () => setHighlightPanelSide("right"));
-  const leftBtn = document.createElement("button");
-  leftBtn.type = "button";
-  leftBtn.dataset.side = "left";
-  leftBtn.className = "hk-panel-side-btn";
-  leftBtn.textContent = "左側";
-  leftBtn.addEventListener("click", () => setHighlightPanelSide("left"));
-
-  sideGroup.appendChild(leftBtn);
-  sideGroup.appendChild(rightBtn);
-
-  controls.appendChild(selectLabel);
-  controls.appendChild(searchWrapper);
-  controls.appendChild(sideGroup);
+  searchControls.appendChild(searchWrapper);
 
   const tagsContainer = document.createElement("div");
   tagsContainer.className = "hk-panel-tags";
-  controls.appendChild(tagsContainer);
+  searchControls.appendChild(tagsContainer);
+
+  const pageFilterSelect = document.createElement("select");
+  pageFilterSelect.className = "hk-panel-search-select";
+  pageFilterSelect.addEventListener("change", (event) => {
+    const value = event.target.value;
+    highlightPanelState.searchPageFilter =
+      value === "__all__" ? null : value || null;
+    renderHighlightPanel();
+  });
+  searchControls.appendChild(pageFilterSelect);
 
   const pageTagSection = document.createElement("div");
   pageTagSection.className = "hk-panel-page-tags";
@@ -1602,13 +2020,12 @@ const ensureHighlightPanel = () => {
   downloadBtn.className = "hk-panel-export-btn";
   downloadBtn.textContent = "下載 JSON";
   downloadBtn.addEventListener("click", () => exportHighlights("download"));
-  const importBtn = document.createElement("button");
-  importBtn.type = "button";
-  importBtn.className = "hk-panel-export-btn";
-  importBtn.textContent = "匯入 JSON";
+  const importLabel = document.createElement("label");
+  importLabel.className = "hk-panel-export-btn hk-panel-import-label";
+  importLabel.textContent = "匯入 JSON";
   exportActions.appendChild(copyBtn);
   exportActions.appendChild(downloadBtn);
-  exportActions.appendChild(importBtn);
+  exportActions.appendChild(importLabel);
   pageTagSection.appendChild(exportActions);
 
   const exportStatus = document.createElement("div");
@@ -1621,12 +2038,11 @@ const ensureHighlightPanel = () => {
   importInput.type = "file";
   importInput.accept = "application/json";
   importInput.className = "hk-panel-import-input";
-  importInput.addEventListener("change", handleImportFileChange);
-  importBtn.addEventListener("click", () => {
-    importInput.value = "";
-    importInput.click();
+  importInput.addEventListener("click", (event) => {
+    event.target.value = "";
   });
-  pageTagSection.appendChild(importInput);
+  importInput.addEventListener("change", handleImportFileChange);
+  importLabel.appendChild(importInput);
 
   const tagInputRow = document.createElement("div");
   tagInputRow.className = "hk-panel-tag-input-row";
@@ -1658,6 +2074,75 @@ const ensureHighlightPanel = () => {
   const pageTagList = document.createElement("div");
   pageTagList.className = "hk-panel-page-tag-list";
   pageTagSection.appendChild(pageTagList);
+
+  const pageArchiveSection = document.createElement("div");
+  pageArchiveSection.className = "hk-panel-archive";
+  const pageArchiveHint = document.createElement("p");
+  pageArchiveHint.className = "hk-panel-archive-hint";
+  pageArchiveHint.textContent = "本頁筆記";
+  const pageArchiveActions = document.createElement("div");
+  pageArchiveActions.className = "hk-panel-archive-actions";
+  const archiveCopyBtn = document.createElement("button");
+  archiveCopyBtn.type = "button";
+  archiveCopyBtn.className = "hk-panel-export-btn";
+  archiveCopyBtn.textContent = "複製文字";
+  archiveCopyBtn.addEventListener("click", () => exportHighlights("copy"));
+  const archiveDownloadBtn = document.createElement("button");
+  archiveDownloadBtn.type = "button";
+  archiveDownloadBtn.className = "hk-panel-export-btn";
+  archiveDownloadBtn.textContent = "下載 JSON";
+  archiveDownloadBtn.addEventListener("click", () => exportHighlights("download"));
+  const archiveImportLabel = document.createElement("label");
+  archiveImportLabel.className = "hk-panel-export-btn hk-panel-import-label";
+  archiveImportLabel.textContent = "匯入 JSON";
+  const archiveImportInput = document.createElement("input");
+  archiveImportInput.type = "file";
+  archiveImportInput.accept = "application/json";
+  archiveImportInput.className = "hk-panel-import-input";
+  archiveImportInput.addEventListener("click", (event) => {
+    event.target.value = "";
+  });
+  archiveImportInput.addEventListener("change", handleImportFileChange);
+  archiveImportLabel.appendChild(archiveImportInput);
+  pageArchiveActions.appendChild(archiveCopyBtn);
+  pageArchiveActions.appendChild(archiveDownloadBtn);
+  pageArchiveActions.appendChild(archiveImportLabel);
+  const archiveSection = document.createElement("div");
+  archiveSection.className = "hk-panel-archive";
+  const archiveHint = document.createElement("p");
+  archiveHint.className = "hk-panel-archive-hint";
+  archiveHint.textContent = "全部筆記";
+  const archiveButtons = document.createElement("div");
+  archiveButtons.className = "hk-panel-archive-actions";
+  const archiveAllDownloadBtn = document.createElement("button");
+  archiveAllDownloadBtn.type = "button";
+  archiveAllDownloadBtn.className = "hk-panel-export-btn";
+  archiveAllDownloadBtn.textContent = "下載全部筆記";
+  archiveAllDownloadBtn.addEventListener("click", handleDownloadAllHighlights);
+  const archiveAllImportLabel = document.createElement("label");
+  archiveAllImportLabel.className = "hk-panel-export-btn hk-panel-import-label";
+  archiveAllImportLabel.textContent = "匯入全部筆記";
+  const archiveAllImportInput = document.createElement("input");
+  archiveAllImportInput.type = "file";
+  archiveAllImportInput.accept = "application/json";
+  archiveAllImportInput.multiple = true;
+  archiveAllImportInput.className = "hk-panel-import-input";
+  archiveAllImportInput.addEventListener("click", (event) => {
+    event.target.value = "";
+  });
+  archiveAllImportInput.addEventListener("change", handleBulkImportChange);
+  archiveAllImportLabel.appendChild(archiveAllImportInput);
+  archiveButtons.appendChild(archiveAllDownloadBtn);
+  archiveButtons.appendChild(archiveAllImportLabel);
+  const archiveStatus = document.createElement("div");
+  archiveStatus.className = "hk-panel-export-status";
+  archiveStatus.setAttribute("role", "status");
+  archiveStatus.setAttribute("aria-live", "polite");
+  pageArchiveSection.appendChild(pageArchiveHint);
+  pageArchiveSection.appendChild(pageArchiveActions);
+  archiveSection.appendChild(archiveHint);
+  archiveSection.appendChild(archiveButtons);
+  archiveSection.appendChild(archiveStatus);
 
   const aiSettingsSection = document.createElement("section");
   aiSettingsSection.className = "hk-panel-ai-settings";
@@ -1796,34 +2281,49 @@ const ensureHighlightPanel = () => {
   aiNoteSection.appendChild(aiNoteContent);
   aiNoteSection.appendChild(aiNoteEmpty);
 
-  const list = document.createElement("div");
-  list.className = "hk-panel-list";
+  const pageList = document.createElement("div");
+  pageList.className = "hk-panel-list hk-panel-page-list";
 
-  const placeholder = document.createElement("p");
-  placeholder.className = "hk-panel-placeholder";
-  placeholder.textContent = "正在載入標註...";
+  const pagePlaceholder = document.createElement("p");
+  pagePlaceholder.className = "hk-panel-placeholder";
+  pagePlaceholder.textContent = "本頁尚未建立標註。";
+
+  const searchList = document.createElement("div");
+  searchList.className = "hk-panel-list hk-panel-search-list";
+
+  const searchPlaceholder = document.createElement("p");
+  searchPlaceholder.className = "hk-panel-placeholder";
+  searchPlaceholder.textContent = "目前沒有符合的筆記。";
 
   panel.appendChild(header);
   panel.appendChild(tabs);
-  highlightsTabPanel.appendChild(controls);
-  highlightsTabPanel.appendChild(pageTagSection);
-  highlightsTabPanel.appendChild(list);
-  highlightsTabPanel.appendChild(placeholder);
+  pageTabPanel.appendChild(pageTagSection);
+  pageTabPanel.appendChild(pageList);
+  pageTabPanel.appendChild(pagePlaceholder);
+  searchTabPanel.appendChild(searchControls);
+  searchTabPanel.appendChild(searchList);
+  searchTabPanel.appendChild(searchPlaceholder);
+  archiveTabPanel.appendChild(pageArchiveSection);
+  archiveTabPanel.appendChild(archiveSection);
   aiTabPanel.appendChild(aiSettingsSection);
   aiTabPanel.appendChild(aiNoteSection);
-  panel.appendChild(highlightsTabPanel);
+  panel.appendChild(pageTabPanel);
+  panel.appendChild(archiveTabPanel);
+  panel.appendChild(searchTabPanel);
   panel.appendChild(aiTabPanel);
 
   highlightPanel = panel;
   highlightPanelEls = {
     container: panel,
+    dragHandle: header,
     tabs,
-    list,
-    placeholder,
-    pageSelect,
-    sideButtons: [leftBtn, rightBtn],
+    pageList,
+    pagePlaceholder,
+    searchList,
+    searchPlaceholder,
     searchInput,
     tagsContainer,
+    searchPageSelect: pageFilterSelect,
     pageTagSection,
     pageTagHint,
     copyBtn,
@@ -1833,6 +2333,7 @@ const ensureHighlightPanel = () => {
     suggestionDropdown,
     pageTagList,
     exportStatus,
+    archiveStatus,
     aiSettingsSection,
     aiNoteSection,
     aiNoteContent,
@@ -1847,12 +2348,20 @@ const ensureHighlightPanel = () => {
     aiKeyGroups: [openaiGroup, geminiGroup],
     aiGenerateBtn,
     aiStatus,
+    fontControls: {
+      decrease: fontDecreaseBtn,
+      increase: fontIncreaseBtn,
+    },
     tabButtons: {
-      highlights: highlightsTabBtn,
+      page: pageTabBtn,
+      archive: archiveTabBtn,
+      search: searchTabBtn,
       ai: aiTabBtn,
     },
     tabPanels: {
-      highlights: highlightsTabPanel,
+      page: pageTabPanel,
+      archive: archiveTabPanel,
+      search: searchTabPanel,
       ai: aiTabPanel,
     },
   };
@@ -1894,157 +2403,58 @@ const ensureHighlightPanel = () => {
 
   aiGenerateBtn.addEventListener("click", handleGenerateAiNote);
 
+  document.body.appendChild(panel);
   applyHighlightPanelSideClasses();
   applyHighlightPanelTabState();
   updateExportButtonsState();
   applyAiSettingsToUI();
+  applyHighlightPanelFontScale();
   setAiPanelStatus("");
-  document.body.appendChild(panel);
   return panel;
-};
-
-const setHighlightPanelPlaceholder = (message) => {
-  ensureHighlightPanel();
-  if (highlightPanelEls?.placeholder) {
-    highlightPanelEls.placeholder.textContent = message;
-    highlightPanelEls.placeholder.style.display = "block";
-  }
-  if (highlightPanelEls?.list) {
-    highlightPanelEls.list.innerHTML = "";
-  }
 };
 
 const renderHighlightPanel = async () => {
   ensureHighlightPanel();
-  if (!highlightPanelEls?.list) return;
+  if (!highlightPanelEls) return;
 
-  applyHighlightPanelTabState();
+  highlightPanelState.activeKey = pageKey;
+
   await refreshHighlightPanelData();
   applyHighlightPanelSideClasses();
-  updateHighlightPanelTagFilters();
   await renderPageTagEditor();
+  updateHighlightPanelTagFilters();
+  updateSearchPageFilterOptions();
+
+  const pageEntries = collectPanelEntries("current").sort(
+    (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
+  );
+  renderPageEntries(pageEntries);
 
   const searchTerm = highlightPanelState.searchTerm.trim().toLowerCase();
   const activeTag = highlightPanelState.activeTag;
+  const searchEntries = collectPanelEntries("all", {
+    pageFilter: highlightPanelState.searchPageFilter,
+  })
+    .filter((entry) => {
+      const tags = Array.isArray(entry.pageTags) ? entry.pageTags : [];
+      const matchesTag = !activeTag || tags.includes(activeTag);
+      if (!matchesTag) return false;
+      if (!searchTerm) return true;
+      const haystacks = [entry.text, entry.note, entry.pageUrl, tags.join(" ")]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase());
+      return haystacks.some((text) => text.includes(searchTerm));
+    })
+    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  renderSearchEntries(searchEntries);
 
-  const filtered = collectPanelEntries().filter((entry) => {
-    const tags = Array.isArray(entry.pageTags) ? entry.pageTags : [];
-    const matchesTag = !activeTag || tags.includes(activeTag);
-    if (!matchesTag) return false;
-    if (!searchTerm) return true;
-    const haystacks = [entry.text, entry.note, entry.pageUrl, tags.join(" ")]
-      .filter(Boolean)
-      .map((value) => String(value).toLowerCase());
-    return haystacks.some((text) => text.includes(searchTerm));
-  });
-
-  const entries = filtered.sort(
-    (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
-  );
-
-  highlightPanelState.currentEntries = entries;
-  highlightPanelEls.list.innerHTML = "";
-  highlightPanelEls.list.dataset.entriesCount = String(entries.length);
-
-  if (!entries.length) {
-    const noteKey =
-      highlightPanelState.activeKey === PANEL_ALL_KEY
-        ? pageKey
-        : highlightPanelState.activeKey;
-    updateAiNoteSection(highlightPanelState.notesByPage[noteKey]);
-    const message =
-      highlightPanelState.activeKey === PANEL_ALL_KEY
-        ? "目前沒有任何標註。"
-        : "該頁面尚未建立標註。";
-    setHighlightPanelPlaceholder(message);
-    updateExportButtonsState();
-    setPanelStatus("");
-    return;
+  if (highlightPanelEls?.searchInput) {
+    highlightPanelEls.searchInput.value = highlightPanelState.searchTerm;
   }
 
-  if (highlightPanelEls.placeholder) {
-    highlightPanelEls.placeholder.style.display = "none";
-  }
+  applyHighlightPanelTabState();
 
-  updateExportButtonsState();
-  setPanelStatus("");
-
-  entries.forEach((entry) => {
-    const item = document.createElement("article");
-    item.className = "hk-panel-item";
-    item.setAttribute("data-highlight-id", entry.id);
-
-    const meta = document.createElement("div");
-    meta.className = "hk-panel-meta";
-
-    const colorDot = document.createElement("span");
-    colorDot.className = "hk-panel-color";
-    colorDot.style.backgroundColor = entry.color ?? DEFAULT_COLOR;
-
-    const pageLabel = document.createElement("span");
-    pageLabel.className = "hk-panel-page";
-    pageLabel.textContent =
-      entry.pageUrl === pageKey ? "本頁" : getPageDisplayName(entry.pageUrl);
-
-    const timestamp = document.createElement("span");
-    timestamp.className = "hk-panel-time";
-    timestamp.textContent = formatTimestamp(entry.createdAt);
-
-    meta.appendChild(colorDot);
-    if (entry.note) {
-      const note = document.createElement("span");
-      note.className = "hk-panel-note";
-      note.textContent = entry.note;
-      meta.appendChild(note);
-    }
-    meta.appendChild(pageLabel);
-    meta.appendChild(timestamp);
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "hk-panel-delete-btn";
-    deleteBtn.textContent = "刪除";
-    deleteBtn.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      await deleteHighlightFromPanel(entry);
-    });
-    meta.appendChild(deleteBtn);
-
-    const text = document.createElement("p");
-    text.className = "hk-panel-text";
-    text.textContent = truncateText(entry.text) || "(無文字)";
-
-    item.appendChild(meta);
-    item.appendChild(text);
-
-    if (entry.pageTags?.length) {
-      const tagsRow = document.createElement("div");
-      tagsRow.className = "hk-panel-tags-row";
-      entry.pageTags.forEach((tag) => {
-        const chip = document.createElement("span");
-        chip.className = "hk-panel-tag-chip";
-        chip.textContent = tag;
-        tagsRow.appendChild(chip);
-      });
-      item.appendChild(tagsRow);
-    }
-
-    if (entry.pageUrl === pageKey) {
-      item.addEventListener("click", () => focusHighlightElement(entry.id));
-    } else {
-      item.classList.add("is-external");
-      item.addEventListener("click", () => {
-        window.open(entry.pageUrl, "_blank", "noopener");
-      });
-    }
-
-    highlightPanelEls.list.appendChild(item);
-  });
-
-  const noteKey =
-    highlightPanelState.activeKey === PANEL_ALL_KEY
-      ? pageKey
-      : highlightPanelState.activeKey;
+  const noteKey = pageKey;
   updateAiNoteSection(highlightPanelState.notesByPage[noteKey]);
 };
 
@@ -2057,31 +2467,29 @@ const openHighlightPanel = async (options = {}) => {
       console.debug("載入面板設定失敗:", error);
     }
   }
-  const { side, pageKey: targetPage, view } = options ?? {};
-  if (typeof targetPage === "string") {
-    highlightPanelState.activeKey =
-      targetPage === PANEL_ALL_KEY ? PANEL_ALL_KEY : targetPage;
-  } else if (view === PANEL_ALL_KEY) {
-    highlightPanelState.activeKey = PANEL_ALL_KEY;
-  }
-  if (view === "ai-note" || view === "highlights") {
-    highlightPanelState.activeTab = view;
-  }
-  if (side) {
+  const { side, view } = options ?? {};
+  if (typeof side === "string") {
     await setHighlightPanelSide(side);
   } else if (highlightPanelState.side !== highlightPanelPreferredSide) {
     await setHighlightPanelSide(highlightPanelPreferredSide, false);
   } else {
     applyHighlightPanelSideClasses();
   }
-  applyHighlightPanelTabState();
+
+  if (view === "ai-note") {
+    highlightPanelState.activeTab = "ai-note";
+  } else if (view === "search") {
+    highlightPanelState.activeTab = "search";
+  } else if (view === "archive") {
+    highlightPanelState.activeTab = "archive";
+  } else if (view === "highlights" || view === "page") {
+    highlightPanelState.activeTab = "page";
+  }
+
   highlightPanelVisible = true;
   highlightPanel.style.display = "flex";
   highlightPanel.setAttribute("aria-hidden", "false");
   await renderHighlightPanel();
-  if (highlightPanelEls?.searchInput) {
-    highlightPanelEls.searchInput.value = highlightPanelState.searchTerm;
-  }
   return true;
 };
 
@@ -2374,6 +2782,27 @@ chrome.storage?.onChanged.addListener((changes, areaName) => {
   if (changes.hkColorPalette) {
     setColorPaletteState(changes.hkColorPalette.newValue);
   }
+  if (changes.hkPanelSide) {
+    const nextSide =
+      changes.hkPanelSide.newValue === "left" ? "left" : "right";
+    highlightPanelState.side = nextSide;
+    highlightPanelPreferredSide = nextSide;
+    applyHighlightPanelSideClasses();
+  }
+  if (changes[HIGHLIGHT_PANEL_POSITION_KEY]) {
+    const nextPosition = changes[HIGHLIGHT_PANEL_POSITION_KEY].newValue;
+    highlightPanelState.position = isValidPanelPosition(nextPosition)
+      ? nextPosition
+      : null;
+    applyHighlightPanelSideClasses();
+  }
+  if (changes[HIGHLIGHT_PANEL_FONT_SCALE_KEY]) {
+    const nextScale = Number(changes[HIGHLIGHT_PANEL_FONT_SCALE_KEY].newValue);
+    if (Number.isFinite(nextScale)) {
+      highlightPanelState.fontScale = clampPanelFontScale(nextScale);
+      applyHighlightPanelFontScale();
+    }
+  }
   if (changes.hkAISettings) {
     aiSettings = {
       ...aiSettings,
@@ -2384,18 +2813,12 @@ chrome.storage?.onChanged.addListener((changes, areaName) => {
   if (changes.hkGeneratedNotes) {
     highlightPanelState.notesByPage = changes.hkGeneratedNotes.newValue ?? {};
     if (highlightPanelVisible) {
-      const noteKey =
-        highlightPanelState.activeKey === PANEL_ALL_KEY
-          ? pageKey
-          : highlightPanelState.activeKey;
-      updateAiNoteSection(highlightPanelState.notesByPage[noteKey]);
+      updateAiNoteSection(highlightPanelState.notesByPage[pageKey]);
     }
   }
   if (highlightPanelVisible) {
     const affectedKeys = Object.keys(changes);
     const shouldRefresh =
-      highlightPanelState.activeKey === PANEL_ALL_KEY ||
-      affectedKeys.includes(highlightPanelState.activeKey) ||
       affectedKeys.includes(pageKey) ||
       affectedKeys.some((key) => isValidPageKey(key));
     if (shouldRefresh) {
@@ -2930,13 +3353,6 @@ document.addEventListener(
       hideFloatingButton();
     }
     if (
-      highlightPanelVisible &&
-      highlightPanel &&
-      !highlightPanel.contains(target)
-    ) {
-      closeHighlightPanel();
-    }
-    if (
       highlightMenu &&
       highlightMenu.style.display !== "none" &&
       !highlightMenu.contains(target) &&
@@ -2964,6 +3380,13 @@ window.addEventListener(
         console.debug("重新渲染標註面板失敗", error)
       );
     }
+    if (highlightPanelState.position && highlightPanel) {
+      setHighlightPanelPosition(
+        highlightPanelState.position.x,
+        highlightPanelState.position.y,
+        false
+      );
+    }
   },
   true
 );
@@ -2974,3 +3397,105 @@ document.addEventListener("keydown", (event) => {
     closeHighlightPanel();
   }
 });
+const collectAllPageHighlights = async () => {
+  if (!storage) throw new Error("無法使用儲存空間");
+  const everything = await storage.get(null);
+  const meta = everything[PAGE_META_KEY] || {};
+  const pages = Object.entries(everything)
+    .filter(([key, value]) => isValidPageKey(key) && Array.isArray(value))
+    .map(([url, entries]) => ({
+      url,
+      title: meta[url]?.title || "",
+      entries,
+    }));
+  return { pages, meta };
+};
+
+const handleDownloadAllHighlights = async () => {
+  try {
+    const { pages } = await collectAllPageHighlights();
+    if (!pages.length) {
+      setArchiveStatus("沒有筆記可下載", true);
+      return;
+    }
+    const payload = {
+      type: "highlight-keeper-bulk",
+      version: 1,
+      exportedAt: Date.now(),
+      pages,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "highlight-keeper-all.json";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setArchiveStatus("已下載全部筆記");
+  } catch (error) {
+    console.debug("下載全部筆記失敗", error);
+    setArchiveStatus(error?.message || "下載全部筆記失敗", true);
+  }
+};
+
+const mergeBulkImportPayload = async (files) => {
+  if (!files?.length) return;
+  try {
+    setArchiveStatus("匯入中…");
+    const fileTexts = await Promise.all(Array.from(files).map((file) => file.text()));
+    const allEntries = fileTexts.flatMap((text) =>
+      parseImportedHighlightsPayload(text)
+    );
+    const normalized = allEntries
+      .map((entry, index) => normalizeImportedHighlightEntry(entry, index))
+      .filter(Boolean);
+    if (!normalized.length) {
+      throw new Error("沒有可匯入的筆記");
+    }
+    const grouped = new Map();
+    normalized.forEach((entry) => {
+      if (!grouped.has(entry.url)) {
+        grouped.set(entry.url, []);
+      }
+      grouped.get(entry.url).push(entry);
+    });
+    const urls = Array.from(grouped.keys());
+    const existing = await storage.get(urls);
+    const updates = {};
+    const skipped = [];
+    grouped.forEach((list, url) => {
+      if (Array.isArray(existing[url]) && existing[url].length) {
+        skipped.push(url);
+        return;
+      }
+      updates[url] = list.map(({ title, ...rest }) => rest);
+    });
+    if (!Object.keys(updates).length) {
+      throw new Error("所有頁面皆已有筆記，已全部跳過");
+    }
+    await storage.set(updates);
+    await Promise.all(
+      normalized
+        .filter((entry) => entry.title)
+        .map((entry) => ensurePageMetaTitle(entry.url, entry.title))
+    );
+    setArchiveStatus(
+      `成功匯入 ${Object.keys(updates).length} 個頁面，跳過 ${skipped.length} 個頁面`
+    );
+    await refreshHighlightPanelData();
+    await renderHighlightPanel();
+    attemptRestoreHighlights();
+  } catch (error) {
+    console.debug("匯入全部筆記失敗", error);
+    setArchiveStatus(error?.message || "匯入全部筆記失敗", true);
+  }
+};
+
+const handleBulkImportChange = (event) => {
+  const files = event.target.files;
+  mergeBulkImportPayload(files);
+};

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Highlight Keeper — 笔記總覽</title>
+    <link rel="stylesheet" href="manager.css" />
+  </head>
+  <body>
+    <main class="hk-manager">
+      <header class="hk-manager-header">
+        <div>
+          <h1>筆記內容總覽</h1>
+          <p>一次匯出/匯入所有頁面的標註，集中管理你的資料。</p>
+        </div>
+        <button type="button" class="hk-manager-close" id="closeManagerBtn">×</button>
+      </header>
+      <div class="hk-manager-search-row">
+        <label class="hk-manager-search-label">
+          搜尋筆記
+          <input
+            type="search"
+            id="managerSearch"
+            class="hk-manager-search"
+            placeholder="輸入關鍵字或頁面標題"
+          />
+        </label>
+      </div>
+      <section class="hk-manager-actions">
+        <button type="button" id="downloadAllBtn" class="hk-manager-btn">
+          下載全部筆記
+        </button>
+        <label class="hk-manager-btn hk-manager-import">
+          匯入多個 JSON
+          <input
+            type="file"
+            id="bulkImportInput"
+            accept="application/json"
+            multiple
+          />
+        </label>
+      </section>
+      <section class="hk-manager-summary">
+        <header>
+          <h2>頁面清單</h2>
+          <span id="pageCount" class="hk-manager-count"></span>
+        </header>
+        <div id="pageList" class="hk-manager-list"></div>
+      </section>
+      <section id="managerStatus" class="hk-manager-status" role="status" aria-live="polite"></section>
+    </main>
+    <script src="manager.js" type="module"></script>
+  </body>
+</html>

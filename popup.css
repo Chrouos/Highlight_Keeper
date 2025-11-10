@@ -98,64 +98,12 @@ h1 {
   background: rgba(26, 115, 232, 0.1);
 }
 
-.panel-open-btn-secondary {
-  background: #1a73e8;
-  color: #fff;
+.data-tools {
+  margin-top: 16px;
 }
 
-.panel-open-btn-secondary:hover,
-.panel-open-btn-secondary:focus-visible {
-  background: #185abc;
-  color: #fff;
-}
-
-.ai-panel-hint {
-  margin-top: 20px;
-  padding: 16px;
-  border-radius: 12px;
-  border: 1px dashed rgba(26, 115, 232, 0.35);
-  background: rgba(26, 115, 232, 0.08);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.ai-panel-message {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #3c4043;
-}
-
-.panel-side-controls {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.panel-side-btn {
-  border: 1px solid #d0d7de;
-  border-radius: 6px;
-  padding: 8px 0;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  background: #ffffff;
-  color: #5f6368;
-  transition: border-color 0.18s ease, color 0.18s ease,
-    background-color 0.18s ease;
-}
-
-.panel-side-btn.is-active {
-  border-color: #1a73e8;
-  color: #1a73e8;
-  background: rgba(26, 115, 232, 0.12);
-}
-
-.panel-side-btn:hover,
-.panel-side-btn:focus-visible {
-  border-color: #1a73e8;
-  color: #1a73e8;
+.data-tools .panel-open-btn {
+  width: 100%;
 }
 
 .palette-header {
