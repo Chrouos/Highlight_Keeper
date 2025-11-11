@@ -1,5 +1,8 @@
 const HIGHLIGHT_CLASS = "hk-highlight";
 const HIGHLIGHT_ATTR = "data-highlight-id";
+const MAX_SELECTOR_DEPTH = 6;
+const TEXT_CONTEXT_CHARS = 60;
+const TEXT_PARENT_SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT"]);
 
 const pageKey = new URL(window.location.href).href;
 
@@ -1285,6 +1288,43 @@ const parseImportedHighlightsPayload = (rawText) => {
   return [];
 };
 
+const sanitizeImportedAnchors = (anchors) => {
+  if (!anchors || typeof anchors !== "object") return undefined;
+  const sanitizeBoundary = (boundary) => {
+    if (!boundary || typeof boundary !== "object") return undefined;
+    const css =
+      typeof boundary.css === "string" && boundary.css.trim()
+        ? boundary.css.trim()
+        : undefined;
+    const offset =
+      typeof boundary.textOffset === "number" && Number.isFinite(boundary.textOffset)
+        ? boundary.textOffset
+        : undefined;
+    if (!css && typeof offset === "undefined") return undefined;
+    return { css, textOffset: offset };
+  };
+  const sanitized = {
+    version:
+      typeof anchors.version === "number" && Number.isFinite(anchors.version)
+        ? anchors.version
+        : undefined,
+    start: sanitizeBoundary(anchors.start),
+    end: sanitizeBoundary(anchors.end),
+    quote:
+      anchors.quote && typeof anchors.quote === "object"
+        ? {
+            exact: typeof anchors.quote.exact === "string" ? anchors.quote.exact : "",
+            prefix: typeof anchors.quote.prefix === "string" ? anchors.quote.prefix : "",
+            suffix: typeof anchors.quote.suffix === "string" ? anchors.quote.suffix : "",
+          }
+        : undefined,
+  };
+  if (!sanitized.start && !sanitized.end && !sanitized.quote) {
+    return undefined;
+  }
+  return sanitized;
+};
+
 const normalizeImportedHighlightEntry = (entry, index) => {
   if (!entry || typeof entry !== "object") return null;
   const url =
@@ -1316,6 +1356,7 @@ const normalizeImportedHighlightEntry = (entry, index) => {
       endXPath: range.endXPath,
       endOffset: Number(range.endOffset) || 0,
       text: range.text ?? entry.text ?? "",
+      anchors: sanitizeImportedAnchors(range.anchors),
     },
     url,
     createdAt:
@@ -2907,13 +2948,335 @@ const clampOffset = (node, offset) => {
   return Math.min(Math.max(offset, 0), max);
 };
 
+const cssEscape = (value) => {
+  if (typeof value !== "string") return "";
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
+  }
+  return value.replace(/([^\w-])/g, "\\$1");
+};
+
+const getSiblingIndexOfType = (element) => {
+  if (!element || !element.parentElement) return 1;
+  let index = 1;
+  let sibling = element.previousElementSibling;
+  while (sibling) {
+    if (sibling.tagName === element.tagName) {
+      index += 1;
+    }
+    sibling = sibling.previousElementSibling;
+  }
+  return index;
+};
+
+const getCssSelector = (element) => {
+  if (!element || element.nodeType !== Node.ELEMENT_NODE) return null;
+  const parts = [];
+  let current = element;
+  let depth = 0;
+  while (current && current.nodeType === Node.ELEMENT_NODE && depth < MAX_SELECTOR_DEPTH) {
+    let selector = current.tagName.toLowerCase();
+    if (current.id) {
+      selector += `#${cssEscape(current.id)}`;
+      parts.unshift(selector);
+      break;
+    }
+    if (current.classList && current.classList.length) {
+      const classes = Array.from(current.classList)
+        .slice(0, 2)
+        .map((cls) => `.${cssEscape(cls)}`)
+        .join("");
+      selector += classes;
+    }
+    const index = getSiblingIndexOfType(current);
+    if (index > 1) {
+      selector += `:nth-of-type(${index})`;
+    }
+    parts.unshift(selector);
+    current = current.parentElement;
+    depth += 1;
+  }
+  if (!parts.length && element.id) {
+    return `${element.tagName.toLowerCase()}#${cssEscape(element.id)}`;
+  }
+  return parts.join(" > ");
+};
+
+const getAnchorElement = (node) => {
+  if (!node) return document.body;
+  if (node.nodeType === Node.ELEMENT_NODE) return node;
+  let current = node.parentElement || node.parentNode;
+  let depth = 0;
+  while (current && depth < MAX_SELECTOR_DEPTH) {
+    if (
+      current.id ||
+      (current.classList && current.classList.length) ||
+      !current.parentElement
+    ) {
+      return current;
+    }
+    current = current.parentElement;
+    depth += 1;
+  }
+  return current || document.body;
+};
+
+const shouldSkipTextNode = (node) => {
+  if (!node || node.nodeType !== Node.TEXT_NODE) return true;
+  const parentTag = node.parentNode?.nodeName;
+  return TEXT_PARENT_SKIP_TAGS.has(parentTag);
+};
+
+const getNextNodeInDocument = (node) => {
+  if (!node) return null;
+  if (node.firstChild) {
+    return node.firstChild;
+  }
+  let current = node;
+  while (current) {
+    if (current.nextSibling) {
+      return current.nextSibling;
+    }
+    current = current.parentNode;
+  }
+  return null;
+};
+
+const getPreviousNodeInDocument = (node) => {
+  if (!node) return null;
+  if (node.previousSibling) {
+    let current = node.previousSibling;
+    while (current && current.lastChild) {
+      current = current.lastChild;
+    }
+    return current;
+  }
+  return node.parentNode;
+};
+
+const getNextTextNode = (node) => {
+  let current = getNextNodeInDocument(node);
+  while (current) {
+    if (current.nodeType === Node.TEXT_NODE && !shouldSkipTextNode(current)) {
+      return current;
+    }
+    current = getNextNodeInDocument(current);
+  }
+  return null;
+};
+
+const getPreviousTextNode = (node) => {
+  let current = getPreviousNodeInDocument(node);
+  while (current) {
+    if (current.nodeType === Node.TEXT_NODE && !shouldSkipTextNode(current)) {
+      return current;
+    }
+    current = getPreviousNodeInDocument(current);
+  }
+  return null;
+};
+
+const findTextNodeInSubtree = (root, forward = true) => {
+  if (!root) return null;
+  if (root.nodeType === Node.TEXT_NODE && !shouldSkipTextNode(root)) {
+    return root;
+  }
+  const walker = document.createTreeWalker(
+    root,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        return shouldSkipTextNode(node)
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT;
+      },
+    },
+    false
+  );
+  if (forward) {
+    return walker.nextNode();
+  }
+  let result = null;
+  let current = walker.nextNode();
+  while (current) {
+    result = current;
+    current = walker.nextNode();
+  }
+  return result;
+};
+
+const resolveTextNodeFromBoundary = (container, offset, searchForward) => {
+  if (!container) return null;
+  if (container.nodeType === Node.TEXT_NODE) {
+    return {
+      node: container,
+      offset: clampOffset(container, offset),
+    };
+  }
+  const childNodes = container.childNodes;
+  if (childNodes && childNodes.length) {
+    if (searchForward) {
+      for (let i = offset; i < childNodes.length; i += 1) {
+        const candidate = findTextNodeInSubtree(childNodes[i], true);
+        if (candidate) {
+          return { node: candidate, offset: 0 };
+        }
+      }
+    } else {
+      for (let i = Math.min(offset - 1, childNodes.length - 1); i >= 0; i -= 1) {
+        const candidate = findTextNodeInSubtree(childNodes[i], false);
+        if (candidate) {
+          return {
+            node: candidate,
+            offset: candidate.nodeValue?.length ?? 0,
+          };
+        }
+      }
+    }
+  }
+  const fallback = searchForward
+    ? getNextTextNode(container)
+    : getPreviousTextNode(container);
+  if (fallback) {
+    return {
+      node: fallback,
+      offset:
+        searchForward && fallback.nodeType === Node.TEXT_NODE
+          ? 0
+          : fallback.nodeValue?.length ?? 0,
+    };
+  }
+  return null;
+};
+
+const getRangeBoundaryInfo = (range, isStart) => {
+  if (!range) return { node: null, offset: 0 };
+  const container = isStart ? range.startContainer : range.endContainer;
+  const offset = isStart ? range.startOffset : range.endOffset;
+  const resolved = resolveTextNodeFromBoundary(container, offset, isStart);
+  if (resolved) return resolved;
+  if (container && container.nodeType === Node.TEXT_NODE) {
+    return { node: container, offset: clampOffset(container, offset) };
+  }
+  return { node: null, offset: 0 };
+};
+
+const collectContextText = (node, offset, direction, maxLength = TEXT_CONTEXT_CHARS) => {
+  if (!node || maxLength <= 0) return "";
+  if (node.nodeType !== Node.TEXT_NODE) return "";
+  let remaining = maxLength;
+  let result = "";
+  let currentNode = node;
+  let currentOffset = clampOffset(node, offset);
+  while (currentNode && remaining > 0) {
+    if (!shouldSkipTextNode(currentNode)) {
+      const value = currentNode.nodeValue || "";
+      if (direction < 0) {
+        const sliceEnd = currentNode === node ? currentOffset : value.length;
+        const sliceStart = Math.max(0, sliceEnd - remaining);
+        result = value.slice(sliceStart, sliceEnd) + result;
+        remaining -= sliceEnd - sliceStart;
+      } else {
+        const sliceStart = currentNode === node ? currentOffset : 0;
+        const sliceEnd = Math.min(value.length, sliceStart + remaining);
+        result += value.slice(sliceStart, sliceEnd);
+        remaining -= sliceEnd - sliceStart;
+      }
+    }
+    if (remaining <= 0) break;
+    currentNode =
+      direction < 0
+        ? getPreviousTextNode(currentNode)
+        : getNextTextNode(currentNode);
+    if (currentNode && currentNode.nodeType === Node.TEXT_NODE) {
+      currentOffset = direction < 0 ? currentNode.nodeValue?.length ?? 0 : 0;
+    } else {
+      currentOffset = 0;
+    }
+  }
+  return direction < 0 ? result.slice(-maxLength) : result.slice(0, maxLength);
+};
+
+const getElementTextOffset = (element, boundaryNode, boundaryOffset) => {
+  if (!element || !boundaryNode) return null;
+  const walker = document.createTreeWalker(
+    element,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        return shouldSkipTextNode(node)
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT;
+      },
+    },
+    false
+  );
+  let accumulated = 0;
+  let current = walker.nextNode();
+  let lastNode = null;
+  while (current) {
+    const length = current.nodeValue?.length ?? 0;
+    if (current === boundaryNode) {
+      return accumulated + Math.min(boundaryOffset, length);
+    }
+    accumulated += length;
+    lastNode = current;
+    current = walker.nextNode();
+  }
+  if (lastNode === boundaryNode) {
+    const length = lastNode.nodeValue?.length ?? 0;
+    return accumulated + Math.min(boundaryOffset, length);
+  }
+  return null;
+};
+
+const buildBoundaryAnchor = (boundary) => {
+  if (!boundary?.node || boundary.node.nodeType !== Node.TEXT_NODE) return null;
+  const anchorElement = getAnchorElement(boundary.node);
+  if (!anchorElement) return null;
+  const selector = getCssSelector(anchorElement);
+  if (!selector) return null;
+  const textOffset = getElementTextOffset(anchorElement, boundary.node, boundary.offset);
+  return {
+    css: selector,
+    textOffset,
+  };
+};
+
+const buildRangeAnchors = (range) => {
+  try {
+    const startBoundary = getRangeBoundaryInfo(range, true);
+    const endBoundary = getRangeBoundaryInfo(range, false);
+    return {
+      version: 1,
+      createdAt: Date.now(),
+      start: buildBoundaryAnchor(startBoundary),
+      end: buildBoundaryAnchor(endBoundary),
+      quote: {
+        exact: range.toString(),
+        prefix: startBoundary.node
+          ? collectContextText(startBoundary.node, startBoundary.offset, -1)
+          : "",
+        suffix: endBoundary.node
+          ? collectContextText(endBoundary.node, endBoundary.offset, 1)
+          : "",
+      },
+    };
+  } catch (error) {
+    console.debug("建立標註 anchors 失敗", error);
+    return null;
+  }
+};
+
 const serializeRange = (range) => {
+  const anchors = buildRangeAnchors(range);
   return {
     startXPath: getNodeXPath(range.startContainer),
     startOffset: range.startOffset,
     endXPath: getNodeXPath(range.endContainer),
     endOffset: range.endOffset,
     text: range.toString(),
+    anchors: anchors ?? undefined,
   };
 };
 
@@ -2928,6 +3291,278 @@ const deserializeRange = (data) => {
   range.setStart(startNode, clampOffset(startNode, data.startOffset));
   range.setEnd(endNode, clampOffset(endNode, data.endOffset));
   return range;
+};
+
+const moveTextBoundary = (node, offset, distance) => {
+  if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+  let remaining = Math.abs(distance);
+  let currentNode = node;
+  let currentOffset = clampOffset(node, offset);
+  if (distance >= 0) {
+    while (currentNode) {
+      const value = currentNode.nodeValue ?? "";
+      const available = value.length - currentOffset;
+      if (remaining <= available) {
+        return {
+          node: currentNode,
+          offset: currentOffset + remaining,
+        };
+      }
+      remaining -= available;
+      currentNode = getNextTextNode(currentNode);
+      currentOffset = 0;
+    }
+    return null;
+  }
+  while (currentNode) {
+    if (remaining <= currentOffset) {
+      return {
+        node: currentNode,
+        offset: currentOffset - remaining,
+      };
+    }
+    remaining -= currentOffset;
+    currentNode = getPreviousTextNode(currentNode);
+    if (!currentNode) break;
+    currentOffset = currentNode.nodeValue?.length ?? 0;
+  }
+  return null;
+};
+
+const locateTextPosition = (nodes, index) => {
+  if (!Array.isArray(nodes)) return null;
+  for (let i = 0; i < nodes.length; i += 1) {
+    const entry = nodes[i];
+    if (index < entry.start) break;
+    if (index <= entry.end) {
+      return {
+        node: entry.node,
+        offset: clampOffset(entry.node, index - entry.start),
+      };
+    }
+  }
+  const lastEntry = nodes[nodes.length - 1];
+  if (lastEntry && index >= lastEntry.end) {
+    return {
+      node: lastEntry.node,
+      offset: clampOffset(lastEntry.node, lastEntry.node.nodeValue?.length ?? 0),
+    };
+  }
+  return null;
+};
+
+const buildDocumentTextIndex = () => {
+  if (!document?.body) return null;
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        return shouldSkipTextNode(node)
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT;
+      },
+    },
+    false
+  );
+  const nodes = [];
+  let text = "";
+  let current = walker.nextNode();
+  while (current) {
+    const value = current.nodeValue ?? "";
+    if (value) {
+      const start = text.length;
+      text += value;
+      nodes.push({ node: current, start, end: text.length });
+    }
+    current = walker.nextNode();
+  }
+  return { text, nodes };
+};
+
+const scanForQuoteMatch = (haystack, needle, prefix, suffix) => {
+  if (!haystack || !needle) return null;
+  let fromIndex = 0;
+  while (fromIndex <= haystack.length) {
+    const index = haystack.indexOf(needle, fromIndex);
+    if (index === -1) break;
+    const before = prefix
+      ? haystack.slice(Math.max(0, index - prefix.length), index)
+      : "";
+    const after = suffix
+      ? haystack.slice(index + needle.length, index + needle.length + suffix.length)
+      : "";
+    const prefixOk = !prefix || before.endsWith(prefix);
+    const suffixOk = !suffix || after.startsWith(suffix);
+    if (prefixOk && suffixOk) {
+      return index;
+    }
+    fromIndex = index + 1;
+  }
+  return null;
+};
+
+const findQuoteMatchIndex = (haystack, needle, prefix, suffix) => {
+  const attempts = [
+    { prefix, suffix },
+    { prefix, suffix: "" },
+    { prefix: "", suffix },
+    { prefix: "", suffix: "" },
+  ];
+  for (const attempt of attempts) {
+    const index = scanForQuoteMatch(
+      haystack,
+      needle,
+      attempt.prefix || "",
+      attempt.suffix || ""
+    );
+    if (index !== null && index !== undefined) {
+      return index;
+    }
+  }
+  return null;
+};
+
+const resolveBoundaryFromCssAnchor = (anchor) => {
+  if (!anchor?.css) return null;
+  const targetOffset =
+    typeof anchor.textOffset === "number" ? Math.max(anchor.textOffset, 0) : null;
+  if (targetOffset === null) return null;
+  let element = null;
+  try {
+    element = document.querySelector(anchor.css);
+  } catch (_error) {
+    element = null;
+  }
+  if (!element) return null;
+  const walker = document.createTreeWalker(
+    element,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        return shouldSkipTextNode(node)
+          ? NodeFilter.FILTER_REJECT
+          : NodeFilter.FILTER_ACCEPT;
+      },
+    },
+    false
+  );
+  let accumulated = 0;
+  let current = walker.nextNode();
+  let lastNode = null;
+  while (current) {
+    const value = current.nodeValue ?? "";
+    const length = value.length;
+    if (accumulated + length >= targetOffset) {
+      const offset = Math.max(0, Math.min(length, targetOffset - accumulated));
+      return {
+        node: current,
+        offset,
+      };
+    }
+    accumulated += length;
+    lastNode = current;
+    current = walker.nextNode();
+  }
+  if (lastNode && targetOffset === accumulated) {
+    return {
+      node: lastNode,
+      offset: lastNode.nodeValue?.length ?? 0,
+    };
+  }
+  return null;
+};
+
+const resolveRangeFromCssAnchors = (anchors, textLength) => {
+  if (!anchors) return null;
+  const startBoundary = anchors.start ? resolveBoundaryFromCssAnchor(anchors.start) : null;
+  const endBoundary = anchors.end ? resolveBoundaryFromCssAnchor(anchors.end) : null;
+  const normalizedLength = Math.max(
+    textLength || 0,
+    typeof anchors.quote?.exact === "string" ? anchors.quote.exact.length : 0
+  );
+  if (startBoundary && endBoundary) {
+    try {
+      const range = document.createRange();
+      range.setStart(startBoundary.node, startBoundary.offset);
+      range.setEnd(endBoundary.node, endBoundary.offset);
+      if (!range.collapsed || normalizedLength === 0) {
+        return range;
+      }
+    } catch (_error) {
+      return null;
+    }
+  }
+  if (startBoundary && !endBoundary && normalizedLength > 0) {
+    const derivedEnd = moveTextBoundary(
+      startBoundary.node,
+      startBoundary.offset,
+      normalizedLength
+    );
+    if (derivedEnd) {
+      const range = document.createRange();
+      range.setStart(startBoundary.node, startBoundary.offset);
+      range.setEnd(derivedEnd.node, derivedEnd.offset);
+      if (!range.collapsed) return range;
+    }
+  }
+  if (!startBoundary && endBoundary && normalizedLength > 0) {
+    const derivedStart = moveTextBoundary(
+      endBoundary.node,
+      endBoundary.offset,
+      -normalizedLength
+    );
+    if (derivedStart) {
+      const range = document.createRange();
+      range.setStart(derivedStart.node, derivedStart.offset);
+      range.setEnd(endBoundary.node, endBoundary.offset);
+      if (!range.collapsed) return range;
+    }
+  }
+  return null;
+};
+
+const resolveRangeFromTextAnchors = (anchors) => {
+  const quote = anchors?.quote;
+  const exact = typeof quote?.exact === "string" ? quote.exact : "";
+  if (!exact) return null;
+  const index = buildDocumentTextIndex();
+  if (!index || !index.text) return null;
+  const matchIndex = findQuoteMatchIndex(
+    index.text,
+    exact,
+    typeof quote?.prefix === "string" ? quote.prefix : "",
+    typeof quote?.suffix === "string" ? quote.suffix : ""
+  );
+  if (matchIndex === null || matchIndex === undefined) return null;
+  const startPosition = locateTextPosition(index.nodes, matchIndex);
+  const endPosition = locateTextPosition(index.nodes, matchIndex + exact.length);
+  if (!startPosition || !endPosition) return null;
+  const range = document.createRange();
+  range.setStart(startPosition.node, startPosition.offset);
+  range.setEnd(endPosition.node, endPosition.offset);
+  return range;
+};
+
+const resolveRangeSnapshot = (snapshot) => {
+  if (!snapshot) {
+    return { range: null, snapshot: null, updated: false };
+  }
+  const directRange = deserializeRange(snapshot);
+  if (directRange) {
+    return { range: directRange, snapshot, updated: false };
+  }
+  const cssRange = resolveRangeFromCssAnchors(snapshot.anchors, snapshot.text?.length);
+  if (cssRange) {
+    const normalized = serializeRange(cssRange.cloneRange());
+    return { range: cssRange, snapshot: normalized, updated: true };
+  }
+  const textRange = resolveRangeFromTextAnchors(snapshot.anchors);
+  if (textRange) {
+    const normalized = serializeRange(textRange.cloneRange());
+    return { range: textRange, snapshot: normalized, updated: true };
+  }
+  return { range: null, snapshot, updated: false };
 };
 
 const createHighlightElement = (color, id) => {
@@ -3106,7 +3741,8 @@ const restoreHighlights = async () => {
         continue;
       }
 
-      const range = deserializeRange(highlight.range);
+      const resolved = resolveRangeSnapshot(highlight.range);
+      const range = resolved.range;
       if (!range || range.collapsed) continue;
 
       try {
@@ -3119,6 +3755,16 @@ const restoreHighlights = async () => {
             : parseTags(highlight.tags ?? ""),
         });
         visibleCount += 1;
+        if (resolved.updated && resolved.snapshot) {
+          await updateHighlightEntry(
+            highlight.id,
+            {
+              range: resolved.snapshot,
+              text: resolved.snapshot.text ?? highlight.text ?? highlight.range?.text ?? "",
+            },
+            pageKey
+          );
+        }
       } catch (error) {
         console.debug("無法還原 highlight:", highlight, error);
       }

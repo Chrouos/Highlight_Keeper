@@ -39,6 +39,63 @@
           />
         </label>
       </section>
+      <section class="hk-manager-sync" aria-labelledby="githubSyncTitle">
+        <div class="hk-manager-sync-header">
+          <div>
+            <h2 id="githubSyncTitle">GitHub 備份</h2>
+            <p>填入 Personal Access Token 與儲存庫資訊，即可一鍵把全部筆記上傳到 GitHub。</p>
+          </div>
+        </div>
+        <div class="hk-manager-sync-fields">
+          <label class="hk-manager-field">
+            GitHub Token
+            <input
+              type="password"
+              id="githubToken"
+              class="hk-manager-input"
+              placeholder="ghp_xxx"
+            />
+          </label>
+          <label class="hk-manager-field">
+            儲存庫（owner/repo）
+            <input
+              type="text"
+              id="githubRepo"
+              class="hk-manager-input"
+              placeholder="username/highlight-backup"
+            />
+          </label>
+          <label class="hk-manager-field">
+            分支
+            <input
+              type="text"
+              id="githubBranch"
+              class="hk-manager-input"
+              placeholder="main"
+            />
+          </label>
+          <label class="hk-manager-field">
+            檔案路徑
+            <input
+              type="text"
+              id="githubPath"
+              class="hk-manager-input"
+              placeholder="backups/highlight-keeper.json"
+            />
+          </label>
+        </div>
+        <div class="hk-manager-sync-actions">
+          <button type="button" id="githubUploadBtn" class="hk-manager-btn hk-manager-btn-muted">
+            上傳到 GitHub
+          </button>
+        </div>
+        <p
+          id="githubSyncStatus"
+          class="hk-manager-sync-status"
+          role="status"
+          aria-live="polite"
+        ></p>
+      </section>
       <section class="hk-manager-summary">
         <header>
           <h2>頁面清單</h2>

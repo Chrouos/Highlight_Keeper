@@ -1,11 +1,19 @@
 const PAGE_META_KEY = "__hk_page_meta__";
 const DEFAULT_COLOR = "#ffeb3b";
+const GITHUB_SETTINGS_KEY = "hkGithubSyncSettings";
+const GITHUB_DEFAULT_SETTINGS = {
+  token: "",
+  repo: "",
+  branch: "main",
+  path: "backups/highlight-keeper.json",
+};
 
 const state = {
   pages: [],
   meta: {},
   searchTerm: "",
 };
+let githubSettings = { ...GITHUB_DEFAULT_SETTINGS };
 
 const statusEl = document.getElementById("managerStatus");
 const listEl = document.getElementById("pageList");
@@ -14,11 +22,23 @@ const downloadBtn = document.getElementById("downloadAllBtn");
 const importInput = document.getElementById("bulkImportInput");
 const closeBtn = document.getElementById("closeManagerBtn");
 const searchInput = document.getElementById("managerSearch");
+const githubTokenInput = document.getElementById("githubToken");
+const githubRepoInput = document.getElementById("githubRepo");
+const githubBranchInput = document.getElementById("githubBranch");
+const githubPathInput = document.getElementById("githubPath");
+const githubUploadBtn = document.getElementById("githubUploadBtn");
+const githubStatusEl = document.getElementById("githubSyncStatus");
 
 const setStatus = (message, isError = false) => {
   if (!statusEl) return;
   statusEl.textContent = message || "";
   statusEl.classList.toggle("is-error", Boolean(isError));
+};
+
+const setGithubStatus = (message, isError = false) => {
+  if (!githubStatusEl) return;
+  githubStatusEl.textContent = message || "";
+  githubStatusEl.classList.toggle("is-error", Boolean(isError));
 };
 
 const getPageDisplayName = (url) => {
@@ -66,6 +86,88 @@ const parseTags = (input) => {
   );
 };
 
+const applyGithubSettingsToFields = () => {
+  if (githubTokenInput) {
+    githubTokenInput.value = githubSettings.token || "";
+  }
+  if (githubRepoInput) {
+    githubRepoInput.value = githubSettings.repo || "";
+  }
+  if (githubBranchInput) {
+    githubBranchInput.value = githubSettings.branch || "";
+  }
+  if (githubPathInput) {
+    githubPathInput.value = githubSettings.path || "";
+  }
+};
+
+const persistGithubSettings = (updates = {}) => {
+  const normalized = { ...updates };
+  if (typeof normalized.repo === "string") {
+    normalized.repo = normalized.repo.trim();
+  }
+  if (typeof normalized.branch === "string") {
+    normalized.branch = normalized.branch.trim() || GITHUB_DEFAULT_SETTINGS.branch;
+  }
+  if (typeof normalized.path === "string") {
+    normalized.path = normalized.path.replace(/^\/+/, "");
+  }
+  githubSettings = {
+    ...githubSettings,
+    ...normalized,
+  };
+  return chrome.storage.local
+    .set({ [GITHUB_SETTINGS_KEY]: githubSettings })
+    .catch((error) => {
+      console.debug("儲存 GitHub 設定失敗", error);
+    });
+};
+
+const loadGithubSettings = async () => {
+  try {
+    const stored = await chrome.storage.local.get(GITHUB_SETTINGS_KEY);
+    const saved = stored?.[GITHUB_SETTINGS_KEY] || {};
+    githubSettings = {
+      ...GITHUB_DEFAULT_SETTINGS,
+      ...saved,
+    };
+    githubSettings = {
+      ...githubSettings,
+      token: githubSettings.token || "",
+      repo: githubSettings.repo?.trim() || "",
+      branch: githubSettings.branch?.trim() || GITHUB_DEFAULT_SETTINGS.branch,
+      path: (githubSettings.path || GITHUB_DEFAULT_SETTINGS.path).replace(
+        /^\/+/,
+        ""
+      ),
+    };
+  } catch (error) {
+    console.debug("讀取 GitHub 設定失敗", error);
+    githubSettings = { ...GITHUB_DEFAULT_SETTINGS };
+  } finally {
+    applyGithubSettingsToFields();
+  }
+};
+
+const bindGithubInput = (element, key) => {
+  if (!element) return;
+  element.addEventListener("input", (event) => {
+    let value = event.target.value;
+    if (key !== "token") {
+      value = value.trim();
+    }
+    if (key === "path") {
+      value = value.replace(/^\/+/, "");
+      if (value !== event.target.value) {
+        event.target.value = value;
+      }
+    } else if (key !== "token" && value !== event.target.value) {
+      event.target.value = value;
+    }
+    persistGithubSettings({ [key]: value });
+  });
+};
+
 const parseImportedHighlightsPayload = (rawText) => {
   let parsed;
   try {
@@ -77,6 +179,43 @@ const parseImportedHighlightsPayload = (rawText) => {
   if (parsed && Array.isArray(parsed.entries)) return parsed.entries;
   if (parsed && typeof parsed === "object") return [parsed];
   return [];
+};
+
+const sanitizeImportedAnchors = (anchors) => {
+  if (!anchors || typeof anchors !== "object") return undefined;
+  const sanitizeBoundary = (boundary) => {
+    if (!boundary || typeof boundary !== "object") return undefined;
+    const css =
+      typeof boundary.css === "string" && boundary.css.trim()
+        ? boundary.css.trim()
+        : undefined;
+    const offset =
+      typeof boundary.textOffset === "number" && Number.isFinite(boundary.textOffset)
+        ? boundary.textOffset
+        : undefined;
+    if (!css && typeof offset === "undefined") return undefined;
+    return { css, textOffset: offset };
+  };
+  const sanitized = {
+    version:
+      typeof anchors.version === "number" && Number.isFinite(anchors.version)
+        ? anchors.version
+        : undefined,
+    start: sanitizeBoundary(anchors.start),
+    end: sanitizeBoundary(anchors.end),
+    quote:
+      anchors.quote && typeof anchors.quote === "object"
+        ? {
+            exact: typeof anchors.quote.exact === "string" ? anchors.quote.exact : "",
+            prefix: typeof anchors.quote.prefix === "string" ? anchors.quote.prefix : "",
+            suffix: typeof anchors.quote.suffix === "string" ? anchors.quote.suffix : "",
+          }
+        : undefined,
+  };
+  if (!sanitized.start && !sanitized.end && !sanitized.quote) {
+    return undefined;
+  }
+  return sanitized;
 };
 
 const normalizeImportedHighlightEntry = (entry, index) => {
@@ -103,6 +242,7 @@ const normalizeImportedHighlightEntry = (entry, index) => {
       endXPath: range.endXPath,
       endOffset: Number(range.endOffset) || 0,
       text: range.text ?? entry.text ?? "",
+      anchors: sanitizeImportedAnchors(range.anchors),
     },
     url,
     createdAt:
@@ -208,22 +348,24 @@ const refreshManager = async () => {
   renderPageList();
 };
 
+const buildFullExportPayload = () => ({
+  type: "highlight-keeper-bulk",
+  version: 1,
+  exportedAt: Date.now(),
+  pages: state.pages.map((page) => ({
+    url: page.url,
+    title: state.meta[page.url]?.title || "",
+    entries: page.entries,
+  })),
+});
+
 const downloadAllPages = async () => {
   await fetchAllPages();
   if (!state.pages.length) {
     setStatus("沒有筆記可匯出", true);
     return;
   }
-  const payload = {
-    type: "highlight-keeper-bulk",
-    version: 1,
-    exportedAt: Date.now(),
-    pages: state.pages.map((page) => ({
-      url: page.url,
-      title: state.meta[page.url]?.title || "",
-      entries: page.entries,
-    })),
-  };
+  const payload = buildFullExportPayload();
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: "application/json",
   });
@@ -236,6 +378,150 @@ const downloadAllPages = async () => {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
   setStatus("已下載全部筆記");
+};
+
+const encodeContentToBase64 = (text) => {
+  const encoder = new TextEncoder();
+  const bytes = encoder.encode(text);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+};
+
+const buildRepoApiBase = (repo) => {
+  if (typeof repo !== "string") return null;
+  const [owner, name] = repo.split("/").map((part) => part?.trim());
+  if (!owner || !name) return null;
+  return `https://api.github.com/repos/${encodeURIComponent(
+    owner
+  )}/${encodeURIComponent(name)}`;
+};
+
+const buildContentPath = (path) => {
+  if (typeof path !== "string") return "";
+  return path
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+};
+
+const getGithubSettingsSnapshot = () => {
+  const token =
+    githubTokenInput?.value?.trim() || githubSettings.token?.trim() || "";
+  const repo =
+    githubRepoInput?.value?.trim() || githubSettings.repo?.trim() || "";
+  const branch =
+    githubBranchInput?.value?.trim() ||
+    githubSettings.branch?.trim() ||
+    GITHUB_DEFAULT_SETTINGS.branch;
+  const pathInput =
+    githubPathInput?.value?.trim() ||
+    githubSettings.path?.trim() ||
+    GITHUB_DEFAULT_SETTINGS.path;
+  const normalizedPath = pathInput.replace(/^\/+/, "");
+  return {
+    token,
+    repo,
+    branch: branch || GITHUB_DEFAULT_SETTINGS.branch,
+    path: normalizedPath,
+  };
+};
+
+const validateGithubSettings = (settings) => {
+  if (!settings.token) return "請輸入 GitHub Token";
+  if (!settings.repo || !settings.repo.includes("/")) {
+    return "請輸入 owner/repo 格式的儲存庫";
+  }
+  if (!settings.path) return "請輸入檔案路徑";
+  return null;
+};
+
+const fetchGithubFileSha = async (settings) => {
+  const repoBase = buildRepoApiBase(settings.repo);
+  if (!repoBase) throw new Error("儲存庫格式不正確");
+  const encodedPath = buildContentPath(settings.path);
+  const url = `${repoBase}/contents/${encodedPath}?ref=${encodeURIComponent(
+    settings.branch
+  )}`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${settings.token}`,
+      Accept: "application/vnd.github+json",
+    },
+  });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`GitHub 讀取檔案失敗：${errorText}`);
+  }
+  const json = await response.json();
+  return json?.sha ?? null;
+};
+
+const uploadHighlightsToGithub = async () => {
+  const settings = getGithubSettingsSnapshot();
+  const validationError = validateGithubSettings(settings);
+  if (validationError) {
+    setGithubStatus(validationError, true);
+    return;
+  }
+  if (!githubUploadBtn) return;
+  githubUploadBtn.disabled = true;
+  setGithubStatus("上傳中…");
+  try {
+    await fetchAllPages();
+    if (!state.pages.length) {
+      throw new Error("目前沒有筆記可上傳");
+    }
+    const payload = buildFullExportPayload();
+    const content = encodeContentToBase64(JSON.stringify(payload, null, 2));
+    let existingSha = null;
+    try {
+      existingSha = await fetchGithubFileSha(settings);
+    } catch (error) {
+      console.debug("查詢 GitHub 既有檔案失敗", error);
+    }
+    const repoBase = buildRepoApiBase(settings.repo);
+    if (!repoBase) {
+      throw new Error("儲存庫格式不正確");
+    }
+    const encodedPath = buildContentPath(settings.path);
+    const url = `${repoBase}/contents/${encodedPath}`;
+    const body = {
+      message: `backup: highlight-keeper (${new Date().toISOString()})`,
+      content,
+      branch: settings.branch,
+    };
+    if (existingSha) {
+      body.sha = existingSha;
+    }
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${settings.token}`,
+        "Content-Type": "application/json",
+        Accept: "application/vnd.github+json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`GitHub API 錯誤：${errorText}`);
+    }
+    setGithubStatus("已成功上傳到 GitHub");
+    githubSettings = { ...githubSettings, ...settings };
+    persistGithubSettings(githubSettings);
+  } catch (error) {
+    setGithubStatus(error?.message || "上傳失敗", true);
+  } finally {
+    githubUploadBtn.disabled = false;
+  }
 };
 
 const savePageMetaTitles = async (updates) => {
@@ -330,6 +616,16 @@ const init = () => {
   searchInput?.addEventListener("input", (event) => {
     state.searchTerm = event.target.value ?? "";
     renderPageList();
+  });
+  bindGithubInput(githubTokenInput, "token");
+  bindGithubInput(githubRepoInput, "repo");
+  bindGithubInput(githubBranchInput, "branch");
+  bindGithubInput(githubPathInput, "path");
+  githubUploadBtn?.addEventListener("click", () => {
+    uploadHighlightsToGithub();
+  });
+  loadGithubSettings().catch((error) => {
+    console.debug("初始化 GitHub 設定失敗", error);
   });
 };
 
