@@ -92,7 +92,7 @@ const ensureFloatingButton = () => {
   floatingButton.title = "標註選取文字";
   const iconSrc =
     chrome?.runtime?.id && typeof chrome.runtime.getURL === "function"
-      ? chrome.runtime.getURL("Icon.png")
+      ? chrome.runtime.getURL("Icon/32.png")
       : null;
   if (iconSrc) {
     floatingButton.innerHTML = `<img src="${iconSrc}" class="hk-floating-btn-image" alt="" aria-hidden="true" />`;
