@@ -18,7 +18,8 @@
     "16": "Icon/16.png",
     "32": "Icon/32.png",
     "48": "Icon/48.png",
-    "128": "Icon/128.png"
+    "128": "Icon/128.png",
+    "400": "Icon/Icon.png"
   },
   "content_scripts": [
     {
@@ -34,7 +35,8 @@
         "Icon/16.png",
         "Icon/32.png",
         "Icon/48.png",
-        "Icon/128.png"
+        "Icon/128.png",
+        "Icon/Icon.png"
       ],
       "matches": ["<all_urls>"]
     }
