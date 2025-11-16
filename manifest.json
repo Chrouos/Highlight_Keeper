@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Highlight Keeper",
   "version": "1.0.0",
-  "description": "在任意網頁標註文字、挑選顏色，並在本機儲存與還原標記。",
+  "description": "在任意網頁加上可自訂顏色的高亮與筆記，支援搜尋、標籤、批次匯出匯入、本機與 GitHub 備份還原。",
   "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
   "action": {

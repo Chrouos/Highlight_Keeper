@@ -107,6 +107,8 @@ body {
 .hk-manager-sync-actions {
   display: flex;
   justify-content: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .hk-manager-btn-muted {

@@ -26,6 +26,7 @@ const githubTokenInput = document.getElementById("githubToken");
 const githubRepoInput = document.getElementById("githubRepo");
 const githubBranchInput = document.getElementById("githubBranch");
 const githubPathInput = document.getElementById("githubPath");
+const githubDownloadBtn = document.getElementById("githubDownloadBtn");
 const githubUploadBtn = document.getElementById("githubUploadBtn");
 const githubStatusEl = document.getElementById("githubSyncStatus");
 
@@ -39,6 +40,15 @@ const setGithubStatus = (message, isError = false) => {
   if (!githubStatusEl) return;
   githubStatusEl.textContent = message || "";
   githubStatusEl.classList.toggle("is-error", Boolean(isError));
+};
+
+const setGithubActionsDisabled = (disabled) => {
+  if (githubUploadBtn) {
+    githubUploadBtn.disabled = disabled;
+  }
+  if (githubDownloadBtn) {
+    githubDownloadBtn.disabled = disabled;
+  }
 };
 
 const getPageDisplayName = (url) => {
@@ -359,6 +369,46 @@ const buildFullExportPayload = () => ({
   })),
 });
 
+const parseGithubBackupPayload = (rawText) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (_error) {
+    throw new Error("GitHub 備份檔案不是有效的 JSON 格式");
+  }
+  const pages = Array.isArray(parsed?.pages)
+    ? parsed.pages
+    : Array.isArray(parsed)
+    ? parsed
+    : [];
+  if (!pages.length) {
+    throw new Error("GitHub 備份中沒有頁面資料");
+  }
+  const normalized = pages
+    .map((page) => {
+      if (!page || typeof page !== "object") return null;
+      const url =
+        typeof page.url === "string"
+          ? page.url
+          : typeof page.pageUrl === "string"
+          ? page.pageUrl
+          : null;
+      if (!url || !isValidPageKey(url)) return null;
+      const entries = Array.isArray(page.entries) ? page.entries : [];
+      if (!entries.length) return null;
+      return {
+        url,
+        title: typeof page.title === "string" ? page.title : "",
+        entries,
+      };
+    })
+    .filter(Boolean);
+  if (!normalized.length) {
+    throw new Error("GitHub 備份裡沒有可匯入的筆記");
+  }
+  return normalized;
+};
+
 const downloadAllPages = async () => {
   await fetchAllPages();
   if (!state.pages.length) {
@@ -388,6 +438,18 @@ const encodeContentToBase64 = (text) => {
     binary += String.fromCharCode(byte);
   });
   return btoa(binary);
+};
+
+const decodeBase64ToText = (encoded) => {
+  if (!encoded) return "";
+  const sanitized = encoded.replace(/\s/g, "");
+  const binary = atob(sanitized);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  const decoder = new TextDecoder();
+  return decoder.decode(bytes);
 };
 
 const buildRepoApiBase = (repo) => {
@@ -464,6 +526,33 @@ const fetchGithubFileSha = async (settings) => {
   return json?.sha ?? null;
 };
 
+const fetchGithubBackupContent = async (settings) => {
+  const repoBase = buildRepoApiBase(settings.repo);
+  if (!repoBase) throw new Error("儲存庫格式不正確");
+  const encodedPath = buildContentPath(settings.path);
+  const url = `${repoBase}/contents/${encodedPath}?ref=${encodeURIComponent(
+    settings.branch
+  )}`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${settings.token}`,
+      Accept: "application/vnd.github+json",
+    },
+  });
+  if (response.status === 404) {
+    throw new Error("GitHub 上找不到指定的備份檔案");
+  }
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`GitHub 讀取檔案失敗：${errorText}`);
+  }
+  const json = await response.json();
+  if (!json?.content) {
+    throw new Error("GitHub 回傳的檔案內容為空");
+  }
+  return decodeBase64ToText(json.content);
+};
+
 const uploadHighlightsToGithub = async () => {
   const settings = getGithubSettingsSnapshot();
   const validationError = validateGithubSettings(settings);
@@ -471,8 +560,7 @@ const uploadHighlightsToGithub = async () => {
     setGithubStatus(validationError, true);
     return;
   }
-  if (!githubUploadBtn) return;
-  githubUploadBtn.disabled = true;
+  setGithubActionsDisabled(true);
   setGithubStatus("上傳中…");
   try {
     await fetchAllPages();
@@ -520,7 +608,7 @@ const uploadHighlightsToGithub = async () => {
   } catch (error) {
     setGithubStatus(error?.message || "上傳失敗", true);
   } finally {
-    githubUploadBtn.disabled = false;
+    setGithubActionsDisabled(false);
   }
 };
 
@@ -534,6 +622,93 @@ const savePageMetaTitles = async (updates) => {
       ...updates,
     },
   });
+};
+
+const applyGithubBackupPages = async (pages) => {
+  if (!Array.isArray(pages) || !pages.length) {
+    setGithubStatus("GitHub 備份中沒有可匯入的頁面", true);
+    return;
+  }
+  await fetchAllPages();
+  const seen = new Set();
+  const uniquePages = pages.filter((page) => {
+    if (seen.has(page.url)) return false;
+    seen.add(page.url);
+    return true;
+  });
+  const urls = uniquePages.map((page) => page.url);
+  const existing = await chrome.storage.local.get(urls);
+  const overlapping = uniquePages
+    .filter((page) => Array.isArray(existing[page.url]) && existing[page.url].length)
+    .map((page) => page.url);
+  let pagesToImport = uniquePages;
+  let overwrittenCount = overlapping.length;
+  if (overlapping.length) {
+    const samples = overlapping.slice(0, 3).map((url) => `- ${getPageDisplayName(url)}`);
+    const confirmMessage = [
+      `有 ${overlapping.length} 個頁面在本機已有筆記。`,
+      ...samples,
+      overlapping.length > samples.length ? "..." : null,
+      "要覆蓋這些頁面並改用 GitHub 版本嗎？",
+      "按「取消」則只匯入新的頁面並保留本機資料。",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const shouldOverride = window.confirm(confirmMessage);
+    if (!shouldOverride) {
+      pagesToImport = uniquePages.filter((page) => !overlapping.includes(page.url));
+      overwrittenCount = 0;
+    }
+  }
+  if (!pagesToImport.length) {
+    setGithubStatus("已取消匯入，本機筆記保持不變。");
+    return;
+  }
+  const updates = Object.fromEntries(
+    pagesToImport.map((page) => [page.url, page.entries])
+  );
+  const metaUpdates = {};
+  pagesToImport.forEach((page) => {
+    if (page.title) {
+      metaUpdates[page.url] = {
+        ...(state.meta[page.url] || {}),
+        title: page.title,
+      };
+    }
+  });
+  await chrome.storage.local.set(updates);
+  await savePageMetaTitles(metaUpdates);
+  const importedCount = pagesToImport.length;
+  const skippedOverlap = overlapping.length - overwrittenCount;
+  const statusParts = [
+    `已從 GitHub 匯入 ${importedCount} 個頁面`,
+    overwrittenCount ? `覆蓋 ${overwrittenCount} 個已存在頁面` : null,
+    skippedOverlap > 0 ? `保留 ${skippedOverlap} 個本機版本` : null,
+  ].filter(Boolean);
+  setGithubStatus(statusParts.join("，"));
+  await refreshManager();
+};
+
+const downloadHighlightsFromGithub = async () => {
+  const settings = getGithubSettingsSnapshot();
+  const validationError = validateGithubSettings(settings);
+  if (validationError) {
+    setGithubStatus(validationError, true);
+    return;
+  }
+  setGithubActionsDisabled(true);
+  setGithubStatus("從 GitHub 下載中…");
+  try {
+    const content = await fetchGithubBackupContent(settings);
+    const pages = parseGithubBackupPayload(content);
+    await applyGithubBackupPages(pages);
+    githubSettings = { ...githubSettings, ...settings };
+    persistGithubSettings(githubSettings);
+  } catch (error) {
+    setGithubStatus(error?.message || "下載失敗", true);
+  } finally {
+    setGithubActionsDisabled(false);
+  }
 };
 
 const importMultipleFiles = async (files) => {
@@ -621,6 +796,9 @@ const init = () => {
   bindGithubInput(githubRepoInput, "repo");
   bindGithubInput(githubBranchInput, "branch");
   bindGithubInput(githubPathInput, "path");
+  githubDownloadBtn?.addEventListener("click", () => {
+    downloadHighlightsFromGithub();
+  });
   githubUploadBtn?.addEventListener("click", () => {
     uploadHighlightsToGithub();
   });
