@@ -145,8 +145,8 @@
 
 .hk-menu-note {
   resize: vertical;
-  min-height: 64px;
-  max-height: 180px;
+  min-height: 120px;
+  max-height: 260px;
   font-size: 13px;
   line-height: 1.4;
   padding: 8px;

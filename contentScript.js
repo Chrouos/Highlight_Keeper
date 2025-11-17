@@ -2663,7 +2663,7 @@ const ensureHighlightMenu = () => {
   noteLabel.textContent = "註解";
   const noteField = document.createElement("textarea");
   noteField.className = "hk-menu-note";
-  noteField.rows = 3;
+  noteField.rows = 6;
   noteField.placeholder = "輸入註解...";
   noteWrapper.appendChild(noteLabel);
   noteWrapper.appendChild(noteField);
