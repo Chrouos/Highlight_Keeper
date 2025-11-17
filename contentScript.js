@@ -3829,11 +3829,14 @@ const applyHighlight = async (color) => {
 
 const handleSelectionIntent = () => {
   const activeEl = document.activeElement;
+  const isInsideHighlightUi =
+    activeEl instanceof Node &&
+    ((highlightMenu && highlightMenu.contains(activeEl)) ||
+      (highlightPanel && highlightPanel.contains(activeEl)));
   if (
     highlightMenu &&
     highlightMenu.style.display !== "none" &&
-    activeEl instanceof Node &&
-    highlightMenu.contains(activeEl)
+    isInsideHighlightUi
   ) {
     return;
   }
