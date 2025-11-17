@@ -3828,6 +3828,15 @@ const applyHighlight = async (color) => {
 };
 
 const handleSelectionIntent = () => {
+  const activeEl = document.activeElement;
+  if (
+    highlightMenu &&
+    highlightMenu.style.display !== "none" &&
+    activeEl instanceof Node &&
+    highlightMenu.contains(activeEl)
+  ) {
+    return;
+  }
   if (selectionDebounceTimer) {
     window.clearTimeout(selectionDebounceTimer);
   }
