@@ -263,3 +263,126 @@ body {
 .hk-manager-status.is-error {
   color: #dc2626;
 }
+
+.hk-manager-detail {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hk-manager-detail.is-hidden {
+  display: none;
+}
+
+.hk-manager-detail-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.hk-manager-detail-dialog {
+  position: relative;
+  background: #fff;
+  max-width: 760px;
+  width: 90%;
+  max-height: 80vh;
+  border-radius: 14px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  padding: 20px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hk-manager-detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.hk-manager-detail-header h3 {
+  margin: 0;
+}
+
+.hk-manager-detail-url {
+  display: inline-block;
+  color: #2563eb;
+  font-size: 13px;
+  word-break: break-all;
+  margin-top: 2px;
+}
+
+.hk-manager-detail-meta {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.hk-manager-detail-close {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  cursor: pointer;
+  color: #94a3b8;
+}
+
+.hk-manager-detail-close:hover,
+.hk-manager-detail-close:focus-visible {
+  color: #0f172a;
+}
+
+.hk-manager-detail-section {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+
+.hk-manager-detail-section h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.hk-manager-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hk-manager-detail-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.hk-manager-detail-text {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.hk-manager-detail-note {
+  margin: 0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.hk-manager-detail-empty {
+  margin: 0;
+  color: #94a3b8;
+}
+
+.hk-manager-detail-ai {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  color: #0f172a;
+}

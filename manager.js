@@ -11,6 +11,7 @@ const GITHUB_DEFAULT_SETTINGS = {
 const state = {
   pages: [],
   meta: {},
+  notes: {},
   searchTerm: "",
 };
 let githubSettings = { ...GITHUB_DEFAULT_SETTINGS };
@@ -29,6 +30,7 @@ const githubPathInput = document.getElementById("githubPath");
 const githubDownloadBtn = document.getElementById("githubDownloadBtn");
 const githubUploadBtn = document.getElementById("githubUploadBtn");
 const githubStatusEl = document.getElementById("githubSyncStatus");
+const detailOverlayId = "hk-manager-detail";
 
 const setStatus = (message, isError = false) => {
   if (!statusEl) return;
@@ -272,6 +274,7 @@ const normalizeImportedHighlightEntry = (entry, index) => {
 const fetchAllPages = async () => {
   const all = await chrome.storage.local.get(null);
   const meta = all[PAGE_META_KEY] || {};
+  const notes = all.hkGeneratedNotes || {};
   const pages = Object.entries(all)
     .filter(([key, value]) => isValidPageKey(key) && Array.isArray(value))
     .map(([url, entries]) => {
@@ -290,6 +293,7 @@ const fetchAllPages = async () => {
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   state.pages = pages;
   state.meta = meta;
+  state.notes = notes;
 };
 
 const matchesSearch = (page, term) => {
@@ -329,6 +333,7 @@ const renderPageList = () => {
   filtered.forEach((page) => {
     const card = document.createElement("article");
     card.className = "hk-manager-card";
+    card.addEventListener("click", () => openPageDetail(page));
     const title = document.createElement("h3");
     title.textContent = page.title;
     card.appendChild(title);
@@ -428,6 +433,145 @@ const downloadAllPages = async () => {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
   setStatus("已下載全部筆記");
+};
+
+const ensureDetailOverlay = () => {
+  let overlay = document.getElementById(detailOverlayId);
+  if (overlay) return overlay;
+
+  overlay = document.createElement("div");
+  overlay.id = detailOverlayId;
+  overlay.className = "hk-manager-detail is-hidden";
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "hk-manager-detail-backdrop";
+  backdrop.addEventListener("click", () => closePageDetail());
+
+  const dialog = document.createElement("div");
+  dialog.className = "hk-manager-detail-dialog";
+
+  const header = document.createElement("header");
+  header.className = "hk-manager-detail-header";
+
+  const headingWrap = document.createElement("div");
+  const titleEl = document.createElement("h3");
+  titleEl.id = "hk-manager-detail-title";
+  const urlEl = document.createElement("a");
+  urlEl.id = "hk-manager-detail-url";
+  urlEl.className = "hk-manager-detail-url";
+  urlEl.target = "_blank";
+  urlEl.rel = "noopener";
+  const metaEl = document.createElement("div");
+  metaEl.id = "hk-manager-detail-meta";
+  metaEl.className = "hk-manager-detail-meta";
+  headingWrap.appendChild(titleEl);
+  headingWrap.appendChild(urlEl);
+  headingWrap.appendChild(metaEl);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "hk-manager-detail-close";
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", () => closePageDetail());
+
+  header.appendChild(headingWrap);
+  header.appendChild(closeBtn);
+
+  const entriesSection = document.createElement("section");
+  entriesSection.className = "hk-manager-detail-section";
+  const entriesTitle = document.createElement("h4");
+  entriesTitle.textContent = "筆記";
+  const entriesList = document.createElement("div");
+  entriesList.id = "hk-manager-detail-entries";
+  entriesList.className = "hk-manager-detail-list";
+  entriesSection.appendChild(entriesTitle);
+  entriesSection.appendChild(entriesList);
+
+  const aiSection = document.createElement("section");
+  aiSection.className = "hk-manager-detail-section";
+  aiSection.id = "hk-manager-detail-ai";
+  const aiTitle = document.createElement("h4");
+  aiTitle.textContent = "AI 紀錄";
+  const aiContent = document.createElement("p");
+  aiContent.id = "hk-manager-detail-ai-content";
+  aiContent.className = "hk-manager-detail-ai";
+  aiSection.appendChild(aiTitle);
+  aiSection.appendChild(aiContent);
+
+  dialog.appendChild(header);
+  dialog.appendChild(entriesSection);
+  dialog.appendChild(aiSection);
+
+  overlay.appendChild(backdrop);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  return overlay;
+};
+
+const closePageDetail = () => {
+  const overlay = document.getElementById(detailOverlayId);
+  if (!overlay) return;
+  overlay.classList.add("is-hidden");
+};
+
+const renderPageDetail = (page) => {
+  const overlay = ensureDetailOverlay();
+  const titleEl = overlay.querySelector("#hk-manager-detail-title");
+  const urlEl = overlay.querySelector("#hk-manager-detail-url");
+  const metaEl = overlay.querySelector("#hk-manager-detail-meta");
+  const entriesList = overlay.querySelector("#hk-manager-detail-entries");
+  const aiContent = overlay.querySelector("#hk-manager-detail-ai-content");
+  const aiSection = overlay.querySelector("#hk-manager-detail-ai");
+  if (!titleEl || !urlEl || !metaEl || !entriesList || !aiContent || !aiSection) return;
+
+  titleEl.textContent = page.title;
+  urlEl.textContent = page.url;
+  urlEl.href = page.url;
+  metaEl.textContent = `筆記 ${page.total} 則 · 最後更新：${
+    page.updatedAt
+      ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
+          new Date(page.updatedAt)
+        )
+      : "未知時間"
+  }`;
+
+  entriesList.innerHTML = "";
+  if (!page.entries?.length) {
+    const empty = document.createElement("p");
+    empty.className = "hk-manager-detail-empty";
+    empty.textContent = "尚無筆記。";
+    entriesList.appendChild(empty);
+  } else {
+    page.entries.forEach((entry) => {
+      const item = document.createElement("article");
+      item.className = "hk-manager-detail-item";
+      const text = document.createElement("p");
+      text.className = "hk-manager-detail-text";
+      text.textContent = entry.text || "(無內容)";
+      const note = document.createElement("p");
+      note.className = "hk-manager-detail-note";
+      note.textContent =
+        entry.note && entry.note.trim() ? `註解：${entry.note.trim()}` : "註解：—";
+      item.appendChild(text);
+      item.appendChild(note);
+      entriesList.appendChild(item);
+    });
+  }
+
+  const aiNote = state.notes?.[page.url];
+  if (aiNote?.note) {
+    aiContent.textContent = aiNote.note;
+    aiSection.style.display = "";
+  } else {
+    aiContent.textContent = "尚未產生 AI 紀錄。";
+    aiSection.style.display = "";
+  }
+};
+
+const openPageDetail = (page) => {
+  renderPageDetail(page);
+  const overlay = ensureDetailOverlay();
+  overlay.classList.remove("is-hidden");
 };
 
 const encodeContentToBase64 = (text) => {
