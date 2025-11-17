@@ -430,6 +430,37 @@ body {
   color: #0f172a;
 }
 
+.hk-manager-detail-tags {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.hk-manager-tags-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.hk-manager-tag-chip {
+  background: #e0ecff;
+  color: #1d4ed8;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.hk-manager-detail-tags .hk-manager-input {
+  grid-column: 2 / 3;
+  width: 100%;
+}
+
+.hk-manager-detail-tags .hk-manager-btn-muted {
+  grid-column: 2 / 3;
+  justify-self: flex-start;
+}
+
 @media (max-width: 768px) {
   .hk-manager-detail-body {
     grid-template-columns: 1fr;
@@ -437,5 +468,9 @@ body {
 
   .hk-manager-detail-section-ai {
     padding: 10px;
+  }
+
+  .hk-manager-detail-tags {
+    grid-template-columns: 1fr;
   }
 }

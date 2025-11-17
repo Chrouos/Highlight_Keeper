@@ -14,6 +14,7 @@ const state = {
   notes: {},
   searchTerm: "",
 };
+let detailCurrentPageUrl = "";
 let githubSettings = { ...GITHUB_DEFAULT_SETTINGS };
 
 const statusEl = document.getElementById("managerStatus");
@@ -287,6 +288,7 @@ const fetchAllPages = async () => {
         title: meta[url]?.title?.trim() || getPageDisplayName(url),
         total: entries.length,
         updatedAt: latest,
+        tags: Array.isArray(meta[url]?.tags) ? meta[url].tags : [],
         entries,
       };
     })
@@ -303,6 +305,7 @@ const matchesSearch = (page, term) => {
   const haystacks = [
     page.title,
     page.url,
+    ...(Array.isArray(page.tags) ? page.tags : []),
     ...(page.entries || []).flatMap((entry) => [
       entry.text,
       entry.note,
@@ -484,10 +487,37 @@ const ensureDetailOverlay = () => {
   entriesSection.className = "hk-manager-detail-section hk-manager-detail-section-notes";
   const entriesTitle = document.createElement("h4");
   entriesTitle.textContent = "筆記";
+  const tagsRow = document.createElement("div");
+  tagsRow.className = "hk-manager-detail-tags";
+  const tagsLabel = document.createElement("span");
+  tagsLabel.textContent = "頁面標籤";
+  const tagsChips = document.createElement("div");
+  tagsChips.id = "hk-manager-detail-tags-chips";
+  tagsChips.className = "hk-manager-tags-chips";
+  const tagsInput = document.createElement("input");
+  tagsInput.id = "hk-manager-detail-tags-input";
+  tagsInput.className = "hk-manager-input";
+  tagsInput.placeholder = "以逗號或空白分隔多個 Tags";
+  const tagsButton = document.createElement("button");
+  tagsButton.type = "button";
+  tagsButton.className = "hk-manager-btn hk-manager-btn-muted";
+  tagsButton.textContent = "套用標籤";
+  tagsButton.addEventListener("click", () => savePageTagsFromDetail());
+  tagsInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      savePageTagsFromDetail();
+    }
+  });
+  tagsRow.appendChild(tagsLabel);
+  tagsRow.appendChild(tagsChips);
+  tagsRow.appendChild(tagsInput);
+  tagsRow.appendChild(tagsButton);
   const entriesList = document.createElement("div");
   entriesList.id = "hk-manager-detail-entries";
   entriesList.className = "hk-manager-detail-list";
   entriesSection.appendChild(entriesTitle);
+  entriesSection.appendChild(tagsRow);
   entriesSection.appendChild(entriesList);
 
   const aiSection = document.createElement("section");
@@ -517,6 +547,7 @@ const closePageDetail = () => {
   const overlay = document.getElementById(detailOverlayId);
   if (!overlay) return;
   overlay.classList.add("is-hidden");
+  detailCurrentPageUrl = "";
 };
 
 const renderPageDetail = (page) => {
@@ -527,8 +558,21 @@ const renderPageDetail = (page) => {
   const entriesList = overlay.querySelector("#hk-manager-detail-entries");
   const aiContent = overlay.querySelector("#hk-manager-detail-ai-content");
   const aiSection = overlay.querySelector("#hk-manager-detail-ai");
-  if (!titleEl || !urlEl || !metaEl || !entriesList || !aiContent || !aiSection) return;
+  const tagsChips = overlay.querySelector("#hk-manager-detail-tags-chips");
+  const tagsInput = overlay.querySelector("#hk-manager-detail-tags-input");
+  if (
+    !titleEl ||
+    !urlEl ||
+    !metaEl ||
+    !entriesList ||
+    !aiContent ||
+    !aiSection ||
+    !tagsChips ||
+    !tagsInput
+  )
+    return;
 
+  detailCurrentPageUrl = page.url;
   titleEl.textContent = page.title;
   urlEl.textContent = page.url;
   urlEl.href = page.url;
@@ -575,6 +619,25 @@ const renderPageDetail = (page) => {
     });
   }
 
+  const sanitizedTags = Array.isArray(page.tags)
+    ? Array.from(new Set(page.tags.map((tag) => tag.trim()).filter(Boolean)))
+    : [];
+  tagsChips.innerHTML = "";
+  if (!sanitizedTags.length) {
+    const emptyTag = document.createElement("span");
+    emptyTag.className = "hk-manager-detail-empty";
+    emptyTag.textContent = "尚無標籤";
+    tagsChips.appendChild(emptyTag);
+  } else {
+    sanitizedTags.forEach((tag) => {
+      const chip = document.createElement("span");
+      chip.className = "hk-manager-tag-chip";
+      chip.textContent = tag;
+      tagsChips.appendChild(chip);
+    });
+  }
+  tagsInput.value = sanitizedTags.join(", ");
+
   const aiNote = state.notes?.[page.url];
   if (aiNote?.note) {
     aiContent.textContent = aiNote.note;
@@ -589,6 +652,70 @@ const openPageDetail = (page) => {
   renderPageDetail(page);
   const overlay = ensureDetailOverlay();
   overlay.classList.remove("is-hidden");
+};
+
+const normalizeTagsInput = (input) => {
+  if (!input) return [];
+  return Array.from(
+    new Set(
+      input
+        .split(/[,\\s]+/)
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+    )
+  );
+};
+
+const savePageTagsInStorage = async (url, tags) => {
+  const stored = await chrome.storage.local.get(PAGE_META_KEY);
+  const current = stored[PAGE_META_KEY] || {};
+  const existing = current[url] || {};
+  const normalized = Array.isArray(tags) ? tags : [];
+  const next = {
+    ...existing,
+    tags: normalized,
+    updatedAt: Date.now(),
+  };
+  await chrome.storage.local.set({
+    [PAGE_META_KEY]: {
+      ...current,
+      [url]: next,
+    },
+  });
+};
+
+const savePageTagsFromDetail = async () => {
+  if (!detailCurrentPageUrl) return;
+  const overlay = ensureDetailOverlay();
+  const input = overlay.querySelector("#hk-manager-detail-tags-input");
+  const chips = overlay.querySelector("#hk-manager-detail-tags-chips");
+  if (!input || !chips) return;
+  const tags = normalizeTagsInput(input.value);
+  try {
+    await savePageTagsInStorage(detailCurrentPageUrl, tags);
+    state.meta[detailCurrentPageUrl] = {
+      ...(state.meta[detailCurrentPageUrl] || {}),
+      tags,
+    };
+    state.pages = state.pages.map((page) =>
+      page.url === detailCurrentPageUrl ? { ...page, tags } : page
+    );
+    renderPageDetail(
+      state.pages.find((page) => page.url === detailCurrentPageUrl) || {
+        url: detailCurrentPageUrl,
+        title: state.meta[detailCurrentPageUrl]?.title || detailCurrentPageUrl,
+        total: 0,
+        updatedAt: null,
+        entries: [],
+        tags,
+      }
+    );
+    renderPageList();
+    setStatus("已更新頁面標籤");
+  } catch (error) {
+    console.debug("更新頁面標籤失敗", error);
+    setStatus("無法更新頁面標籤", true);
+  }
 };
 
 const encodeContentToBase64 = (text) => {
