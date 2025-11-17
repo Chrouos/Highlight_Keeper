@@ -295,7 +295,7 @@ body {
 .hk-manager-detail-dialog {
   position: relative;
   background: #fff;
-  max-width: 760px;
+  max-width: 900px;
   width: 90%;
   max-height: 80vh;
   border-radius: 14px;
@@ -354,6 +354,30 @@ body {
   overflow: auto;
 }
 
+.hk-manager-detail-body {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 16px;
+  min-height: 320px;
+}
+
+.hk-manager-detail-section-ai {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.hk-manager-detail-section-ai h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hk-manager-detail-section-notes {
+  padding-right: 6px;
+}
+
 .hk-manager-detail-section h4 {
   margin: 0;
   font-size: 14px;
@@ -404,4 +428,14 @@ body {
   white-space: pre-wrap;
   line-height: 1.5;
   color: #0f172a;
+}
+
+@media (max-width: 768px) {
+  .hk-manager-detail-body {
+    grid-template-columns: 1fr;
+  }
+
+  .hk-manager-detail-section-ai {
+    padding: 10px;
+  }
 }

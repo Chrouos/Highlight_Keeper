@@ -477,8 +477,11 @@ const ensureDetailOverlay = () => {
   header.appendChild(headingWrap);
   header.appendChild(closeBtn);
 
+  const body = document.createElement("div");
+  body.className = "hk-manager-detail-body";
+
   const entriesSection = document.createElement("section");
-  entriesSection.className = "hk-manager-detail-section";
+  entriesSection.className = "hk-manager-detail-section hk-manager-detail-section-notes";
   const entriesTitle = document.createElement("h4");
   entriesTitle.textContent = "筆記";
   const entriesList = document.createElement("div");
@@ -488,7 +491,7 @@ const ensureDetailOverlay = () => {
   entriesSection.appendChild(entriesList);
 
   const aiSection = document.createElement("section");
-  aiSection.className = "hk-manager-detail-section";
+  aiSection.className = "hk-manager-detail-section hk-manager-detail-section-ai";
   aiSection.id = "hk-manager-detail-ai";
   const aiTitle = document.createElement("h4");
   aiTitle.textContent = "AI 紀錄";
@@ -498,9 +501,11 @@ const ensureDetailOverlay = () => {
   aiSection.appendChild(aiTitle);
   aiSection.appendChild(aiContent);
 
+  body.appendChild(entriesSection);
+  body.appendChild(aiSection);
+
   dialog.appendChild(header);
-  dialog.appendChild(entriesSection);
-  dialog.appendChild(aiSection);
+  dialog.appendChild(body);
 
   overlay.appendChild(backdrop);
   overlay.appendChild(dialog);
@@ -548,12 +553,12 @@ const renderPageDetail = (page) => {
       const text = document.createElement("p");
       text.className = "hk-manager-detail-text";
       text.textContent = entry.text || "(無內容)";
-      const note = document.createElement("p");
-      note.className = "hk-manager-detail-note";
+      item.appendChild(text);
       const trimmedNote = entry.note?.trim();
-      note.textContent = trimmedNote ? `註解：${trimmedNote}` : "註解：—";
       if (trimmedNote) {
-        note.classList.add("is-clickable");
+        const note = document.createElement("p");
+        note.className = "hk-manager-detail-note is-clickable";
+        note.textContent = trimmedNote;
         note.setAttribute("title", "點擊複製註解");
         note.addEventListener("click", async () => {
           try {
@@ -564,9 +569,8 @@ const renderPageDetail = (page) => {
             setStatus("無法複製註解", true);
           }
         });
+        item.appendChild(note);
       }
-      item.appendChild(text);
-      item.appendChild(note);
       entriesList.appendChild(item);
     });
   }
