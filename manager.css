@@ -228,6 +228,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
 }
 
 .hk-manager-card h3 {
@@ -252,6 +254,13 @@ body {
 .hk-manager-card .hk-manager-meta {
   font-size: 12px;
   color: #64748b;
+}
+
+.hk-manager-card:hover,
+.hk-manager-card:focus-visible {
+  border-color: #cbd5e1;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  transform: translateY(-2px);
 }
 
 .hk-manager-status {
@@ -373,6 +382,16 @@ body {
   margin: 0;
   font-size: 13px;
   color: #475569;
+}
+
+.hk-manager-detail-note.is-clickable {
+  cursor: pointer;
+  color: #2563eb;
+}
+
+.hk-manager-detail-note.is-clickable:hover,
+.hk-manager-detail-note.is-clickable:focus-visible {
+  text-decoration: underline;
 }
 
 .hk-manager-detail-empty {

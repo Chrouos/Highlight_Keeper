@@ -550,8 +550,21 @@ const renderPageDetail = (page) => {
       text.textContent = entry.text || "(無內容)";
       const note = document.createElement("p");
       note.className = "hk-manager-detail-note";
-      note.textContent =
-        entry.note && entry.note.trim() ? `註解：${entry.note.trim()}` : "註解：—";
+      const trimmedNote = entry.note?.trim();
+      note.textContent = trimmedNote ? `註解：${trimmedNote}` : "註解：—";
+      if (trimmedNote) {
+        note.classList.add("is-clickable");
+        note.setAttribute("title", "點擊複製註解");
+        note.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(trimmedNote);
+            setStatus("已複製註解");
+          } catch (error) {
+            console.debug("複製註解失敗", error);
+            setStatus("無法複製註解", true);
+          }
+        });
+      }
       item.appendChild(text);
       item.appendChild(note);
       entriesList.appendChild(item);
