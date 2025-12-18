@@ -90,14 +90,29 @@ const ensureFloatingButton = () => {
   floatingButton.className = "hk-floating-btn";
   floatingButton.setAttribute("aria-label", "標註選取文字");
   floatingButton.title = "標註選取文字";
-  const iconSrc =
-    chrome?.runtime?.id && typeof chrome.runtime.getURL === "function"
-      ? chrome.runtime.getURL("Icon/32.png")
-      : null;
-  if (iconSrc) {
-    floatingButton.innerHTML = `<img src="${iconSrc}" class="hk-floating-btn-image" alt="" aria-hidden="true" />`;
-  } else {
-    floatingButton.textContent = "HL";
+  floatingButton.textContent = "HL";
+  if (chrome?.runtime?.id && typeof chrome.runtime.getURL === "function") {
+    try {
+      const iconSrc = chrome.runtime.getURL("Icon/32.png");
+      if (iconSrc) {
+        const iconImage = new Image();
+        iconImage.className = "hk-floating-btn-image";
+        iconImage.alt = "";
+        iconImage.setAttribute("aria-hidden", "true");
+        iconImage.decoding = "async";
+        iconImage.addEventListener("load", () => {
+          floatingButton.textContent = "";
+          floatingButton.appendChild(iconImage);
+        });
+        iconImage.addEventListener("error", () => {
+          iconImage.remove();
+          floatingButton.textContent = "HL";
+        });
+        iconImage.src = iconSrc;
+      }
+    } catch (error) {
+      console.debug("無法載入浮動按鈕圖示", error);
+    }
   }
   floatingButton.style.display = "none";
   floatingButton.addEventListener("mousedown", (event) => {
