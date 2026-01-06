@@ -183,6 +183,17 @@ body {
   background: #1d4ed8;
 }
 
+.hk-manager-btn-ghost {
+  background: #ffffff;
+  border-color: #cbd5e1;
+  color: #334155;
+}
+
+.hk-manager-btn-ghost:hover,
+.hk-manager-btn-ghost:focus-visible {
+  background: #f1f5f9;
+}
+
 .hk-manager-import input {
   position: absolute;
   inset: 0;
@@ -284,6 +295,56 @@ body {
 
 .hk-manager-detail.is-hidden {
   display: none;
+}
+
+.hk-manager-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hk-manager-confirm.is-hidden {
+  display: none;
+}
+
+.hk-manager-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+}
+
+.hk-manager-confirm-dialog {
+  position: relative;
+  background: #fff;
+  width: min(420px, 90%);
+  border-radius: 14px;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+  padding: 18px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hk-manager-confirm-dialog h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.hk-manager-confirm-message {
+  margin: 0;
+  font-size: 13px;
+  color: #475569;
+  white-space: pre-line;
+}
+
+.hk-manager-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
 }
 
 .hk-manager-detail-backdrop {

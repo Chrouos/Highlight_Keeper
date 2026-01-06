@@ -96,17 +96,21 @@ const ensureFloatingButton = () => {
       const iconSrc = chrome.runtime.getURL("Icon/32.png");
       if (iconSrc) {
         const iconImage = new Image();
-        iconImage.className = "hk-floating-btn-image";
-        iconImage.alt = "";
-        iconImage.setAttribute("aria-hidden", "true");
         iconImage.decoding = "async";
         iconImage.addEventListener("load", () => {
           floatingButton.textContent = "";
-          floatingButton.appendChild(iconImage);
+          floatingButton.style.setProperty(
+            "background-image",
+            `url("${iconSrc}")`,
+            "important"
+          );
+          floatingButton.style.setProperty("background-repeat", "no-repeat", "important");
+          floatingButton.style.setProperty("background-position", "center", "important");
+          floatingButton.style.setProperty("background-size", "22px 22px", "important");
         });
         iconImage.addEventListener("error", () => {
-          iconImage.remove();
           floatingButton.textContent = "HL";
+          floatingButton.style.removeProperty("background-image");
         });
         iconImage.src = iconSrc;
       }

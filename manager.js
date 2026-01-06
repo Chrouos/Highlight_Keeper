@@ -32,6 +32,7 @@ const githubDownloadBtn = document.getElementById("githubDownloadBtn");
 const githubUploadBtn = document.getElementById("githubUploadBtn");
 const githubStatusEl = document.getElementById("githubSyncStatus");
 const detailOverlayId = "hk-manager-detail";
+const confirmOverlayId = "hk-manager-confirm";
 
 const setStatus = (message, isError = false) => {
   if (!statusEl) return;
@@ -437,6 +438,106 @@ const downloadAllPages = async () => {
   URL.revokeObjectURL(url);
   setStatus("已下載全部筆記");
 };
+
+const ensureConfirmOverlay = () => {
+  let overlay = document.getElementById(confirmOverlayId);
+  if (overlay) return overlay;
+
+  overlay = document.createElement("div");
+  overlay.id = confirmOverlayId;
+  overlay.className = "hk-manager-confirm is-hidden";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-labelledby", "hk-manager-confirm-title");
+  overlay.setAttribute("aria-describedby", "hk-manager-confirm-message");
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "hk-manager-confirm-backdrop";
+
+  const dialog = document.createElement("div");
+  dialog.className = "hk-manager-confirm-dialog";
+  dialog.tabIndex = -1;
+
+  const title = document.createElement("h3");
+  title.id = "hk-manager-confirm-title";
+
+  const message = document.createElement("p");
+  message.id = "hk-manager-confirm-message";
+  message.className = "hk-manager-confirm-message";
+
+  const actions = document.createElement("div");
+  actions.className = "hk-manager-confirm-actions";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.id = "hk-manager-confirm-cancel";
+  cancelBtn.className = "hk-manager-btn hk-manager-btn-ghost";
+  cancelBtn.textContent = "取消";
+
+  const confirmBtn = document.createElement("button");
+  confirmBtn.type = "button";
+  confirmBtn.id = "hk-manager-confirm-ok";
+  confirmBtn.className = "hk-manager-btn";
+  confirmBtn.textContent = "確定";
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(confirmBtn);
+
+  dialog.appendChild(title);
+  dialog.appendChild(message);
+  dialog.appendChild(actions);
+
+  overlay.appendChild(backdrop);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  return overlay;
+};
+
+const openConfirmDialog = ({ title, message, confirmLabel, cancelLabel }) =>
+  new Promise((resolve) => {
+    const overlay = ensureConfirmOverlay();
+    const titleEl = overlay.querySelector("#hk-manager-confirm-title");
+    const messageEl = overlay.querySelector("#hk-manager-confirm-message");
+    const confirmBtn = overlay.querySelector("#hk-manager-confirm-ok");
+    const cancelBtn = overlay.querySelector("#hk-manager-confirm-cancel");
+    const backdrop = overlay.querySelector(".hk-manager-confirm-backdrop");
+
+    if (!titleEl || !messageEl || !confirmBtn || !cancelBtn || !backdrop) {
+      resolve(false);
+      return;
+    }
+
+    titleEl.textContent = title || "確認動作";
+    messageEl.textContent = message || "";
+    confirmBtn.textContent = confirmLabel || "確定";
+    cancelBtn.textContent = cancelLabel || "取消";
+
+    let resolved = false;
+    const cleanup = (result) => {
+      if (resolved) return;
+      resolved = true;
+      overlay.classList.add("is-hidden");
+      overlay.removeEventListener("keydown", onKeydown);
+      confirmBtn.onclick = null;
+      cancelBtn.onclick = null;
+      backdrop.onclick = null;
+      resolve(result);
+    };
+
+    const onKeydown = (event) => {
+      if (event.key === "Escape") {
+        cleanup(false);
+      }
+    };
+
+    confirmBtn.onclick = () => cleanup(true);
+    cancelBtn.onclick = () => cleanup(false);
+    backdrop.onclick = () => cleanup(false);
+    overlay.addEventListener("keydown", onKeydown);
+
+    overlay.classList.remove("is-hidden");
+    confirmBtn.focus();
+  });
 
 const ensureDetailOverlay = () => {
   let overlay = document.getElementById(detailOverlayId);
@@ -926,30 +1027,50 @@ const applyGithubBackupPages = async (pages) => {
   });
   const urls = uniquePages.map((page) => page.url);
   const existing = await chrome.storage.local.get(urls);
-  const overlapping = uniquePages
-    .filter((page) => Array.isArray(existing[page.url]) && existing[page.url].length)
-    .map((page) => page.url);
-  let pagesToImport = uniquePages;
-  let overwrittenCount = overlapping.length;
-  if (overlapping.length) {
-    const samples = overlapping.slice(0, 3).map((url) => `- ${getPageDisplayName(url)}`);
+  const overlapping = uniquePages.filter(
+    (page) => Array.isArray(existing[page.url]) && existing[page.url].length
+  );
+  const toSortedJson = (value) => JSON.stringify(value ?? null);
+  const isSameEntries = (currentEntries, nextEntries) =>
+    toSortedJson(currentEntries) === toSortedJson(nextEntries);
+  const identical = overlapping.filter((page) =>
+    isSameEntries(existing[page.url], page.entries)
+  );
+  const changed = overlapping.filter(
+    (page) => !identical.includes(page)
+  );
+  const changedUrls = changed.map((page) => page.url);
+  const identicalUrls = identical.map((page) => page.url);
+  let pagesToImport = uniquePages.filter((page) => !identicalUrls.includes(page.url));
+  let overwrittenCount = changed.length;
+  if (changed.length) {
+    const samples = changedUrls.slice(0, 3).map((url) => `- ${getPageDisplayName(url)}`);
     const confirmMessage = [
-      `有 ${overlapping.length} 個頁面在本機已有筆記。`,
+      `有 ${changed.length} 個頁面在本機已有筆記，且內容不同。`,
       ...samples,
-      overlapping.length > samples.length ? "..." : null,
+      changed.length > samples.length ? "..." : null,
       "要覆蓋這些頁面並改用 GitHub 版本嗎？",
       "按「取消」則只匯入新的頁面並保留本機資料。",
     ]
       .filter(Boolean)
       .join("\n");
-    const shouldOverride = window.confirm(confirmMessage);
+    const shouldOverride = await openConfirmDialog({
+      title: "確認匯入方式",
+      message: confirmMessage,
+      confirmLabel: "覆蓋本機版本",
+      cancelLabel: "只匯入新頁面",
+    });
     if (!shouldOverride) {
-      pagesToImport = uniquePages.filter((page) => !overlapping.includes(page.url));
+      pagesToImport = pagesToImport.filter((page) => !changedUrls.includes(page.url));
       overwrittenCount = 0;
     }
   }
   if (!pagesToImport.length) {
-    setGithubStatus("已取消匯入，本機筆記保持不變。");
+    if (identical.length) {
+      setGithubStatus("已是最新版本，沒有需要更新的筆記。");
+    } else {
+      setGithubStatus("已取消匯入，本機筆記保持不變。");
+    }
     return;
   }
   const updates = Object.fromEntries(
