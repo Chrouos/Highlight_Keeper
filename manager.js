@@ -936,10 +936,43 @@ const fetchGithubBackupContent = async (settings) => {
     throw new Error(`GitHub 讀取檔案失敗：${errorText}`);
   }
   const json = await response.json();
-  if (!json?.content) {
-    throw new Error("GitHub 回傳的檔案內容為空");
+  if (Array.isArray(json)) {
+    throw new Error("GitHub 路徑指向資料夾，請指定備份檔案");
   }
-  return decodeBase64ToText(json.content);
+  if (json?.content) {
+    return decodeBase64ToText(json.content);
+  }
+  if (json?.download_url) {
+    const rawResponse = await fetch(json.download_url, {
+      headers: {
+        Authorization: `Bearer ${settings.token}`,
+        Accept: "application/vnd.github+json",
+      },
+    });
+    if (!rawResponse.ok) {
+      const errorText = await rawResponse.text();
+      throw new Error(`GitHub 讀取檔案失敗：${errorText}`);
+    }
+    return await rawResponse.text();
+  }
+  if (json?.sha) {
+    const blobResponse = await fetch(`${repoBase}/git/blobs/${json.sha}`, {
+      headers: {
+        Authorization: `Bearer ${settings.token}`,
+        Accept: "application/vnd.github+json",
+      },
+    });
+    if (!blobResponse.ok) {
+      const errorText = await blobResponse.text();
+      throw new Error(`GitHub 讀取檔案失敗：${errorText}`);
+    }
+    const blob = await blobResponse.json();
+    if (!blob?.content) {
+      throw new Error("GitHub 回傳的檔案內容為空");
+    }
+    return decodeBase64ToText(blob.content);
+  }
+  throw new Error("GitHub 回傳的檔案內容為空");
 };
 
 const uploadHighlightsToGithub = async () => {
