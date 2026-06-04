@@ -7,24 +7,93 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   min-width: 700px;
   max-width: 1000px;
-  padding: 20px;
-  background-color: #f9fafb;
-  color: #202124;
+  background: #fafaf9;
+  color: #1c1917;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+}
+
+.lang-switch {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 24px 0;
+  font-size: 12px;
+  color: #57534e;
+}
+
+.lang-switch select {
+  font: inherit;
+  padding: 2px 8px;
+  border: 1px solid #e7e5e4;
+  border-radius: 6px;
+  background: #fff;
+  color: #1c1917;
 }
 
 h1 {
-  margin: 0 0 12px;
+  margin: 0;
+  padding: 18px 24px 16px;
   font-size: 16px;
-  font-weight: 600;
-  text-align: center;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #1c1917;
+  background: #fff;
+  border-bottom: 1px solid #f0ece4;
+}
+
+/* ── Page info (mode + mark count) ────────────────────── */
+.page-info {
+  display: flex;
+  gap: 8px;
+  padding: 12px 24px;
+  background: #fafaf9;
+  border-bottom: 1px solid #f0ece4;
+}
+
+.page-info .info-row {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #f0ece4;
+  border-radius: 8px;
+}
+
+.page-info .info-label {
+  font-size: 11px;
+  color: #a8a29e;
+  letter-spacing: 0.02em;
+}
+
+.page-info .info-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1c1917;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+/* ── Color picker ─────────────────────────────────────── */
+.color-picker {
+  padding: 16px 24px;
+  background: #fff;
+  border-bottom: 1px solid #f0ece4;
 }
 
 .color-picker label {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 14px;
-  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #57534e;
   gap: 12px;
 }
 
@@ -32,123 +101,96 @@ h1 {
   appearance: none;
   border: none;
   padding: 0;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 38px;
   cursor: pointer;
   background: transparent;
 }
 
 .color-picker input[type="color"]::-webkit-color-swatch {
-  border-radius: 6px;
-  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  border: 2px solid #e7e5e4;
 }
 
 .add-color-btn {
-  margin-top: 10px;
+  margin-top: 12px;
   width: 100%;
   padding: 8px;
-  border-radius: 6px;
-  border: 1px dashed #1a73e8;
-  background: rgba(26, 115, 232, 0.08);
-  color: #1a73e8;
+  border-radius: 8px;
+  border: 1.5px dashed #d97706;
+  background: rgba(217, 119, 6, 0.06);
+  color: #b45309;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .add-color-btn:hover,
 .add-color-btn:focus-visible {
-  background: rgba(26, 115, 232, 0.16);
-  color: #0f4cbd;
+  background: rgba(217, 119, 6, 0.12);
+  border-color: #b45309;
 }
 
+/* ── Palette management ───────────────────────────────── */
 .palette-management {
-  margin-top: 18px;
+  padding: 14px 24px 18px;
+  background: #fff;
+  border-bottom: 1px solid #f0ece4;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.panel-controls {
-  margin-top: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 10px;
-  background: #ffffff;
-  border: 1px solid #e0e3e8;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
-}
-
-.panel-open-btn {
-  border: 1px solid #1a73e8;
-  background: #ffffff;
-  color: #1a73e8;
-  font-weight: 600;
-  border-radius: 8px;
-  padding: 8px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.panel-open-btn:hover,
-.panel-open-btn:focus-visible {
-  background: rgba(26, 115, 232, 0.1);
-}
-
-.data-tools {
-  margin-top: 16px;
-}
-
-.data-tools .panel-open-btn {
-  width: 100%;
-}
-
 .palette-header {
-  font-size: 12px;
-  font-weight: 600;
-  color: #5f6368;
+  font-size: 11px;
+  font-weight: 700;
+  color: #a8a29e;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.07em;
 }
 
 .palette-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .palette-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background-color: #ffffff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease,
-    background-color 0.2s ease;
+  padding: 8px 10px;
+  border: 1.5px solid transparent;
+  border-radius: 10px;
+  background: #fafaf9;
+  transition: border-color 0.15s ease, background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.palette-item:hover {
+  border-color: #e7e5e4;
+  box-shadow: 0 2px 6px rgba(28, 25, 23, 0.06);
 }
 
 .palette-item.is-active {
-  border-color: #1a73e8;
-  background-color: rgba(26, 115, 232, 0.08);
-  box-shadow: 0 0 0 1px rgba(26, 115, 232, 0.32);
+  border-color: #d97706;
+  background: #fffbeb;
+  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.2);
 }
 
 .palette-swatch {
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: 8px;
   border: none;
   cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
 .palette-swatch:focus-visible {
-  outline: 2px solid #1a73e8;
+  outline: 2px solid #d97706;
   outline-offset: 2px;
 }
 
@@ -163,42 +205,136 @@ h1 {
 
 .palette-edit::-webkit-color-swatch {
   border-radius: 6px;
-  border: 1px solid #d0d7de;
+  border: 1.5px solid #d4d2ce;
 }
 
 .palette-edit:focus-visible {
-  outline: 2px solid #1a73e8;
+  outline: 2px solid #d97706;
   outline-offset: 2px;
 }
 
 .palette-remove {
   margin-left: auto;
-  padding: 6px 10px;
+  padding: 5px 10px;
   border-radius: 6px;
-  border: 1px solid #e57373;
-  background: #ffffff;
-  color: #d93025;
+  border: 1px solid #fca5a5;
+  background: #fff;
+  color: #dc2626;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .palette-remove:hover,
 .palette-remove:focus-visible {
-  background: #fdecea;
+  background: #fef2f2;
 }
 
 .palette-empty {
   margin: 0;
   font-size: 12px;
-  color: #5f6368;
+  color: #a8a29e;
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* ── Panel controls ───────────────────────────────────── */
+.panel-controls {
+  padding: 16px 24px;
+  background: #fff;
+  border-bottom: 1px solid #f0ece4;
+}
+
+.panel-open-btn {
+  border: 1.5px solid #d97706;
+  background: #fff;
+  color: #b45309;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 9px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.panel-open-btn:hover,
+.panel-open-btn:focus-visible {
+  background: #fffbeb;
+  border-color: #b45309;
+}
+
+/* ── AI tools ─────────────────────────────────────────── */
+.ai-tools {
+  padding: 8px 24px;
+  background: #fff;
+  border-bottom: 1px solid #f0ece4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.panel-ai-btn {
+  border-color: #059669;
+  color: #065f46;
+}
+
+.panel-ai-btn:hover,
+.panel-ai-btn:focus-visible {
+  background: #f0fdf4;
+  border-color: #047857;
+}
+
+.panel-clear-btn {
+  border-color: #e7e5e4;
+  color: #78716c;
+  background: #fafaf9;
+  font-size: 12px;
+  padding: 6px 16px;
+}
+
+.panel-clear-btn:hover,
+.panel-clear-btn:focus-visible {
+  background: #fff1f2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
+/* ── Data tools ───────────────────────────────────────── */
+.data-tools {
+  padding: 12px 24px;
+  background: #fff;
+  border-bottom: 1px solid #f0ece4;
+}
+
+.data-tools .panel-open-btn {
+  border-color: #d4d2ce;
+  color: #57534e;
+  background: #fafaf9;
+}
+
+.data-tools .panel-open-btn:hover,
+.data-tools .panel-open-btn:focus-visible {
+  background: #f5f5f4;
+  border-color: #a8a29e;
+  color: #1c1917;
+}
+
+/* ── Status ───────────────────────────────────────────── */
+.status {
+  min-height: 16px;
+  padding: 8px 24px 4px;
+  font-size: 12px;
+  color: #d97706;
   text-align: center;
 }
 
-.status {
-  min-height: 18px;
-  margin-top: 8px;
-  font-size: 12px;
-  color: #1a73e8;
+/* ── Footer note ──────────────────────────────────────── */
+main > p {
+  margin: 0;
+  padding: 4px 24px 16px;
+  font-size: 11px;
+  color: #c4b5a0;
   text-align: center;
 }

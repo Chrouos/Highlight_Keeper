@@ -3,7 +3,10 @@ const addColorBtn = document.getElementById("addColorBtn");
 const paletteListEl = document.getElementById("paletteList");
 const openPanelBtn = document.getElementById("openPanelBtn");
 const openManagerBtn = document.getElementById("openManagerBtn");
+const langSelect = document.getElementById("langSelect");
 const statusEl = document.querySelector(".status");
+
+const t = (key, params) => HkI18n.t(key, params);
 
 const DEFAULT_COLOR = "#ffeb3b";
 const DEFAULT_PALETTE = [
@@ -72,7 +75,7 @@ const injectContentAssets = async (tabId) => {
   try {
     await chrome.scripting?.executeScript({
       target: { tabId },
-      files: ["contentScript.js"],
+      files: ["i18n.js", "contentScript.js"],
     });
   } catch (error) {
     console.debug("注入內容腳本失敗", error);
@@ -88,9 +91,10 @@ const sendMessageToTab = async (tabId, payload) => {
       chrome.runtime.lastError?.message || error?.message || "";
     if (message.includes(RECEIVER_MISSING_ERROR)) {
       await injectContentAssets(tabId);
+      await new Promise((resolve) => setTimeout(resolve, 150));
       return chrome.tabs.sendMessage(tabId, payload);
     }
-    throw new Error(message || "無法傳送訊息");
+    throw new Error(message || t("popup.errCannotSendMessage"));
   }
 };
 
@@ -118,7 +122,7 @@ const renderPalette = () => {
   if (!palette.length) {
     const placeholder = document.createElement("p");
     placeholder.className = "palette-empty";
-    placeholder.textContent = "目前沒有顏色，請新增一個色票。";
+    placeholder.textContent = t("popup.emptyPalette");
     paletteListEl.appendChild(placeholder);
     return;
   }
@@ -135,14 +139,14 @@ const renderPalette = () => {
     applyBtn.type = "button";
     applyBtn.className = "palette-swatch";
     applyBtn.style.backgroundColor = color;
-    applyBtn.title = `使用 ${color}`;
+    applyBtn.title = t("popup.useColor", { color });
     applyBtn.addEventListener("click", () => selectColor(color));
 
     const editInput = document.createElement("input");
     editInput.type = "color";
     editInput.className = "palette-edit";
     editInput.value = color;
-    editInput.title = `編輯顏色 ${color}`;
+    editInput.title = t("popup.editColor", { color });
     editInput.addEventListener("input", (event) => {
       updatePaletteColor(index, event.target.value);
     });
@@ -150,8 +154,8 @@ const renderPalette = () => {
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
     deleteBtn.className = "palette-remove";
-    deleteBtn.textContent = "刪除";
-    deleteBtn.title = `刪除顏色 ${color}`;
+    deleteBtn.textContent = t("popup.deleteColor");
+    deleteBtn.title = t("popup.deleteColorTitle", { color });
     deleteBtn.addEventListener("click", () => removePaletteColor(index));
 
     item.appendChild(applyBtn);
@@ -168,7 +172,7 @@ const selectColor = async (color, silent = false) => {
   }
   await persistColor(normalized);
   if (!silent) {
-    setStatus(`已選擇顏色 ${normalized}`);
+    setStatus(t("popup.statusSelected", { color: normalized }));
   }
   renderPalette();
 };
@@ -182,7 +186,7 @@ const updatePaletteColor = async (index, color) => {
   if (colorInput.value.toLowerCase() === previousColor) {
     await selectColor(normalized, true);
   }
-  setStatus(`色票顏色已更新為 ${normalized}`);
+  setStatus(t("popup.statusUpdated", { color: normalized }));
   window.requestAnimationFrame(() => {
     const nextInput = paletteListEl.querySelector(
       `.palette-item[data-index="${index}"] .palette-edit`
@@ -201,20 +205,70 @@ const removePaletteColor = async (index) => {
   if (!palette.includes(current)) {
     await selectColor(palette[0] ?? DEFAULT_COLOR, true);
   }
-  setStatus(`已刪除顏色 ${removed}`);
+  setStatus(t("popup.statusDeleted", { color: removed }));
 };
 
 const handleAddColor = async () => {
   const color = normalizeColor(colorInput.value);
   if (palette.includes(color)) {
-    setStatus("此顏色已存在於色票中");
+    setStatus(t("popup.statusDuplicate"));
     return;
   }
   await persistPalette([...palette, color]);
-  setStatus(`已新增顏色 ${color}`);
+  setStatus(t("popup.statusAdded", { color }));
+};
+
+const aiModeLabel = (provider) => {
+  switch (provider) {
+    case "gemini":
+      return t("popup.aiModeGemini");
+    case "chatgpt":
+      return t("popup.aiModeCopy");
+    case "openai":
+    default:
+      return t("popup.aiModeOpenai");
+  }
+};
+
+const loadPageInfo = async () => {
+  const markEl = document.getElementById("markCount");
+  const modeEl = document.getElementById("aiMode");
+  try {
+    const stored = await chrome.storage?.local.get("hkAISettings");
+    const provider = stored?.hkAISettings?.provider || "openai";
+    if (modeEl) modeEl.textContent = aiModeLabel(provider);
+  } catch (_e) {
+    if (modeEl) modeEl.textContent = "—";
+  }
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      if (markEl) markEl.textContent = "—";
+      return;
+    }
+    const response = await sendMessageToTab(tab.id, { type: "GET_PAGE_HIGHLIGHTS" });
+    const count = response?.data?.highlights?.length;
+    if (markEl) markEl.textContent = Number.isFinite(count) ? String(count) : "0";
+  } catch (_e) {
+    if (markEl) markEl.textContent = "—";
+  }
 };
 
 const loadInitialState = async () => {
+  await HkI18n.initI18n();
+  HkI18n.applyDOMTranslations();
+  if (langSelect) {
+    langSelect.value = HkI18n.getLang();
+    langSelect.addEventListener("change", (event) => {
+      HkI18n.setLang(event.target.value);
+    });
+  }
+  HkI18n.onLangChange(() => {
+    renderPalette();
+    loadPageInfo();
+    if (langSelect) langSelect.value = HkI18n.getLang();
+  });
+
   try {
     const stored = await chrome.storage?.local.get([
       "hkLastColor",
@@ -251,28 +305,56 @@ colorInput.addEventListener("input", (event) => {
 addColorBtn.addEventListener("click", handleAddColor);
 
 openPanelBtn.addEventListener("click", async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) {
-    setStatus("找不到目前的分頁，無法開啟面板。", true);
-    return;
-  }
   try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      setStatus(t("popup.errNoTab"), true);
+      return;
+    }
     const response = await sendMessageToTab(tab.id, {
       type: "OPEN_PAGE_PANEL",
       side: panelSide,
     });
     if (!response?.success) {
-      throw new Error(response?.error ?? "無法開啟頁面面板");
+      throw new Error(response?.error ?? t("popup.errOpenPanel"));
     }
-    setStatus("已在頁面顯示面板");
+    setStatus(t("popup.statusPanelOpened"));
   } catch (error) {
-    setStatus(error?.message || "無法開啟頁面面板。", true);
+    setStatus(error?.message || t("popup.errOpenPanel2"), true);
   }
 });
 
 openManagerBtn?.addEventListener("click", () => {
   const url = chrome.runtime.getURL("manager.html");
   chrome.tabs.create({ url });
+});
+
+document.getElementById("aiHighlightBtn")?.addEventListener("click", async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) { setStatus(t("popup.errNoTabSimple"), true); return; }
+    const response = await sendMessageToTab(tab.id, { type: "BUILD_AI_HIGHLIGHT_PROMPT" });
+    if (!response?.success || !response.prompt) {
+      throw new Error(response?.error ?? t("popup.errCannotTrigger"));
+    }
+    await navigator.clipboard.writeText(response.prompt);
+    setStatus(t("popup.statusAiCopied"));
+  } catch (error) {
+    setStatus(error?.message || t("popup.errAiTrigger"), true);
+  }
+});
+
+document.getElementById("clearPageBtn")?.addEventListener("click", async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) { setStatus(t("popup.errNoTabSimple"), true); return; }
+    const response = await sendMessageToTab(tab.id, { type: "CLEAR_PAGE_HIGHLIGHTS" });
+    if (!response?.success) throw new Error(response?.error ?? t("popup.errCannotClear"));
+    setStatus(t("popup.statusCleared"));
+    loadPageInfo();
+  } catch (error) {
+    setStatus(error?.message || t("popup.errClear"), true);
+  }
 });
 
 chrome.storage?.onChanged.addListener((changes, areaName) => {
@@ -290,6 +372,10 @@ chrome.storage?.onChanged.addListener((changes, areaName) => {
     panelSide =
       changes.hkPanelSide.newValue === "left" ? "left" : "right";
   }
+  if (changes.hkAISettings) {
+    loadPageInfo();
+  }
 });
 
 loadInitialState();
+loadPageInfo();

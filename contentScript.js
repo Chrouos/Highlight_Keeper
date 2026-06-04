@@ -18,6 +18,14 @@ const DEFAULT_PALETTE = [
 ];
 const PAGE_META_KEY = "__hk_page_meta__";
 const DEFAULT_AI_PROMPT = `你是一位筆記整理助手，根據提供的網頁全文與標註內容，整理出淺顯易懂的筆記。優先考慮使用者標注段落，將重點控制在五百字以內，輸出內容需要像說故事一樣有脈絡的說明。`;
+const DEFAULT_AUTO_HIGHLIGHT_PROMPT = `你是一位文章結構分析助手。請全面標註文章中各個關鍵面向的重要片段，確保覆蓋文章的完整論述架構，不要只挑少數幾句。`;
+const DEFAULT_AI_CATEGORIES = [
+  { name: "動機／背景", color: "#c792ea" },
+  { name: "方法／做法", color: "#64b5f6" },
+  { name: "優點／好處", color: "#81c784" },
+  { name: "缺點／限制", color: "#ffa726" },
+  { name: "結論／重點", color: "#ffeb3b" },
+];
 const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
 const MODEL_OPTIONS = {
   openai: [
@@ -28,12 +36,30 @@ const MODEL_OPTIONS = {
     { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
     { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
   ],
+  chatgpt: [
+    { value: "chatgpt-web", label: "網頁版（免 API）" },
+  ],
 };
 let colorPalette = [...DEFAULT_PALETTE];
 let currentColor = DEFAULT_COLOR;
 let floatingButton = null;
 const FLOATING_BUTTON_ID = "hk-floating-btn";
 const FLOATING_BUTTON_MARGIN = 8;
+let floatingTranslateCard = null;
+let translateTargetLang = "zh-TW";
+const TRANSLATE_LANGS = [
+  { code: "zh-TW", label: "繁體中文" },
+  { code: "zh-CN", label: "簡體中文" },
+  { code: "en", label: "English" },
+  { code: "ja", label: "日本語" },
+  { code: "ko", label: "한국어" },
+  { code: "fr", label: "Français" },
+  { code: "de", label: "Deutsch" },
+  { code: "es", label: "Español" },
+  { code: "pt", label: "Português" },
+  { code: "ru", label: "Русский" },
+  { code: "ar", label: "العربية" },
+];
 let selectionDebounceTimer = null;
 const HIGHLIGHT_MENU_ID = "hk-highlight-menu";
 let highlightMenu = null;
@@ -41,6 +67,9 @@ let highlightMenuEls = null;
 let activeHighlight = null;
 let activeHighlightId = null;
 let highlightMenuStatusTimer = null;
+const HIGHLIGHT_NOTE_TOOLTIP_ID = "hk-note-tooltip";
+let highlightNoteTooltip = null;
+let tooltipHideTimer = null;
 const HIGHLIGHT_PANEL_ID = "hk-page-panel";
 const HIGHLIGHT_PANEL_POSITION_KEY = "hkPanelPosition";
 const HIGHLIGHT_PANEL_FONT_SCALE_KEY = "hkPanelFontScale";
@@ -78,53 +107,217 @@ let aiSettings = {
   geminiKey: "",
   geminiModel: DEFAULT_GEMINI_MODEL,
   prompt: DEFAULT_AI_PROMPT,
+  autoHighlightPrompt: DEFAULT_AUTO_HIGHLIGHT_PROMPT,
+  categories: [...DEFAULT_AI_CATEGORIES],
+  usePreview: true,
+  selectionOnly: false,
 };
 let isGeneratingNote = false;
+let isAutoHighlighting = false;
+let isChatGPTBridgeWaiting = false;
+let previewData = [];
+const CHATGPT_REQUEST_KEY = "hkChatGPTRequest";
+const CHATGPT_RESPONSE_KEY = "hkChatGPTResponse";
 const HIGHLIGHT_RETRY_DELAYS = [450, 1500, 3500];
+
+// ── Translation API ────────────────────────────────────
+const callGoogleTranslate = async (text, targetLang) => {
+  const url =
+    `https://translate.googleapis.com/translate_a/single` +
+    `?client=gtx&sl=auto&tl=${encodeURIComponent(targetLang)}&dt=t&dt=ld` +
+    `&q=${encodeURIComponent(text)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`翻譯請求失敗 (${res.status})`);
+  const data = await res.json();
+  const translated = (data[0] ?? []).map((c) => c[0] ?? "").join("");
+  const detected = data[8]?.[0]?.[0] || data[2] || "auto";
+  return { translated, detected };
+};
+
+const LANG_NAMES = new Intl.DisplayNames(["zh-Hant"], { type: "language" });
+const langLabel = (code) => {
+  try {
+    return LANG_NAMES.of(code) || code;
+  } catch {
+    return code;
+  }
+};
+
+// ── Translate card ─────────────────────────────────────
+const hideTranslateCard = () => {
+  if (floatingTranslateCard) floatingTranslateCard.style.display = "none";
+};
+
+const ensureTranslateCard = () => {
+  if (floatingTranslateCard) return floatingTranslateCard;
+  const card = document.createElement("div");
+  card.className = "hk-translate-card";
+  card.style.display = "none";
+  card.addEventListener("mousedown", (e) => e.stopPropagation());
+  document.body.appendChild(card);
+  floatingTranslateCard = card;
+  return card;
+};
+
+const showTranslateCard = async (text, anchorRect, highlightEl = null) => {
+  const card = ensureTranslateCard();
+  card.innerHTML = "";
+
+  // header row
+  const header = document.createElement("div");
+  header.className = "hk-tc-header";
+
+  const detectedSpan = document.createElement("span");
+  detectedSpan.className = "hk-tc-detected";
+  detectedSpan.textContent = "偵測語言中…";
+
+  const controls = document.createElement("div");
+  controls.className = "hk-tc-controls";
+
+  const arrowSpan = document.createElement("span");
+  arrowSpan.textContent = "→";
+  arrowSpan.className = "hk-tc-arrow";
+
+  const select = document.createElement("select");
+  select.className = "hk-tc-select";
+  TRANSLATE_LANGS.forEach(({ code, label }) => {
+    const opt = document.createElement("option");
+    opt.value = code;
+    opt.textContent = label;
+    if (code === translateTargetLang) opt.selected = true;
+    select.appendChild(opt);
+  });
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "hk-tc-close";
+  closeBtn.setAttribute("aria-label", "關閉");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", hideTranslateCard);
+
+  controls.appendChild(arrowSpan);
+  controls.appendChild(select);
+  header.appendChild(detectedSpan);
+  header.appendChild(controls);
+  header.appendChild(closeBtn);
+  card.appendChild(header);
+
+  const resultEl = document.createElement("div");
+  resultEl.className = "hk-tc-result";
+  resultEl.textContent = "翻譯中…";
+  card.appendChild(resultEl);
+
+  // position (viewport coords — card uses position:fixed)
+  card.style.display = "block";
+  card.style.visibility = "hidden";
+  const margin = 8;
+  const cardW = card.offsetWidth || 320;
+  const cardH = card.offsetHeight || 80;
+  let top = anchorRect.bottom + margin;
+  let left = anchorRect.left;
+  if (left + cardW > window.innerWidth - margin) {
+    left = window.innerWidth - cardW - margin;
+  }
+  if (anchorRect.bottom + margin + cardH > window.innerHeight) {
+    top = anchorRect.top - margin - cardH;
+  }
+  card.style.left = `${Math.max(margin, left)}px`;
+  card.style.top = `${Math.max(margin, top)}px`;
+  card.style.visibility = "visible";
+
+  const appendTranslationToNote = async (translated) => {
+    if (!highlightEl) return;
+    const highlightId = highlightEl.getAttribute(HIGHLIGHT_ATTR);
+    if (!highlightId) return;
+    const existing = highlightEl.dataset.hkNote?.trim() ?? "";
+    const withoutOldTranslation = existing.replace(/\n?\n?\[翻譯\][^\n]*/g, "").trim();
+    const newNote = withoutOldTranslation ? `${withoutOldTranslation}\n\n[翻譯] ${translated}` : `[翻譯] ${translated}`;
+    const color = highlightEl.dataset.hkColor || highlightEl.style.backgroundColor || DEFAULT_COLOR;
+    setHighlightMetadata(highlightEl, { color, note: newNote });
+    if (highlightMenuEls?.noteField && activeHighlightId === highlightId) {
+      highlightMenuEls.noteField.value = newNote;
+    }
+    try {
+      await updateHighlightEntry(highlightId, { note: newNote });
+      await refreshHighlightPanelIfVisible();
+    } catch (err) {
+      console.debug("附加翻譯到備註失敗", err);
+    }
+  };
+
+  let lastTranslated = null;
+  const doTranslate = async (targetLang) => {
+    resultEl.textContent = "翻譯中…";
+    resultEl.className = "hk-tc-result";
+    try {
+      const { translated, detected } = await callGoogleTranslate(text, targetLang);
+      detectedSpan.textContent = langLabel(detected);
+      resultEl.textContent = translated;
+      if (translated !== lastTranslated) {
+        lastTranslated = translated;
+        appendTranslationToNote(translated);
+      }
+    } catch (err) {
+      resultEl.textContent = err?.message || "翻譯失敗";
+      resultEl.className = "hk-tc-result hk-tc-error";
+    }
+  };
+
+  select.addEventListener("change", () => {
+    translateTargetLang = select.value;
+    doTranslate(translateTargetLang);
+  });
+
+  doTranslate(translateTargetLang);
+};
+
+// ── Floating toolbar ───────────────────────────────────
+let _floatingSelectionRange = null;
 
 const ensureFloatingButton = () => {
   if (floatingButton) return floatingButton;
-  floatingButton = document.createElement("button");
-  floatingButton.type = "button";
-  floatingButton.id = FLOATING_BUTTON_ID;
-  floatingButton.className = "hk-floating-btn";
-  floatingButton.setAttribute("aria-label", "標註選取文字");
-  floatingButton.title = "標註選取文字";
-  floatingButton.textContent = "HL";
+
+  // toolbar wrapper
+  const toolbar = document.createElement("div");
+  toolbar.id = FLOATING_BUTTON_ID;
+  toolbar.className = "hk-floating-toolbar";
+  toolbar.style.display = "none";
+
+  // highlight button
+  const hlBtn = document.createElement("button");
+  hlBtn.type = "button";
+  hlBtn.className = "hk-floating-btn";
+  hlBtn.setAttribute("aria-label", "標註選取文字");
+  hlBtn.title = "標註";
+  hlBtn.textContent = "HL";
+
   if (chrome?.runtime?.id && typeof chrome.runtime.getURL === "function") {
     try {
       const iconSrc = chrome.runtime.getURL("Icon/32.png");
       if (iconSrc) {
-        const iconImage = new Image();
-        iconImage.decoding = "async";
-        iconImage.addEventListener("load", () => {
-          floatingButton.textContent = "";
-          floatingButton.style.setProperty(
-            "background-image",
-            `url("${iconSrc}")`,
-            "important"
-          );
-          floatingButton.style.setProperty("background-repeat", "no-repeat", "important");
-          floatingButton.style.setProperty("background-position", "center", "important");
-          floatingButton.style.setProperty("background-size", "22px 22px", "important");
+        const img = new Image();
+        img.decoding = "async";
+        img.addEventListener("load", () => {
+          hlBtn.textContent = "";
+          hlBtn.style.setProperty("background-image", `url("${iconSrc}")`, "important");
+          hlBtn.style.setProperty("background-repeat", "no-repeat", "important");
+          hlBtn.style.setProperty("background-position", "center", "important");
+          hlBtn.style.setProperty("background-size", "22px 22px", "important");
         });
-        iconImage.addEventListener("error", () => {
-          floatingButton.textContent = "HL";
-          floatingButton.style.removeProperty("background-image");
+        img.addEventListener("error", () => {
+          hlBtn.textContent = "HL";
+          hlBtn.style.removeProperty("background-image");
         });
-        iconImage.src = iconSrc;
+        img.src = iconSrc;
       }
     } catch (error) {
       console.debug("無法載入浮動按鈕圖示", error);
     }
   }
-  floatingButton.style.display = "none";
-  floatingButton.addEventListener("mousedown", (event) => {
-    // Prevent losing selection before highlight is applied.
-    event.preventDefault();
-  });
-  floatingButton.addEventListener("click", async (event) => {
-    event.preventDefault();
+
+  hlBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  hlBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
     try {
       await applyHighlight(currentColor);
     } catch (error) {
@@ -133,45 +326,68 @@ const ensureFloatingButton = () => {
       hideFloatingButton();
     }
   });
-  document.body.appendChild(floatingButton);
-  return floatingButton;
+
+  // translate button
+  const trBtn = document.createElement("button");
+  trBtn.type = "button";
+  trBtn.className = "hk-floating-tr-btn";
+  trBtn.setAttribute("aria-label", "翻譯選取文字");
+  trBtn.title = "翻譯";
+  trBtn.textContent = "譯";
+
+  trBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  trBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    const sel = window.getSelection();
+    const text = sel?.toString().trim();
+    if (!text) return;
+    const rect = _floatingSelectionRange
+      ? _floatingSelectionRange.getBoundingClientRect()
+      : toolbar.getBoundingClientRect();
+    const anchorEl = sel?.anchorNode?.nodeType === Node.TEXT_NODE
+      ? sel.anchorNode.parentElement
+      : sel?.anchorNode;
+    const highlightEl = anchorEl?.closest?.(`.${HIGHLIGHT_CLASS}`) ?? null;
+    showTranslateCard(text, rect, highlightEl);
+  });
+
+  toolbar.appendChild(hlBtn);
+  toolbar.appendChild(trBtn);
+  document.body.appendChild(toolbar);
+  floatingButton = toolbar;
+  return toolbar;
 };
 
 const hideFloatingButton = () => {
-  if (floatingButton) {
-    floatingButton.style.display = "none";
-  }
+  if (floatingButton) floatingButton.style.display = "none";
+  hideTranslateCard();
 };
 
 const positionFloatingButton = (rect) => {
-  const button = ensureFloatingButton();
+  const toolbar = ensureFloatingButton();
+  toolbar.style.visibility = "hidden";
+  toolbar.style.display = "flex";
+
   const { innerWidth, innerHeight } = window;
-  const buttonRect = button.getBoundingClientRect();
-  const width = buttonRect.width || 32;
-  const height = buttonRect.height || 32;
+  const tbRect = toolbar.getBoundingClientRect();
+  const width = tbRect.width || 80;
+  const height = tbRect.height || 38;
 
   let top = rect.top - height - FLOATING_BUTTON_MARGIN;
   let left = rect.right - width;
 
-  if (top < FLOATING_BUTTON_MARGIN) {
-    top = rect.bottom + FLOATING_BUTTON_MARGIN;
-  }
-
-  if (left < FLOATING_BUTTON_MARGIN) {
-    left = rect.left;
-  }
-
+  if (top < FLOATING_BUTTON_MARGIN) top = rect.bottom + FLOATING_BUTTON_MARGIN;
+  if (left < FLOATING_BUTTON_MARGIN) left = rect.left;
   if (left + width > innerWidth - FLOATING_BUTTON_MARGIN) {
     left = innerWidth - width - FLOATING_BUTTON_MARGIN;
   }
-
   if (top + height > innerHeight - FLOATING_BUTTON_MARGIN) {
     top = innerHeight - height - FLOATING_BUTTON_MARGIN;
   }
 
-  button.style.top = `${Math.max(FLOATING_BUTTON_MARGIN, top)}px`;
-  button.style.left = `${Math.max(FLOATING_BUTTON_MARGIN, left)}px`;
-  button.style.display = "flex";
+  toolbar.style.top = `${Math.max(FLOATING_BUTTON_MARGIN, top)}px`;
+  toolbar.style.left = `${Math.max(FLOATING_BUTTON_MARGIN, left)}px`;
+  toolbar.style.visibility = "visible";
 };
 
 const showFloatingButton = (range) => {
@@ -180,6 +396,7 @@ const showFloatingButton = (range) => {
     hideFloatingButton();
     return;
   }
+  _floatingSelectionRange = range;
   positionFloatingButton(rect);
 };
 
@@ -299,7 +516,7 @@ const renderHighlightMenuSwatches = () => {
 const getPagePlainText = () => {
   const raw = document.body?.innerText || "";
   const normalized = raw.replace(/\n{3,}/g, "\n\n").trim();
-  return normalized.slice(0, 15000);
+  return normalized.slice(0, 60000);
 };
 
 const collectPageHighlights = async () => {
@@ -337,6 +554,19 @@ const updateAiKeyVisibility = () => {
       }
     }
   });
+  const modelField = highlightPanelEls?.aiModelSelect?.closest(".hk-panel-ai-field");
+  if (modelField) {
+    modelField.hidden = aiSettings.provider === "chatgpt";
+  }
+  const isChatGPT = aiSettings.provider === "chatgpt";
+  const hlPaste = highlightPanelEls?.aiChatGPTHlPasteArea;
+  const hlApply = highlightPanelEls?.aiChatGPTHlApplyBtn;
+  const notePaste = highlightPanelEls?.aiChatGPTNotePasteArea;
+  const noteApply = highlightPanelEls?.aiChatGPTNoteApplyBtn;
+  if (hlPaste) hlPaste.hidden = !isChatGPT;
+  if (hlApply) hlApply.hidden = !isChatGPT;
+  if (notePaste) notePaste.hidden = !isChatGPT;
+  if (noteApply) noteApply.hidden = !isChatGPT;
 };
 
 const populateAiModelSelect = () => {
@@ -375,18 +605,37 @@ const setAiPanelStatus = (message, isError = false) => {
 
 const updateGenerateAvailability = () => {
   const generateBtn = highlightPanelEls?.aiGenerateBtn;
-  if (!generateBtn) return;
+  const autoHighlightBtn = highlightPanelEls?.aiAutoHighlightBtn;
   const provider = aiSettings.provider;
   const key = provider === "openai" ? aiSettings.openaiKey : aiSettings.geminiKey;
-  const hasKey = Boolean(key?.trim());
-  generateBtn.disabled = isGeneratingNote || !hasKey;
-  generateBtn.textContent = isGeneratingNote ? "產生中..." : "產生筆記";
+  const hasKey = provider === "chatgpt" || Boolean(key?.trim());
+  const hasRunningTask = isGeneratingNote || isAutoHighlighting || isChatGPTBridgeWaiting || previewData.length > 0;
+  if (generateBtn) {
+    generateBtn.disabled = hasRunningTask || !hasKey;
+    generateBtn.textContent = isGeneratingNote ? "產生中..." : "產生筆記";
+  }
+  if (autoHighlightBtn) {
+    autoHighlightBtn.disabled = hasRunningTask || !hasKey;
+    autoHighlightBtn.textContent = isAutoHighlighting ? "標示中..." : "自動畫重點";
+  }
+  // 進階「用 API 直接產生」鈕：只有設定好 OpenAI/Gemini Key 時才顯示
+  const directBtn = highlightPanelEls?.aiDirectBtn;
+  if (directBtn) {
+    const canDirect = provider !== "chatgpt" && Boolean(key?.trim());
+    directBtn.hidden = !canDirect;
+    directBtn.disabled = hasRunningTask;
+  }
+  const cancelBtn = highlightPanelEls?.aiChatGPTCancelBtn;
+  if (cancelBtn) {
+    cancelBtn.hidden = !isChatGPTBridgeWaiting;
+  }
 };
 
 const applyAiSettingsToUI = () => {
   const providerSelect = highlightPanelEls?.aiProviderSelect;
   const modelSelect = highlightPanelEls?.aiModelSelect;
   const promptField = highlightPanelEls?.aiPromptField;
+  const autoHighlightPromptField = highlightPanelEls?.aiAutoHighlightPromptField;
   const openaiInput = highlightPanelEls?.aiOpenaiKeyInput;
   const geminiInput = highlightPanelEls?.aiGeminiKeyInput;
 
@@ -403,14 +652,64 @@ const applyAiSettingsToUI = () => {
   if (promptField) {
     promptField.value = aiSettings.prompt ?? DEFAULT_AI_PROMPT;
   }
+  if (autoHighlightPromptField) {
+    autoHighlightPromptField.value =
+      aiSettings.autoHighlightPrompt ?? DEFAULT_AUTO_HIGHLIGHT_PROMPT;
+  }
   if (openaiInput) {
     openaiInput.value = aiSettings.openaiKey ?? "";
   }
   if (geminiInput) {
     geminiInput.value = aiSettings.geminiKey ?? "";
   }
+  const previewCb = highlightPanelEls?.aiPreviewCheckbox;
+  if (previewCb) previewCb.checked = aiSettings.usePreview ?? true;
+  const selOnlyCb = highlightPanelEls?.aiSelOnlyCheckbox;
+  if (selOnlyCb) selOnlyCb.checked = aiSettings.selectionOnly ?? false;
   updateAiKeyVisibility();
   updateGenerateAvailability();
+  renderCategoryList();
+};
+
+const renderCategoryList = () => {
+  const catList = highlightPanelEls?.aiCatList;
+  if (!catList) return;
+  catList.innerHTML = "";
+  const cats = Array.isArray(aiSettings.categories) ? aiSettings.categories : [];
+  cats.forEach((cat, idx) => {
+    const row = document.createElement("div");
+    row.className = "hk-panel-ai-cat-row";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "hk-panel-ai-cat-name";
+    nameInput.value = cat.name;
+    nameInput.placeholder = "分類名稱";
+    nameInput.addEventListener("input", (e) => {
+      aiSettings.categories[idx].name = e.target.value;
+      persistAISettings();
+    });
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.className = "hk-panel-ai-cat-color";
+    colorInput.value = cat.color;
+    colorInput.addEventListener("input", (e) => {
+      aiSettings.categories[idx].color = e.target.value;
+      persistAISettings();
+    });
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "hk-panel-ai-cat-del";
+    delBtn.textContent = "✕";
+    delBtn.addEventListener("click", () => {
+      aiSettings.categories.splice(idx, 1);
+      persistAISettings();
+      renderCategoryList();
+    });
+    row.appendChild(colorInput);
+    row.appendChild(nameInput);
+    row.appendChild(delBtn);
+    catList.appendChild(row);
+  });
 };
 
 const loadAISettings = async () => {
@@ -452,19 +751,556 @@ ${highlightLines || "（尚未加入標註）"}
 `;
 };
 
-const callOpenAI = async (key, prompt) => {
+const normalizeWhitespace = (input) =>
+  typeof input === "string" ? input.replace(/\s+/g, " ").trim() : "";
+
+const collectColorUsageCounts = async () => {
+  if (!storage) return {};
+  try {
+    const all = await storage.get(null);
+    const counts = {};
+    Object.entries(all).forEach(([key, entries]) => {
+      if (!isValidPageKey(key) || !Array.isArray(entries)) return;
+      entries.forEach((entry) => {
+        if (!entry || typeof entry !== "object") return;
+        const color = toHexColor(entry.color || DEFAULT_COLOR);
+        counts[color] = (counts[color] || 0) + 1;
+      });
+    });
+    return counts;
+  } catch (error) {
+    console.debug("讀取顏色使用次數失敗", error);
+    return {};
+  }
+};
+
+const sortPaletteByUsage = (palette, counts = {}) => {
+  const order = new Map();
+  palette.forEach((color, index) => {
+    order.set(color, index);
+  });
+  return [...palette].sort((a, b) => {
+    const diff = (counts[b] || 0) - (counts[a] || 0);
+    if (diff !== 0) return diff;
+    return (order.get(a) ?? 0) - (order.get(b) ?? 0);
+  });
+};
+
+const buildAutoHighlightPrompt = (pageData, palette, usageCounts) => {
+  const basePrompt =
+    aiSettings.autoHighlightPrompt?.trim() || DEFAULT_AUTO_HIGHLIGHT_PROMPT;
+  const highlightLines = (pageData.highlights || [])
+    .map((item, idx) => {
+      const text = normalizeWhitespace(item.text);
+      const noteText = item.note ? `（註解：${item.note.trim()}）` : "";
+      return `${idx + 1}. ${text}${noteText}`;
+    })
+    .join("\n");
+
+  const categories = Array.isArray(aiSettings.categories) && aiSettings.categories.length
+    ? aiSettings.categories
+    : null;
+
+  let colorSection;
+  let taskExtra = "";
+  let tagInstruction;
+  if (categories) {
+    const catLines = categories.map((c) => `- #${c.name}（${c.color}）`).join("\n");
+    colorSection = `### 標記分類（請依語義從中選一個，用「#分類名稱」標示）
+${catLines}`;
+    tagInstruction = "從上方分類選一個最貼切的，寫成「#分類名稱」";
+    taskExtra = `- 每個分類至少找 1 個片段（文章有提及的話），確保標註覆蓋完整論述架構。
+- 共可回傳 ${Math.max(categories.length * 2, 12)} 個以上的片段，不要因為「夠了」就停止。`;
+  } else {
+    const colorLines = palette
+      .map((color, index) => {
+        const usage = usageCounts?.[color] || 0;
+        return `- #${color}（歷史使用次數：${usage}）`;
+      })
+      .join("\n");
+    colorSection = `### 可用顏色（依使用習慣排序，用「#色碼」標示）
+${colorLines || "- #ffeb3b（歷史使用次數：0）"}`;
+    tagInstruction = "從上方色碼選一個，寫成「#色碼」（例如 #ffeb3b）";
+    taskExtra = `- 盡量標註 10～20 個片段，確保覆蓋文章各個段落，不要只挑少數幾句。`;
+  }
+
+  return `${basePrompt}
+
+### 任務要求
+- 標註數量不要自我設限，文章夠長就多標。
+- 每個重點必須是「原文中可直接找到」的連續文字。
+- 不要回傳與「已有標註」重複的內容。
+- 必須只使用下方提供的分類 / 顏色。
+- 「重點」用一句話直接摘要「這段原文的核心觀點或資訊」，不加任何前綴（不說「這段在說」「這裡提到」「作者指出」等），直接陳述內容本身。
+${taskExtra}
+
+${colorSection}
+
+### 輸出格式（請勿使用 JSON。每個重點固定三行，重點之間空一行）
+原文：要標註的原文片段（必須是原文中可直接找到的連續文字）
+#分類（${tagInstruction}）
+重點：用一句話直接摘要這段原文的核心觀點或資訊（不要加任何前綴）
+
+範例：
+原文：人工智慧正在改變所有產業
+${categories ? `#${categories[0]?.name || "重點"}` : palette[0] || "#ffeb3b"}
+重點：AI 已成為產業變革的核心動力
+
+### 網頁資訊
+- 標題：${pageData.title}
+- URL：${pageData.url}
+
+### 原文內容（可能已截斷）
+${pageData.pageText}
+
+### 已有標註
+${highlightLines || "（尚未加入標註）"}
+`;
+};
+
+// Escape stray double quotes that appear inside a JSON string literal but were
+// not properly escaped by the LLM. We scan char-by-char and track structural
+// context (object vs array, key vs value position) so we can distinguish a
+// real closing quote from content that happens to look like `"x", "y"`.
+const escapeStrayJsonQuotes = (input) => {
+  const out = [];
+  const stack = []; // 'obj' | 'arr'
+  const expectKey = []; // parallel to stack; only meaningful for 'obj'
+  let inString = false;
+  let escape = false;
+  let stringCtx = "root"; // 'obj-key' | 'obj-val' | 'arr' | 'root' at string open
+
+  const currentCtx = () => {
+    const top = stack[stack.length - 1];
+    if (!top) return "root";
+    if (top === "arr") return "arr";
+    return expectKey[expectKey.length - 1] ? "obj-key" : "obj-val";
+  };
+
+  // Look ahead from index `from` (just after the candidate closing `"` and a
+  // following `,`) to see if it matches `"<key>"\s*:` — the only valid shape
+  // after a comma inside an object.
+  const looksLikeNextObjectKey = (from) => {
+    let k = from;
+    while (k < input.length && /\s/.test(input[k])) k++;
+    if (input[k] !== '"') return false;
+    let m = k + 1;
+    let esc = false;
+    while (m < input.length) {
+      if (esc) { esc = false; m++; continue; }
+      if (input[m] === "\\") { esc = true; m++; continue; }
+      if (input[m] === '"') break;
+      m++;
+    }
+    if (m >= input.length) return false;
+    let n = m + 1;
+    while (n < input.length && /\s/.test(input[n])) n++;
+    return input[n] === ":";
+  };
+
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i];
+
+    if (escape) { out.push(c); escape = false; continue; }
+    if (c === "\\") { out.push(c); escape = true; continue; }
+
+    if (inString) {
+      if (c !== '"') { out.push(c); continue; }
+      let j = i + 1;
+      while (j < input.length && /\s/.test(input[j])) j++;
+      const next = input[j];
+      const closeString = () => { inString = false; out.push(c); };
+      const escapeQuote = () => { out.push("\\"); out.push(c); };
+
+      // Verify a `}` or `]` is actually structural by peeking past it: a real
+      // structural close is followed by another structural token or EOF, not
+      // arbitrary content.
+      const followedByStructural = (from) => {
+        let k = from;
+        while (k < input.length && /\s/.test(input[k])) k++;
+        const ch = input[k];
+        return ch === undefined || ch === "," || ch === "}" || ch === "]";
+      };
+
+      if (stringCtx === "obj-key") {
+        if (next === ":") closeString(); else escapeQuote();
+        continue;
+      }
+      if (stringCtx === "obj-val") {
+        if (next === ",") {
+          if (looksLikeNextObjectKey(j + 1)) closeString(); else escapeQuote();
+          continue;
+        }
+        if (next === "}") {
+          if (followedByStructural(j + 1)) closeString(); else escapeQuote();
+          continue;
+        }
+        escapeQuote();
+        continue;
+      }
+      if (stringCtx === "arr") {
+        if (next === ",") { closeString(); continue; }
+        if (next === "]") {
+          if (followedByStructural(j + 1)) closeString(); else escapeQuote();
+          continue;
+        }
+        escapeQuote();
+        continue;
+      }
+      // root: only end-of-input is a clear close
+      if (next === undefined) closeString(); else escapeQuote();
+      continue;
+    }
+
+    if (c === '"') {
+      stringCtx = currentCtx();
+      inString = true;
+      out.push(c);
+      continue;
+    }
+    if (c === "{") { stack.push("obj"); expectKey.push(true); out.push(c); continue; }
+    if (c === "[") { stack.push("arr"); expectKey.push(false); out.push(c); continue; }
+    if (c === "}" || c === "]") { stack.pop(); expectKey.pop(); out.push(c); continue; }
+    if (c === ":") {
+      if (stack[stack.length - 1] === "obj") expectKey[expectKey.length - 1] = false;
+      out.push(c); continue;
+    }
+    if (c === ",") {
+      if (stack[stack.length - 1] === "obj") expectKey[expectKey.length - 1] = true;
+      out.push(c); continue;
+    }
+    out.push(c);
+  }
+  return out.join("");
+};
+
+const repairLlmJson = (text) => {
+  let s = text;
+  const fenceMatch = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch?.[1]) s = fenceMatch[1];
+  s = s.trim();
+  const firstBrace = s.indexOf("{");
+  const firstBracket = s.indexOf("[");
+  let start = -1;
+  if (firstBrace >= 0 && firstBracket >= 0) start = Math.min(firstBrace, firstBracket);
+  else start = Math.max(firstBrace, firstBracket);
+  if (start > 0) s = s.slice(start);
+  s = s.replace(/,(\s*[}\]])/g, "$1");
+  return escapeStrayJsonQuotes(s);
+};
+
+const parseJsonFromModelResponse = (rawText) => {
+  if (typeof rawText !== "string" || !rawText.trim()) {
+    throw new Error("AI 回傳內容為空");
+  }
+  const trimmed = rawText.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch (_error) {
+    // keep parsing below
+  }
+
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fencedMatch?.[1]) {
+    try {
+      return JSON.parse(fencedMatch[1].trim());
+    } catch (_error) {
+      // keep parsing below
+    }
+  }
+
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const candidate = trimmed.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch (_error) {
+      // keep parsing below
+    }
+  }
+
+  try {
+    return JSON.parse(repairLlmJson(trimmed));
+  } catch (_error) {
+    // fall through to throw
+  }
+  throw new Error("AI 回傳不是有效 JSON");
+};
+
+// Parse the non-JSON highlight format produced by the copy/paste flow:
+//   原文：<片段>
+//   #分類名稱        (or #色碼)
+//   重點：<一句話>
+// Blocks are separated by blank lines. Each `#tag` is resolved to a hex color
+// via aiSettings.categories (by name, case-insensitive); a raw #rrggbb is used
+// directly. Returns [{ text, color, reason }] — the same shape the JSON path
+// produces, so it can flow straight into normalizeAutoHighlightItems.
+const parseHighlightBlocks = (rawText) => {
+  if (typeof rawText !== "string" || !rawText.trim()) return [];
+  const cats = Array.isArray(aiSettings.categories) ? aiSettings.categories : [];
+  const catByName = new Map();
+  cats.forEach((c) => {
+    if (c?.name) catByName.set(c.name.trim().toLowerCase(), toHexColor(c.color));
+  });
+  const fallbackColor = toHexColor(cats[0]?.color || DEFAULT_COLOR);
+  const hexRe = /^#?[0-9a-fA-F]{6}$/;
+
+  const resolveColor = (tag) => {
+    const cleaned = (tag || "").trim().replace(/^#/, "");
+    if (!cleaned) return fallbackColor;
+    const byName = catByName.get(cleaned.toLowerCase());
+    if (byName) return byName;
+    if (hexRe.test(cleaned)) return toHexColor(`#${cleaned}`);
+    return fallbackColor;
+  };
+
+  const stripPrefix = (line, labels) => {
+    for (const label of labels) {
+      // tolerate full/half-width colon and optional spaces
+      const re = new RegExp(`^${label}\\s*[:：]\\s*`);
+      if (re.test(line)) return line.replace(re, "").trim();
+    }
+    return null;
+  };
+
+  const items = [];
+  const blocks = rawText.split(/\n\s*\n/);
+  for (const block of blocks) {
+    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+    let text = "";
+    let tag = "";
+    let reason = "";
+    for (const line of lines) {
+      const asText = stripPrefix(line, ["原文", "原句", "片段"]);
+      if (asText !== null) { text = asText; continue; }
+      const asReason = stripPrefix(line, ["重點", "摘要", "說明", "理由"]);
+      if (asReason !== null) { reason = asReason; continue; }
+      // tag line: bare "#定義" or prefixed "分類：#定義"
+      const tagMatch = line.match(/#\s*([^\s#:：]+)/);
+      if (tagMatch && (line.startsWith("#") || /^(分類|顏色|標籤)\s*[:：]/.test(line))) {
+        tag = tagMatch[1].trim();
+      }
+    }
+    if (!text) continue;
+    items.push({ text, color: resolveColor(tag), reason });
+  }
+  return items;
+};
+
+const normalizeAutoHighlightItems = (payload, palette) => {
+  const source = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.highlights)
+    ? payload.highlights
+    : Array.isArray(payload?.items)
+    ? payload.items
+    : [];
+  const normalizedPalette = sanitizePalette(palette);
+  const allowedColors = new Set(normalizedPalette);
+  // also allow any category colors defined in current aiSettings
+  if (Array.isArray(aiSettings.categories)) {
+    aiSettings.categories.forEach((c) => {
+      if (c?.color) allowedColors.add(toHexColor(c.color));
+    });
+  }
+  const fallbackColor = normalizedPalette[0] || DEFAULT_COLOR;
+  const seenText = new Set();
+
+  return source
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const text = normalizeWhitespace(item.text);
+      if (!text) return null;
+      const dedupeKey = text.toLowerCase();
+      if (seenText.has(dedupeKey)) return null;
+      seenText.add(dedupeKey);
+
+      const candidateColor =
+        typeof item.color === "string" ? toHexColor(item.color.trim()) : fallbackColor;
+      const color = allowedColors.has(candidateColor) ? candidateColor : fallbackColor;
+      const reason =
+        typeof item.reason === "string"
+          ? normalizeWhitespace(item.reason).slice(0, 180)
+          : "";
+      return { text, color, reason };
+    })
+    .filter(Boolean);
+};
+
+const rangeTouchesExistingHighlight = (range) => {
+  const boundaries = [range.startContainer, range.endContainer];
+  for (const boundary of boundaries) {
+    const element =
+      boundary?.nodeType === Node.ELEMENT_NODE
+        ? boundary
+        : boundary?.parentElement || boundary?.parentNode;
+    if (element?.closest?.(`.${HIGHLIGHT_CLASS}`)) {
+      return true;
+    }
+  }
+  try {
+    const fragment = range.cloneContents();
+    return Boolean(fragment.querySelector?.(`.${HIGHLIGHT_CLASS}`));
+  } catch (_error) {
+    return true;
+  }
+};
+
+const buildNormalizedSearchIndex = () => {
+  const index = buildDocumentTextIndex();
+  if (!index || !Array.isArray(index.nodes) || !index.nodes.length) return null;
+  const rawText = index.text || "";
+  const normalizedToRaw = [];
+  let normalizedText = "";
+  let lastWasWhitespace = false;
+  for (let i = 0; i < rawText.length; i += 1) {
+    const char = rawText[i];
+    const isWhitespace = /\s/.test(char);
+    if (isWhitespace) {
+      if (!lastWasWhitespace) {
+        normalizedText += " ";
+        normalizedToRaw.push(i);
+      }
+      lastWasWhitespace = true;
+      continue;
+    }
+    normalizedText += char;
+    normalizedToRaw.push(i);
+    lastWasWhitespace = false;
+  }
+  return {
+    ...index,
+    rawTextLength: rawText.length,
+    normalizedText,
+    normalizedToRaw,
+  };
+};
+
+const findIndexesInText = (haystack, needle) => {
+  const indexes = [];
+  let fromIndex = 0;
+  while (fromIndex <= haystack.length) {
+    const index = haystack.indexOf(needle, fromIndex);
+    if (index === -1) break;
+    indexes.push(index);
+    fromIndex = index + 1;
+  }
+  return indexes;
+};
+
+const normalizedSpanToRawSpan = (mapping, start, length, rawTextLength) => {
+  if (!Array.isArray(mapping) || !length) return null;
+  const startRaw = mapping[start];
+  const endRawChar = mapping[start + length - 1];
+  if (!Number.isFinite(startRaw) || !Number.isFinite(endRawChar)) return null;
+  const endRaw = Math.min(rawTextLength, endRawChar + 1);
+  if (endRaw <= startRaw) return null;
+  return { startRaw, endRaw };
+};
+
+const createRangeFromRawOffsets = (nodes, startRaw, endRaw) => {
+  const startPosition = locateTextPosition(nodes, startRaw);
+  const endPosition = locateTextPosition(nodes, endRaw);
+  if (!startPosition || !endPosition) return null;
+  const range = document.createRange();
+  range.setStart(startPosition.node, startPosition.offset);
+  range.setEnd(endPosition.node, endPosition.offset);
+  if (range.collapsed) return null;
+  return range;
+};
+
+const findRangeForAutoHighlightText = (targetText, consumedSpans) => {
+  const normalizedNeedle = normalizeWhitespace(targetText);
+  if (!normalizedNeedle) return null;
+  const searchIndex = buildNormalizedSearchIndex();
+  if (!searchIndex?.normalizedText) return null;
+
+  const attempts = [
+    {
+      haystack: searchIndex.normalizedText,
+      needle: normalizedNeedle,
+    },
+    {
+      haystack: searchIndex.normalizedText.toLowerCase(),
+      needle: normalizedNeedle.toLowerCase(),
+    },
+  ];
+
+  for (const attempt of attempts) {
+    const indexes = findIndexesInText(attempt.haystack, attempt.needle);
+    for (const start of indexes) {
+      const rawSpan = normalizedSpanToRawSpan(
+        searchIndex.normalizedToRaw,
+        start,
+        attempt.needle.length,
+        searchIndex.rawTextLength
+      );
+      if (!rawSpan) continue;
+      const spanKey = `${rawSpan.startRaw}:${rawSpan.endRaw}`;
+      if (consumedSpans?.has(spanKey)) continue;
+      const range = createRangeFromRawOffsets(
+        searchIndex.nodes,
+        rawSpan.startRaw,
+        rawSpan.endRaw
+      );
+      if (!range) continue;
+      const ancestor =
+        range.commonAncestorContainer instanceof HTMLElement
+          ? range.commonAncestorContainer
+          : range.commonAncestorContainer?.parentElement;
+      if (ancestor && isEditableElement(ancestor)) continue;
+      if (rangeTouchesExistingHighlight(range)) continue;
+      consumedSpans?.add(spanKey);
+      return range;
+    }
+  }
+  return null;
+};
+
+const applyAutoHighlightRange = async (range, color, reason) => {
+  const snapshot = serializeRange(range.cloneRange());
+  const text = normalizeWhitespace(snapshot.text);
+  if (!text) return null;
+  const highlightId = `hk-ai-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+  const normalizedColor = toHexColor(color || DEFAULT_COLOR);
+  const note = reason ? `AI：${reason}` : "";
+  const highlightEl = wrapRangeWithHighlight(range, normalizedColor, highlightId);
+  setAllMarksMetadata(highlightId, { color: normalizedColor, note });
+  await saveHighlight({
+    id: highlightId,
+    color: normalizedColor,
+    text: snapshot.text,
+    range: snapshot,
+    url: pageKey,
+    createdAt: Date.now(),
+    note,
+  });
+  return {
+    id: highlightId,
+    color: normalizedColor,
+    text,
+  };
+};
+
+const callOpenAI = async (key, prompt, options = {}) => {
+  const systemPrompt =
+    options.systemPrompt ||
+    "You are a note-taking assistant who produces concise, easy-to-read study notes in Traditional Chinese.";
   const payload = {
     model: aiSettings.openaiModel || "gpt-4o-mini",
     messages: [
       {
         role: "system",
-        content:
-          "You are a note-taking assistant who produces concise, easy-to-read study notes in Traditional Chinese.",
+        content: systemPrompt,
       },
       { role: "user", content: prompt },
     ],
     temperature: 0.4,
   };
+  if (options.jsonMode) {
+    payload.response_format = { type: "json_object" };
+  }
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -477,6 +1313,9 @@ const callOpenAI = async (key, prompt) => {
 
   if (!response.ok) {
     const errorText = await response.text();
+    if (options.jsonMode && response.status === 400) {
+      return callOpenAI(key, prompt, { ...options, jsonMode: false });
+    }
     throw new Error(`OpenAI API 錯誤：${errorText}`);
   }
 
@@ -488,8 +1327,21 @@ const callOpenAI = async (key, prompt) => {
   return text.trim();
 };
 
-const callGemini = async (key, prompt) => {
+const callGemini = async (key, prompt, options = {}) => {
   const model = aiSettings.geminiModel || DEFAULT_GEMINI_MODEL;
+  const payload = {
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: prompt }],
+      },
+    ],
+  };
+  if (options.jsonMode) {
+    payload.generationConfig = {
+      responseMimeType: "application/json",
+    };
+  }
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${encodeURIComponent(
       key
@@ -499,14 +1351,7 @@ const callGemini = async (key, prompt) => {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: prompt }],
-          },
-        ],
-      }),
+      body: JSON.stringify(payload),
     }
   );
 
@@ -515,7 +1360,10 @@ const callGemini = async (key, prompt) => {
     if (response.status === 404 && model !== DEFAULT_GEMINI_MODEL) {
       aiSettings.geminiModel = DEFAULT_GEMINI_MODEL;
       await persistAISettings();
-      return callGemini(key, prompt);
+      return callGemini(key, prompt, options);
+    }
+    if (options.jsonMode && response.status === 400) {
+      return callGemini(key, prompt, { ...options, jsonMode: false });
     }
     throw new Error(`Gemini API 錯誤：${errorText}`);
   }
@@ -542,8 +1390,221 @@ const saveGeneratedNote = async (pageUrl, notePayload) => {
   }
 };
 
+const clearPageHighlights = async () => {
+  document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach(unwrapHighlightElement);
+  await setStoredHighlights([], pageKey);
+  await refreshHighlightPanelIfVisible();
+  setAiPanelStatus("已清除本頁所有標記，可重新標記");
+};
+
+const applyPreviewHighlight = (range, color, reason) => {
+  const snapshot = serializeRange(range.cloneRange());
+  const text = normalizeWhitespace(snapshot.text);
+  if (!text) return null;
+  const highlightId = `hk-ai-preview-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+  const normalizedColor = toHexColor(color || DEFAULT_COLOR);
+  const note = reason ? `AI：${reason}` : "";
+  const highlightEl = wrapRangeWithHighlight(range, normalizedColor, highlightId);
+  if (highlightEl) highlightEl.classList.add("hk-highlight-preview");
+  setAllMarksMetadata(highlightId, { color: normalizedColor, note });
+  document.querySelectorAll(`[${HIGHLIGHT_ATTR}="${highlightId}"]`).forEach(el => el.classList.add("hk-highlight-preview"));
+  return {
+    el: highlightEl,
+    data: {
+      id: highlightId,
+      color: normalizedColor,
+      text: snapshot.text,
+      range: snapshot,
+      url: pageKey,
+      createdAt: Date.now(),
+      note,
+    },
+  };
+};
+
+const showPreviewConfirmBar = (count) => {
+  let bar = document.getElementById("hk-preview-bar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "hk-preview-bar";
+    bar.className = "hk-preview-bar";
+    const msg = document.createElement("span");
+    msg.id = "hk-preview-bar-msg";
+    msg.className = "hk-preview-bar-msg";
+    const confirmBtn = document.createElement("button");
+    confirmBtn.type = "button";
+    confirmBtn.className = "hk-preview-bar-confirm";
+    confirmBtn.textContent = "確認套用";
+    confirmBtn.addEventListener("click", () => confirmPreviewHighlights());
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "hk-preview-bar-cancel";
+    cancelBtn.textContent = "取消";
+    cancelBtn.addEventListener("click", () => cancelPreviewHighlights());
+    bar.appendChild(msg);
+    bar.appendChild(confirmBtn);
+    bar.appendChild(cancelBtn);
+    document.body.appendChild(bar);
+  }
+  const msg = document.getElementById("hk-preview-bar-msg");
+  if (msg) msg.textContent = `預覽 ${count} 個重點，確認後正式套用`;
+  bar.hidden = false;
+};
+
+const hidePreviewConfirmBar = () => {
+  const bar = document.getElementById("hk-preview-bar");
+  if (bar) bar.hidden = true;
+};
+
+const confirmPreviewHighlights = async () => {
+  const toSave = [...previewData];
+  previewData = [];
+  hidePreviewConfirmBar();
+  updateGenerateAvailability();
+  for (const item of toSave) {
+    item.el.classList.remove("hk-highlight-preview");
+    await saveHighlight(item.data);
+  }
+  await ensurePageMetaTitle(pageKey, document.title);
+  await refreshHighlightPanelIfVisible();
+  setAiPanelStatus(`已套用 ${toSave.length} 個重點`);
+};
+
+const cancelPreviewHighlights = () => {
+  const toRemove = [...previewData];
+  previewData = [];
+  hidePreviewConfirmBar();
+  updateGenerateAvailability();
+  toRemove.forEach((item) => unwrapHighlightElement(item.el));
+  setAiPanelStatus("已取消預覽");
+};
+
+const cancelChatGPTBridge = async () => {
+  isChatGPTBridgeWaiting = false;
+  try {
+    await chrome.storage.local.remove([CHATGPT_REQUEST_KEY]);
+  } catch (_e) {}
+  updateGenerateAvailability();
+  setAiPanelStatus("");
+};
+
+const launchChatGPTBridge = async (type) => {
+  if (isChatGPTBridgeWaiting) return;
+  isChatGPTBridgeWaiting = true;
+  updateGenerateAvailability();
+  setAiPanelStatus("準備中…");
+  try {
+    const pageData = {
+      title: document.title,
+      url: pageKey,
+      pageText: getPagePlainText(),
+      highlights: await collectPageHighlights(),
+    };
+    let prompt;
+    if (type === "note") {
+      prompt = buildNotePrompt(pageData);
+    } else {
+      const latestPalette = await refreshPaletteFromStorage();
+      const usageCounts = await collectColorUsageCounts();
+      const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+      prompt = buildAutoHighlightPrompt(pageData, preferredPalette, usageCounts);
+    }
+    const requestId = `hk-${Date.now()}`;
+    await chrome.storage.local.set({
+      [CHATGPT_REQUEST_KEY]: { requestId, type, prompt, sourceUrl: pageKey },
+    });
+    try {
+      await navigator.clipboard.writeText(prompt);
+    } catch (_e) {}
+    window.open("https://chatgpt.com/", "_blank");
+    setAiPanelStatus("已開啟 ChatGPT，請在跳出的頁面點「複製 Prompt」並送出");
+  } catch (error) {
+    isChatGPTBridgeWaiting = false;
+    updateGenerateAvailability();
+    setAiPanelStatus(error?.message || "無法啟動 ChatGPT 橋接", true);
+  }
+};
+
+const handleChatGPTResponse = async (responseData) => {
+  if (!responseData?.text || !responseData?.requestId) return;
+  isChatGPTBridgeWaiting = false;
+  updateGenerateAvailability();
+  try {
+    await chrome.storage.local.remove([CHATGPT_REQUEST_KEY, CHATGPT_RESPONSE_KEY]);
+  } catch (_e) {}
+  const { type, text } = responseData;
+  try {
+    if (type === "note") {
+      const notePayload = {
+        note: text,
+        provider: "chatgpt",
+        model: "chatgpt-web",
+        generatedAt: Date.now(),
+        url: pageKey,
+      };
+      highlightPanelState.notesByPage = {
+        ...highlightPanelState.notesByPage,
+        [pageKey]: notePayload,
+      };
+      highlightPanelState.activeTab = "ai-note";
+      applyHighlightPanelTabState();
+      await saveGeneratedNote(pageKey, notePayload);
+      updateAiNoteSection(notePayload);
+      setAiPanelStatus("ChatGPT 筆記已匯入");
+    } else {
+      setAiPanelStatus("套用重點中…");
+      const latestPalette = await refreshPaletteFromStorage();
+      const usageCounts = await collectColorUsageCounts();
+      const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+      // Prefer the new non-JSON block format; fall back to legacy JSON.
+      const blockItems = parseHighlightBlocks(text);
+      const parsedPayload = blockItems.length
+        ? blockItems
+        : parseJsonFromModelResponse(text);
+      const tasks = normalizeAutoHighlightItems(parsedPayload, preferredPalette);
+      if (!tasks.length) throw new Error("ChatGPT 回傳沒有可用的重點");
+      const usePreview = aiSettings.usePreview;
+      const consumedSpans = new Set();
+      let appliedCount = 0;
+      let skippedCount = 0;
+      for (const task of tasks) {
+        const range = findRangeForAutoHighlightText(task.text, consumedSpans);
+        if (!range) { skippedCount++; continue; }
+        try {
+          if (usePreview) {
+            const result = applyPreviewHighlight(range, task.color, task.reason);
+            if (result) { previewData.push(result); appliedCount++; }
+            else skippedCount++;
+          } else {
+            await applyAutoHighlightRange(range, task.color, task.reason);
+            appliedCount++;
+          }
+        } catch (_e) { skippedCount++; }
+      }
+      if (!appliedCount) throw new Error("找不到可標註的文字");
+      if (usePreview && previewData.length) {
+        showPreviewConfirmBar(previewData.length);
+        setAiPanelStatus(`預覽 ${previewData.length} 個重點，請確認後套用`);
+      } else {
+        await ensurePageMetaTitle(pageKey, document.title);
+        await refreshHighlightPanelIfVisible();
+        setAiPanelStatus(
+          skippedCount
+            ? `已自動畫重點 ${appliedCount} 筆，略過 ${skippedCount} 筆`
+            : `已自動畫重點 ${appliedCount} 筆`
+        );
+      }
+    }
+  } catch (error) {
+    setAiPanelStatus(error?.message || "匯入失敗", true);
+  }
+};
+
 const handleGenerateAiNote = async () => {
   if (isGeneratingNote || !highlightPanelEls?.aiGenerateBtn) return;
+  if (aiSettings.provider === "chatgpt") {
+    return launchChatGPTBridge("note");
+  }
   const provider = aiSettings.provider;
   const apiKey =
     provider === "openai"
@@ -598,6 +1659,111 @@ const handleGenerateAiNote = async () => {
     setAiPanelStatus(error?.message || "無法產生筆記", true);
   } finally {
     isGeneratingNote = false;
+    updateGenerateAvailability();
+  }
+};
+
+const handleGenerateAiHighlights = async () => {
+  if (isAutoHighlighting || isGeneratingNote || previewData.length || !highlightPanelEls?.aiAutoHighlightBtn) {
+    return;
+  }
+  if (aiSettings.provider === "chatgpt") {
+    return launchChatGPTBridge("highlight");
+  }
+  const provider = aiSettings.provider;
+  const apiKey =
+    provider === "openai"
+      ? aiSettings.openaiKey?.trim()
+      : aiSettings.geminiKey?.trim();
+
+  if (!apiKey) {
+    setAiPanelStatus("請先輸入 API Key", true);
+    updateGenerateAvailability();
+    return;
+  }
+
+  try {
+    isAutoHighlighting = true;
+    updateGenerateAvailability();
+    setAiPanelStatus("分析重點中…");
+
+    let scopedText = getPagePlainText();
+    if (aiSettings.selectionOnly) {
+      const selText = window.getSelection()?.toString()?.trim();
+      if (selText) {
+        scopedText = selText;
+      } else {
+        setAiPanelStatus("未選取文字，改為分析整頁");
+      }
+    }
+
+    const pageData = {
+      title: document.title,
+      url: pageKey,
+      pageText: scopedText,
+      highlights: await collectPageHighlights(),
+    };
+    const latestPalette = await refreshPaletteFromStorage();
+    const usageCounts = await collectColorUsageCounts();
+    const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+    const prompt = buildAutoHighlightPrompt(pageData, preferredPalette, usageCounts);
+    const rawResponse =
+      provider === "openai"
+        ? await callOpenAI(apiKey, prompt, {
+            jsonMode: true,
+            systemPrompt:
+              "You are a strict JSON extraction assistant. Return only valid JSON without markdown.",
+          })
+        : await callGemini(apiKey, prompt, { jsonMode: true });
+    const parsedPayload = parseJsonFromModelResponse(rawResponse);
+    const tasks = normalizeAutoHighlightItems(parsedPayload, preferredPalette);
+    if (!tasks.length) {
+      throw new Error("AI 沒有回傳可用的重點項目");
+    }
+
+    const usePreview = aiSettings.usePreview;
+    const consumedSpans = new Set();
+    let appliedCount = 0;
+    let skippedCount = 0;
+    for (const task of tasks) {
+      const range = findRangeForAutoHighlightText(task.text, consumedSpans);
+      if (!range) { skippedCount++; continue; }
+      try {
+        if (usePreview) {
+          const result = applyPreviewHighlight(range, task.color, task.reason);
+          if (result) { previewData.push(result); appliedCount++; }
+          else skippedCount++;
+        } else {
+          await applyAutoHighlightRange(range, task.color, task.reason);
+          appliedCount++;
+        }
+      } catch (error) {
+        console.debug("套用 AI 自動畫重點失敗", error);
+        skippedCount++;
+      }
+    }
+
+    if (!appliedCount) {
+      throw new Error("找不到可標註的文字，請調整 Prompt 後再試");
+    }
+
+    if (usePreview && previewData.length) {
+      showPreviewConfirmBar(previewData.length);
+      setAiPanelStatus(`預覽 ${previewData.length} 個重點，請確認後套用`);
+    } else {
+      await ensurePageMetaTitle(pageKey, document.title);
+      await refreshHighlightPanelIfVisible();
+      setAiPanelStatus(
+        skippedCount
+          ? `已自動畫重點 ${appliedCount} 筆，略過 ${skippedCount} 筆`
+          : `已自動畫重點 ${appliedCount} 筆`
+      );
+    }
+  } catch (error) {
+    console.debug("AI 自動畫重點失敗", error);
+    setAiPanelStatus(error?.message || "無法自動畫重點", true);
+  } finally {
+    isAutoHighlighting = false;
     updateGenerateAvailability();
   }
 };
@@ -705,26 +1871,26 @@ const setHighlightPanelSide = async (side, persist = true) => {
 };
 
 const applyHighlightPanelTabState = () => {
-  const allowedTabs = ["page", "archive", "search", "ai-note"];
-  const resolved = allowedTabs.includes(highlightPanelState.activeTab)
-    ? highlightPanelState.activeTab
-    : "page";
+  // Legacy "archive" and "ai-note" tabs collapsed into the page view —
+  // their controls moved to the settings drawer and the AI action strip.
+  const visibleTabs = ["page", "search"];
+  const legacyRedirect = { archive: "page", "ai-note": "page" };
+  let resolved = highlightPanelState.activeTab;
+  if (legacyRedirect[resolved]) resolved = legacyRedirect[resolved];
+  if (!visibleTabs.includes(resolved)) resolved = "page";
   highlightPanelState.activeTab = resolved;
+
   const { tabButtons, tabPanels } = highlightPanelEls ?? {};
   const buttonMap = {
     page: tabButtons?.page,
-    archive: tabButtons?.archive,
     search: tabButtons?.search,
-    "ai-note": tabButtons?.ai,
   };
   const panelMap = {
     page: tabPanels?.page,
-    archive: tabPanels?.archive,
     search: tabPanels?.search,
-    "ai-note": tabPanels?.ai,
   };
 
-  allowedTabs.forEach((tab) => {
+  visibleTabs.forEach((tab) => {
     const isActive = resolved === tab;
     const btn = buttonMap[tab];
     if (btn) {
@@ -1145,6 +2311,41 @@ const deleteHighlightFromPanel = async (entry) => {
   }
 };
 
+// Render a stored note for display. Most notes are prose, but legacy notes (or
+// a highlight JSON pasted into note mode) can be raw JSON — convert those into a
+// readable numbered list instead of dumping braces at the user.
+const formatNoteForDisplay = (raw) => {
+  if (typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  if (!/^[[{]/.test(trimmed)) return raw;
+  let data = null;
+  try {
+    data = JSON.parse(trimmed);
+  } catch (_e) {
+    try {
+      data = parseJsonFromModelResponse(trimmed);
+    } catch (_e2) {
+      data = null;
+    }
+  }
+  const items = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.highlights)
+    ? data.highlights
+    : null;
+  if (!items) return raw;
+  const lines = items
+    .map((it) => {
+      const text = (it?.text ?? "").toString().trim();
+      const reason = (it?.reason ?? "").toString().trim();
+      if (!text && !reason) return "";
+      if (text && reason) return `• ${text}\n  → ${reason}`;
+      return `• ${text || reason}`;
+    })
+    .filter(Boolean);
+  return lines.length ? lines.join("\n\n") : raw;
+};
+
 const updateAiNoteSection = (noteData) => {
   const {
     aiNoteSection,
@@ -1164,11 +2365,21 @@ const updateAiNoteSection = (noteData) => {
   aiNoteCopyBtn.classList.remove("is-error");
 
   if (noteData?.note) {
-    aiNoteContent.textContent = noteData.note;
+    const displayNote = formatNoteForDisplay(noteData.note);
+    aiNoteSection.style.display = "flex";
+    aiNoteContent.textContent = displayNote;
     aiNoteContent.style.display = "block";
     aiNoteEmpty.style.display = "none";
-    const providerLabel = noteData.provider === "openai" ? "OpenAI" : "Gemini";
-    const modelLabel = noteData.model ? `${providerLabel} · ${noteData.model}` : providerLabel;
+    const providerLabel =
+      noteData.provider === "openai"
+        ? "OpenAI"
+        : noteData.provider === "chatgpt"
+        ? "ChatGPT"
+        : "Gemini";
+    const modelLabel =
+      noteData.model && noteData.model !== "chatgpt-web"
+        ? `${providerLabel} · ${noteData.model}`
+        : providerLabel;
     const generatedLabel = noteData.generatedAt
       ? `${modelLabel} · ${formatTimestamp(noteData.generatedAt)}`
       : modelLabel;
@@ -1181,7 +2392,7 @@ const updateAiNoteSection = (noteData) => {
         aiNoteCopyBtn._hkResetTimer = null;
       }
       try {
-        await navigator.clipboard.writeText(noteData.note);
+        await navigator.clipboard.writeText(displayNote);
         aiNoteCopyBtn.textContent = "已複製";
       } catch (error) {
         console.debug("複製 AI 筆記失敗", error);
@@ -1196,6 +2407,7 @@ const updateAiNoteSection = (noteData) => {
       }
     };
   } else {
+    aiNoteSection.style.display = "none";
     aiNoteContent.textContent = "";
     aiNoteContent.style.display = "none";
     aiNoteEmpty.style.display = "block";
@@ -1728,6 +2940,8 @@ const createPanelEntryElement = (entry, options = {}) => {
   const item = document.createElement("article");
   item.className = "hk-panel-item";
   item.setAttribute("data-highlight-id", entry.id);
+  // Color shown as a left vertical bar — see .hk-panel-item::before
+  item.style.setProperty("--hk-color", entry.color ?? DEFAULT_COLOR);
 
   const meta = document.createElement("div");
   meta.className = "hk-panel-meta";
@@ -1788,6 +3002,14 @@ const createPanelEntryElement = (entry, options = {}) => {
 
   item.appendChild(meta);
   item.appendChild(text);
+
+  const noteText = typeof entry.note === "string" ? entry.note.trim() : "";
+  if (noteText) {
+    const note = document.createElement("p");
+    note.className = "hk-panel-item-note";
+    note.textContent = noteText;
+    item.appendChild(note);
+  }
 
   if (entry.pageTags?.length && !options.hideTags) {
     const tagsRow = document.createElement("div");
@@ -1873,7 +3095,12 @@ const focusHighlightElement = (id) => {
 };
 
 const ensureHighlightPanel = () => {
-  if (highlightPanel) return highlightPanel;
+  if (highlightPanel) {
+    if (!document.body.contains(highlightPanel)) {
+      document.body.appendChild(highlightPanel);
+    }
+    return highlightPanel;
+  }
   const panel = document.createElement("aside");
   panel.id = HIGHLIGHT_PANEL_ID;
   panel.className = "hk-page-panel";
@@ -1886,14 +3113,15 @@ const ensureHighlightPanel = () => {
   title.className = "hk-panel-title";
   title.textContent = "此頁標註";
 
+  // Font controls live in the settings drawer now
   const fontControls = document.createElement("div");
-  fontControls.className = "hk-panel-font-controls";
+  fontControls.className = "hk-panel-drawer-font-row";
 
   const fontDecreaseBtn = document.createElement("button");
   fontDecreaseBtn.type = "button";
   fontDecreaseBtn.className = "hk-panel-font-btn";
   fontDecreaseBtn.setAttribute("aria-label", "縮小文字");
-  fontDecreaseBtn.textContent = "A-";
+  fontDecreaseBtn.textContent = "A−";
   fontDecreaseBtn.addEventListener("click", (event) => {
     event.stopPropagation();
     adjustHighlightPanelFontScale(-PANEL_FONT_SCALE_STEP);
@@ -1912,6 +3140,13 @@ const ensureHighlightPanel = () => {
   fontControls.appendChild(fontDecreaseBtn);
   fontControls.appendChild(fontIncreaseBtn);
 
+  const settingsBtn = document.createElement("button");
+  settingsBtn.type = "button";
+  settingsBtn.className = "hk-panel-iconbtn hk-panel-settings-btn";
+  settingsBtn.setAttribute("aria-label", "設定");
+  settingsBtn.setAttribute("aria-expanded", "false");
+  settingsBtn.innerHTML = "&#9881;"; // ⚙
+
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "hk-panel-close";
@@ -1920,7 +3155,7 @@ const ensureHighlightPanel = () => {
   closeBtn.addEventListener("click", () => closeHighlightPanel());
 
   header.appendChild(title);
-  header.appendChild(fontControls);
+  header.appendChild(settingsBtn);
   header.appendChild(closeBtn);
   header.addEventListener("pointerdown", handlePanelPointerDown);
   header.addEventListener("pointermove", handlePanelPointerMove);
@@ -1938,7 +3173,7 @@ const ensureHighlightPanel = () => {
   pageTabBtn.id = "hk-panel-tab-page";
   pageTabBtn.setAttribute("role", "tab");
   pageTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-page");
-  pageTabBtn.textContent = "標註";
+  pageTabBtn.textContent = "本頁";
   pageTabBtn.addEventListener("click", () => {
     if (highlightPanelState.activeTab === "page") return;
     highlightPanelState.activeTab = "page";
@@ -1954,6 +3189,7 @@ const ensureHighlightPanel = () => {
   archiveTabBtn.id = "hk-panel-tab-archive";
   archiveTabBtn.setAttribute("role", "tab");
   archiveTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-archive");
+  archiveTabBtn.dataset.tabLegacy = "1";
   archiveTabBtn.textContent = "存檔";
   archiveTabBtn.addEventListener("click", () => {
     if (highlightPanelState.activeTab === "archive") return;
@@ -1970,7 +3206,7 @@ const ensureHighlightPanel = () => {
   searchTabBtn.id = "hk-panel-tab-search";
   searchTabBtn.setAttribute("role", "tab");
   searchTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-search");
-  searchTabBtn.textContent = "搜尋";
+  searchTabBtn.textContent = "全部";
   searchTabBtn.addEventListener("click", () => {
     if (highlightPanelState.activeTab === "search") return;
     highlightPanelState.activeTab = "search";
@@ -1986,6 +3222,7 @@ const ensureHighlightPanel = () => {
   aiTabBtn.id = "hk-panel-tab-ai-note";
   aiTabBtn.setAttribute("role", "tab");
   aiTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-ai-note");
+  aiTabBtn.dataset.tabLegacy = "1";
   aiTabBtn.textContent = "AI 筆記";
   aiTabBtn.addEventListener("click", () => {
     if (highlightPanelState.activeTab === "ai-note") return;
@@ -2058,15 +3295,24 @@ const ensureHighlightPanel = () => {
 
   const pageTagSection = document.createElement("div");
   pageTagSection.className = "hk-panel-page-tags";
+  // Header redundant with drawer section title — keep only the hint span
   const pageTagHeader = document.createElement("div");
   pageTagHeader.className = "hk-panel-page-tags-header";
-  const pageTagTitle = document.createElement("span");
-  pageTagTitle.textContent = "頁面工具";
-  pageTagHeader.appendChild(pageTagTitle);
   const pageTagHint = document.createElement("span");
   pageTagHint.className = "hk-panel-page-tags-hint";
   pageTagHeader.appendChild(pageTagHint);
   pageTagSection.appendChild(pageTagHeader);
+
+  const clearPageBtn = document.createElement("button");
+  clearPageBtn.type = "button";
+  clearPageBtn.className = "hk-panel-clear-page-btn";
+  clearPageBtn.textContent = "清除本頁標記";
+  clearPageBtn.title = "刪除此頁所有標記，可重新 AI 標示";
+  clearPageBtn.addEventListener("click", async () => {
+    if (!window.confirm("確定要刪除本頁所有標記嗎？")) return;
+    await clearPageHighlights();
+  });
+  pageTagSection.appendChild(clearPageBtn);
 
   const exportActions = document.createElement("div");
   exportActions.className = "hk-panel-export-actions";
@@ -2207,6 +3453,10 @@ const ensureHighlightPanel = () => {
   const aiSettingsSection = document.createElement("section");
   aiSettingsSection.className = "hk-panel-ai-settings";
 
+  // ── Shared settings ──────────────────────────────────
+  const aiConfigBlock = document.createElement("div");
+  aiConfigBlock.className = "hk-panel-ai-config-block";
+
   const providerField = document.createElement("div");
   providerField.className = "hk-panel-ai-field";
   const providerLabel = document.createElement("label");
@@ -2220,6 +3470,7 @@ const ensureHighlightPanel = () => {
   [
     ["openai", "OpenAI"],
     ["gemini", "Google Gemini"],
+    ["chatgpt", "ChatGPT 網頁版"],
   ].forEach(([value, label]) => {
     const option = document.createElement("option");
     option.value = value;
@@ -2228,7 +3479,7 @@ const ensureHighlightPanel = () => {
   });
   providerField.appendChild(providerLabel);
   providerField.appendChild(aiProviderSelect);
-  aiSettingsSection.appendChild(providerField);
+  aiConfigBlock.appendChild(providerField);
 
   const modelField = document.createElement("div");
   modelField.className = "hk-panel-ai-field";
@@ -2242,7 +3493,7 @@ const ensureHighlightPanel = () => {
   aiModelSelect.className = "hk-panel-ai-select";
   modelField.appendChild(modelLabel);
   modelField.appendChild(aiModelSelect);
-  aiSettingsSection.appendChild(modelField);
+  aiConfigBlock.appendChild(modelField);
 
   const aiKeyGroupsContainer = document.createElement("div");
   aiKeyGroupsContainer.className = "hk-panel-ai-key-groups";
@@ -2281,9 +3532,166 @@ const ensureHighlightPanel = () => {
   geminiGroup.appendChild(geminiInput);
   geminiGroup.hidden = true;
 
+  const chatgptGroup = document.createElement("div");
+  chatgptGroup.className = "hk-panel-ai-key-group";
+  chatgptGroup.dataset.provider = "chatgpt";
+  const chatgptInfo = document.createElement("p");
+  chatgptInfo.className = "hk-panel-ai-chatgpt-info";
+  chatgptInfo.textContent = "無需 API Key。點擊功能按鈕後，Prompt 會自動複製到剪貼簿並開啟 ChatGPT。取得回應後貼入各區塊下方即可套用。";
+  const chatgptCancelBtn = document.createElement("button");
+  chatgptCancelBtn.type = "button";
+  chatgptCancelBtn.className = "hk-panel-ai-chatgpt-cancel";
+  chatgptCancelBtn.textContent = "取消等待";
+  chatgptCancelBtn.hidden = true;
+  chatgptCancelBtn.addEventListener("click", () => cancelChatGPTBridge());
+  chatgptGroup.appendChild(chatgptInfo);
+  chatgptGroup.appendChild(chatgptCancelBtn);
+  chatgptGroup.hidden = true;
+
   aiKeyGroupsContainer.appendChild(openaiGroup);
   aiKeyGroupsContainer.appendChild(geminiGroup);
-  aiSettingsSection.appendChild(aiKeyGroupsContainer);
+  aiKeyGroupsContainer.appendChild(chatgptGroup);
+  aiConfigBlock.appendChild(aiKeyGroupsContainer);
+  aiSettingsSection.appendChild(aiConfigBlock);
+
+  // status (shared)
+  // status banner — promoted to top of panel so users always see it
+  const aiStatus = document.createElement("div");
+  aiStatus.className = "hk-panel-ai-status hk-panel-status-banner";
+  aiStatus.setAttribute("role", "status");
+  aiStatus.setAttribute("aria-live", "polite");
+
+  // ── 自動畫重點 block ─────────────────────────────────
+  const aiHighlightBlock = document.createElement("div");
+  aiHighlightBlock.className = "hk-panel-ai-block hk-panel-ai-hl-block";
+
+  const aiHlHead = document.createElement("div");
+  aiHlHead.className = "hk-panel-ai-block-head";
+  const aiHlTitle = document.createElement("span");
+  aiHlTitle.className = "hk-panel-ai-block-title";
+  aiHlTitle.textContent = "自動畫重點";
+  const aiHlDesc = document.createElement("p");
+  aiHlDesc.className = "hk-panel-ai-block-desc";
+  aiHlDesc.textContent = "AI 分析頁面內容，自動找出重要段落並套上顏色標記";
+  aiHlHead.appendChild(aiHlTitle);
+  aiHlHead.appendChild(aiHlDesc);
+
+  const autoHighlightPromptField = document.createElement("div");
+  autoHighlightPromptField.className = "hk-panel-ai-field";
+  const autoHighlightPromptLabel = document.createElement("label");
+  const autoHighlightPromptTextareaId = "hk-panel-ai-auto-highlight-prompt";
+  autoHighlightPromptLabel.setAttribute("for", autoHighlightPromptTextareaId);
+  autoHighlightPromptLabel.className = "hk-panel-ai-label";
+  autoHighlightPromptLabel.textContent = "Prompt";
+  const autoHighlightPromptTextarea = document.createElement("textarea");
+  autoHighlightPromptTextarea.id = autoHighlightPromptTextareaId;
+  autoHighlightPromptTextarea.className = "hk-panel-ai-textarea";
+  autoHighlightPromptTextarea.rows = 3;
+  autoHighlightPromptField.appendChild(autoHighlightPromptLabel);
+  autoHighlightPromptField.appendChild(autoHighlightPromptTextarea);
+
+  const aiAutoHighlightBtn = document.createElement("button");
+  aiAutoHighlightBtn.type = "button";
+  aiAutoHighlightBtn.className = "hk-panel-ai-generate hk-panel-ai-auto-highlight";
+  aiAutoHighlightBtn.textContent = "自動畫重點";
+
+  // ChatGPT manual paste for highlight
+  const chatgptHlPasteArea = document.createElement("textarea");
+  chatgptHlPasteArea.className = "hk-panel-ai-textarea hk-panel-ai-chatgpt-paste-area";
+  chatgptHlPasteArea.rows = 3;
+  chatgptHlPasteArea.placeholder = "貼上 ChatGPT 回應後點「套用重點」…";
+  const chatgptHlApplyBtn = document.createElement("button");
+  chatgptHlApplyBtn.type = "button";
+  chatgptHlApplyBtn.className = "hk-panel-ai-chatgpt-apply-btn";
+  chatgptHlApplyBtn.textContent = "套用重點";
+  chatgptHlApplyBtn.addEventListener("click", () => {
+    const text = chatgptHlPasteArea.value.trim();
+    if (!text) { setAiPanelStatus("請先貼上 ChatGPT 回應", true); return; }
+    handleChatGPTResponse({ requestId: "manual", type: "highlight", text, sourceUrl: pageKey });
+    chatgptHlPasteArea.value = "";
+  });
+
+  // Category editor
+  const catField = document.createElement("div");
+  catField.className = "hk-panel-ai-field";
+  const catLabel = document.createElement("label");
+  catLabel.className = "hk-panel-ai-label";
+  catLabel.textContent = "標記分類";
+  const catList = document.createElement("div");
+  catList.className = "hk-panel-ai-cat-list";
+  const catAddBtn = document.createElement("button");
+  catAddBtn.type = "button";
+  catAddBtn.className = "hk-panel-ai-cat-add";
+  catAddBtn.textContent = "+ 新增分類";
+  catAddBtn.addEventListener("click", () => {
+    if (!Array.isArray(aiSettings.categories)) aiSettings.categories = [];
+    aiSettings.categories.push({ name: "新分類", color: "#a8a8a8" });
+    persistAISettings();
+    renderCategoryList();
+  });
+  const catResetBtn = document.createElement("button");
+  catResetBtn.type = "button";
+  catResetBtn.className = "hk-panel-ai-cat-reset";
+  catResetBtn.textContent = "重置為預設分類";
+  catResetBtn.addEventListener("click", () => {
+    aiSettings.categories = [...DEFAULT_AI_CATEGORIES];
+    persistAISettings();
+    renderCategoryList();
+  });
+  catField.appendChild(catLabel);
+  catField.appendChild(catList);
+  catField.appendChild(catAddBtn);
+  catField.appendChild(catResetBtn);
+
+  // Options row
+  const hlOptionsRow = document.createElement("div");
+  hlOptionsRow.className = "hk-panel-ai-options-row";
+  const previewCheckLabel = document.createElement("label");
+  previewCheckLabel.className = "hk-panel-ai-check-row";
+  const previewCheckbox = document.createElement("input");
+  previewCheckbox.type = "checkbox";
+  previewCheckbox.addEventListener("change", (e) => {
+    aiSettings.usePreview = e.target.checked;
+    persistAISettings();
+  });
+  previewCheckLabel.appendChild(previewCheckbox);
+  previewCheckLabel.append("先預覽再確認");
+  const selOnlyCheckLabel = document.createElement("label");
+  selOnlyCheckLabel.className = "hk-panel-ai-check-row";
+  const selOnlyCheckbox = document.createElement("input");
+  selOnlyCheckbox.type = "checkbox";
+  selOnlyCheckbox.addEventListener("change", (e) => {
+    aiSettings.selectionOnly = e.target.checked;
+    persistAISettings();
+  });
+  selOnlyCheckLabel.appendChild(selOnlyCheckbox);
+  selOnlyCheckLabel.append("只標選取的文字");
+  hlOptionsRow.appendChild(previewCheckLabel);
+  hlOptionsRow.appendChild(selOnlyCheckLabel);
+
+  aiHighlightBlock.appendChild(aiHlHead);
+  aiHighlightBlock.appendChild(catField);
+  aiHighlightBlock.appendChild(autoHighlightPromptField);
+  aiHighlightBlock.appendChild(hlOptionsRow);
+  aiHighlightBlock.appendChild(aiAutoHighlightBtn);
+  aiHighlightBlock.appendChild(chatgptHlPasteArea);
+  aiHighlightBlock.appendChild(chatgptHlApplyBtn);
+  aiSettingsSection.appendChild(aiHighlightBlock);
+
+  // ── AI 摘要筆記 block ────────────────────────────────
+  const aiNoteGenBlock = document.createElement("div");
+  aiNoteGenBlock.className = "hk-panel-ai-block hk-panel-ai-note-gen-block";
+
+  const aiNoteGenHead = document.createElement("div");
+  aiNoteGenHead.className = "hk-panel-ai-block-head";
+  const aiNoteGenTitle = document.createElement("span");
+  aiNoteGenTitle.className = "hk-panel-ai-block-title";
+  aiNoteGenTitle.textContent = "AI 摘要筆記";
+  const aiNoteGenDesc = document.createElement("p");
+  aiNoteGenDesc.className = "hk-panel-ai-block-desc";
+  aiNoteGenDesc.textContent = "整篇文章的大致摘要，整理成有脈絡的筆記";
+  aiNoteGenHead.appendChild(aiNoteGenTitle);
+  aiNoteGenHead.appendChild(aiNoteGenDesc);
 
   const promptField = document.createElement("div");
   promptField.className = "hk-panel-ai-field";
@@ -2291,28 +3699,41 @@ const ensureHighlightPanel = () => {
   const promptTextareaId = "hk-panel-ai-prompt";
   promptLabel.setAttribute("for", promptTextareaId);
   promptLabel.className = "hk-panel-ai-label";
-  promptLabel.textContent = "自訂 Prompt";
+  promptLabel.textContent = "Prompt";
   const promptTextarea = document.createElement("textarea");
   promptTextarea.id = promptTextareaId;
   promptTextarea.className = "hk-panel-ai-textarea";
   promptTextarea.rows = 4;
   promptField.appendChild(promptLabel);
   promptField.appendChild(promptTextarea);
-  aiSettingsSection.appendChild(promptField);
 
-  const aiActions = document.createElement("div");
-  aiActions.className = "hk-panel-ai-actions";
-  const aiStatus = document.createElement("span");
-  aiStatus.className = "hk-panel-ai-status";
-  aiStatus.setAttribute("role", "status");
-  aiStatus.setAttribute("aria-live", "polite");
   const aiGenerateBtn = document.createElement("button");
   aiGenerateBtn.type = "button";
   aiGenerateBtn.className = "hk-panel-ai-generate";
   aiGenerateBtn.textContent = "產生筆記";
-  aiActions.appendChild(aiStatus);
-  aiActions.appendChild(aiGenerateBtn);
-  aiSettingsSection.appendChild(aiActions);
+
+  // ChatGPT manual paste for note
+  const chatgptNotePasteArea = document.createElement("textarea");
+  chatgptNotePasteArea.className = "hk-panel-ai-textarea hk-panel-ai-chatgpt-paste-area";
+  chatgptNotePasteArea.rows = 3;
+  chatgptNotePasteArea.placeholder = "貼上 ChatGPT 回應後點「套用筆記」…";
+  const chatgptNoteApplyBtn = document.createElement("button");
+  chatgptNoteApplyBtn.type = "button";
+  chatgptNoteApplyBtn.className = "hk-panel-ai-chatgpt-apply-btn";
+  chatgptNoteApplyBtn.textContent = "套用筆記";
+  chatgptNoteApplyBtn.addEventListener("click", () => {
+    const text = chatgptNotePasteArea.value.trim();
+    if (!text) { setAiPanelStatus("請先貼上 ChatGPT 回應", true); return; }
+    handleChatGPTResponse({ requestId: "manual", type: "note", text, sourceUrl: pageKey });
+    chatgptNotePasteArea.value = "";
+  });
+
+  aiNoteGenBlock.appendChild(aiNoteGenHead);
+  aiNoteGenBlock.appendChild(promptField);
+  aiNoteGenBlock.appendChild(aiGenerateBtn);
+  aiNoteGenBlock.appendChild(chatgptNotePasteArea);
+  aiNoteGenBlock.appendChild(chatgptNoteApplyBtn);
+  aiSettingsSection.appendChild(aiNoteGenBlock);
 
   const aiNoteSection = document.createElement("section");
   aiNoteSection.className = "hk-panel-ai-note";
@@ -2355,27 +3776,234 @@ const ensureHighlightPanel = () => {
   searchPlaceholder.className = "hk-panel-placeholder";
   searchPlaceholder.textContent = "目前沒有符合的筆記。";
 
+  // ── 統一 AI 卡片：複製 → 貼到 GPT → 貼回 ─────────────────
+  let aiMode = "note"; // "note" | "highlight"
+  const aiCard = document.createElement("div");
+  aiCard.className = "hk-ai-card";
+
+  // 模式切換
+  const aiModeToggle = document.createElement("div");
+  aiModeToggle.className = "hk-ai-mode-toggle";
+  const aiModeNoteBtn = document.createElement("button");
+  aiModeNoteBtn.type = "button";
+  aiModeNoteBtn.className = "hk-ai-mode-btn is-active";
+  aiModeNoteBtn.textContent = "📝 摘要筆記";
+  const aiModeHlBtn = document.createElement("button");
+  aiModeHlBtn.type = "button";
+  aiModeHlBtn.className = "hk-ai-mode-btn";
+  aiModeHlBtn.textContent = "✦ 自動畫重點";
+  aiModeToggle.appendChild(aiModeNoteBtn);
+  aiModeToggle.appendChild(aiModeHlBtn);
+
+  // 主按鈕：複製給 GPT
+  const aiCopyBtn = document.createElement("button");
+  aiCopyBtn.type = "button";
+  aiCopyBtn.className = "hk-ai-copy-btn";
+  aiCopyBtn.textContent = "複製給 GPT";
+
+  const aiCardHint = document.createElement("p");
+  aiCardHint.className = "hk-ai-hint";
+  aiCardHint.textContent = "複製後貼到 ChatGPT，再把回覆貼回下面。";
+
+  // 貼回區
+  const aiPasteArea = document.createElement("textarea");
+  aiPasteArea.className = "hk-ai-paste";
+  aiPasteArea.rows = 3;
+  aiPasteArea.placeholder = "把 ChatGPT 的回覆貼在這裡…";
+
+  const aiApplyBtn = document.createElement("button");
+  aiApplyBtn.type = "button";
+  aiApplyBtn.className = "hk-ai-apply";
+  aiApplyBtn.textContent = "套用";
+
+  // 進階：有 API Key 時可一鍵直接產生
+  const aiDirectBtn = document.createElement("button");
+  aiDirectBtn.type = "button";
+  aiDirectBtn.className = "hk-ai-direct";
+  aiDirectBtn.textContent = "用 API 直接產生";
+  aiDirectBtn.hidden = true;
+
+  // 指引閱讀（次要）
+  const actionGuidedReadingBtn = document.createElement("button");
+  actionGuidedReadingBtn.type = "button";
+  actionGuidedReadingBtn.className = "hk-ai-guided";
+  actionGuidedReadingBtn.textContent = "▷ 指引閱讀";
+  actionGuidedReadingBtn.addEventListener("click", () => startGuidedReading());
+
+  const setAiMode = (mode) => {
+    aiMode = mode === "highlight" ? "highlight" : "note";
+    aiModeNoteBtn.classList.toggle("is-active", aiMode === "note");
+    aiModeHlBtn.classList.toggle("is-active", aiMode === "highlight");
+    aiPasteArea.placeholder =
+      aiMode === "highlight"
+        ? "把 ChatGPT 回覆（原文／#分類／重點）貼在這裡…"
+        : "把 ChatGPT 的回覆貼在這裡…";
+    aiDirectBtn.textContent =
+      aiMode === "highlight" ? "用 API 直接畫重點" : "用 API 直接產生筆記";
+  };
+  aiModeNoteBtn.addEventListener("click", () => setAiMode("note"));
+  aiModeHlBtn.addEventListener("click", () => setAiMode("highlight"));
+
+  const flashCopyBtn = (msg) => {
+    aiCopyBtn.textContent = msg;
+    aiCopyBtn.classList.add("is-done");
+    window.setTimeout(() => {
+      aiCopyBtn.textContent = "複製給 GPT";
+      aiCopyBtn.classList.remove("is-done");
+    }, 1600);
+  };
+
+  aiCopyBtn.addEventListener("click", async () => {
+    try {
+      const pageData = {
+        title: document.title,
+        url: pageKey,
+        pageText: getPagePlainText(),
+        highlights: await collectPageHighlights(),
+      };
+      let prompt;
+      if (aiMode === "highlight") {
+        const latestPalette = await refreshPaletteFromStorage();
+        const usageCounts = await collectColorUsageCounts();
+        const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+        prompt = buildAutoHighlightPrompt(pageData, preferredPalette, usageCounts);
+      } else {
+        prompt = buildNotePrompt(pageData);
+      }
+      await navigator.clipboard.writeText(prompt);
+      flashCopyBtn("已複製 ✓");
+      setAiPanelStatus("已複製，貼到 ChatGPT 後把回覆貼回下面");
+    } catch (error) {
+      setAiPanelStatus(error?.message || "複製失敗", true);
+    }
+  });
+
+  aiApplyBtn.addEventListener("click", () => {
+    const text = aiPasteArea.value.trim();
+    if (!text) {
+      setAiPanelStatus("請先貼上 ChatGPT 回覆", true);
+      return;
+    }
+    handleChatGPTResponse({
+      requestId: "manual",
+      type: aiMode === "highlight" ? "highlight" : "note",
+      text,
+      sourceUrl: pageKey,
+    });
+    aiPasteArea.value = "";
+  });
+
+  aiDirectBtn.addEventListener("click", () => {
+    if (aiMode === "highlight") handleGenerateAiHighlights();
+    else handleGenerateAiNote();
+  });
+
+  const aiCardActions = document.createElement("div");
+  aiCardActions.className = "hk-ai-actions";
+  aiCardActions.appendChild(aiApplyBtn);
+  aiCardActions.appendChild(aiDirectBtn);
+
+  aiCard.appendChild(aiModeToggle);
+  aiCard.appendChild(aiCopyBtn);
+  aiCard.appendChild(aiCardHint);
+  aiCard.appendChild(aiStatus);
+  aiCard.appendChild(aiPasteArea);
+  aiCard.appendChild(aiCardActions);
+  aiCard.appendChild(actionGuidedReadingBtn);
+
+  // ── Settings drawer (overlay, slides over the panel body) ─
+  const drawer = document.createElement("div");
+  drawer.className = "hk-panel-drawer";
+  drawer.setAttribute("role", "region");
+  drawer.setAttribute("aria-label", "面板設定");
+
+  const drawerHeader = document.createElement("div");
+  drawerHeader.className = "hk-panel-drawer-header";
+
+  const drawerTitle = document.createElement("h3");
+  drawerTitle.className = "hk-panel-drawer-title";
+  drawerTitle.textContent = "面板設定";
+
+  const drawerCloseBtn = document.createElement("button");
+  drawerCloseBtn.type = "button";
+  drawerCloseBtn.className = "hk-panel-close";
+  drawerCloseBtn.setAttribute("aria-label", "關閉設定");
+  drawerCloseBtn.textContent = "×";
+
+  drawerHeader.appendChild(drawerTitle);
+  drawerHeader.appendChild(drawerCloseBtn);
+
+  const drawerBody = document.createElement("div");
+  drawerBody.className = "hk-panel-drawer-body";
+
+  const makeDrawerSection = (titleText, ...children) => {
+    const section = document.createElement("section");
+    section.className = "hk-panel-drawer-section";
+    if (titleText) {
+      const h = document.createElement("h4");
+      h.className = "hk-panel-drawer-section-title";
+      h.textContent = titleText;
+      section.appendChild(h);
+    }
+    children.forEach((c) => c && section.appendChild(c));
+    return section;
+  };
+
+  const displaySection = makeDrawerSection("顯示", fontControls);
+  const pageToolsSection = makeDrawerSection("本頁工具", pageTagSection);
+  const pageArchiveSectionWrap = makeDrawerSection("本頁備份", pageArchiveSection);
+  const allArchiveSectionWrap = makeDrawerSection("全部備份", archiveSection);
+  const aiSettingsWrap = makeDrawerSection("AI 服務", aiSettingsSection);
+
+  drawerBody.appendChild(displaySection);
+  drawerBody.appendChild(pageToolsSection);
+  drawerBody.appendChild(pageArchiveSectionWrap);
+  drawerBody.appendChild(allArchiveSectionWrap);
+  drawerBody.appendChild(aiSettingsWrap);
+
+  drawer.appendChild(drawerHeader);
+  drawer.appendChild(drawerBody);
+
+  const toggleDrawer = (open) => {
+    const isOpen = typeof open === "boolean" ? open : !drawer.classList.contains("is-open");
+    drawer.classList.toggle("is-open", isOpen);
+    settingsBtn.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  };
+  settingsBtn.addEventListener("click", () => toggleDrawer());
+  drawerCloseBtn.addEventListener("click", () => toggleDrawer(false));
+
+  // ── Assemble panel ─────────────────────────────────────
   panel.appendChild(header);
   panel.appendChild(tabs);
-  pageTabPanel.appendChild(pageTagSection);
+  pageTabPanel.appendChild(aiCard);
+  pageTabPanel.appendChild(aiNoteSection);
   pageTabPanel.appendChild(pageList);
   pageTabPanel.appendChild(pagePlaceholder);
   searchTabPanel.appendChild(searchControls);
   searchTabPanel.appendChild(searchList);
   searchTabPanel.appendChild(searchPlaceholder);
-  archiveTabPanel.appendChild(pageArchiveSection);
-  archiveTabPanel.appendChild(archiveSection);
-  aiTabPanel.appendChild(aiSettingsSection);
-  aiTabPanel.appendChild(aiNoteSection);
+  // archive + ai tabpanels kept in memory (unused) for backwards compat with
+  // legacy state values; they receive no children and are never displayed.
   panel.appendChild(pageTabPanel);
-  panel.appendChild(archiveTabPanel);
   panel.appendChild(searchTabPanel);
-  panel.appendChild(aiTabPanel);
+  panel.appendChild(drawer);
 
   highlightPanel = panel;
   highlightPanelEls = {
     container: panel,
     dragHandle: header,
+    aiCard,
+    aiModeNoteBtn,
+    aiModeHlBtn,
+    aiCopyBtn,
+    aiPasteArea,
+    aiApplyBtn,
+    aiDirectBtn,
+    actionGuidedReadingBtn,
+    settingsBtn,
+    drawer,
+    drawerCloseBtn,
+    toggleDrawer,
     tabs,
     pageList,
     pagePlaceholder,
@@ -2403,11 +4031,21 @@ const ensureHighlightPanel = () => {
     aiProviderSelect,
     aiModelSelect,
     aiPromptField: promptTextarea,
+    aiAutoHighlightPromptField: autoHighlightPromptTextarea,
     aiOpenaiKeyInput: openaiInput,
     aiGeminiKeyInput: geminiInput,
-    aiKeyGroups: [openaiGroup, geminiGroup],
+    aiKeyGroups: [openaiGroup, geminiGroup, chatgptGroup],
+    aiChatGPTCancelBtn: chatgptCancelBtn,
     aiGenerateBtn,
+    aiAutoHighlightBtn,
     aiStatus,
+    aiChatGPTHlPasteArea: chatgptHlPasteArea,
+    aiChatGPTHlApplyBtn: chatgptHlApplyBtn,
+    aiChatGPTNotePasteArea: chatgptNotePasteArea,
+    aiChatGPTNoteApplyBtn: chatgptNoteApplyBtn,
+    aiCatList: catList,
+    aiPreviewCheckbox: previewCheckbox,
+    aiSelOnlyCheckbox: selOnlyCheckbox,
     fontControls: {
       decrease: fontDecreaseBtn,
       increase: fontIncreaseBtn,
@@ -2427,7 +4065,9 @@ const ensureHighlightPanel = () => {
   };
 
   aiProviderSelect.addEventListener("change", (event) => {
-    const value = event.target.value === "gemini" ? "gemini" : "openai";
+    const v = event.target.value;
+    const value = ["gemini", "chatgpt"].includes(v) ? v : "openai";
+    if (isChatGPTBridgeWaiting) cancelChatGPTBridge();
     aiSettings.provider = value;
     populateAiModelSelect();
     updateAiKeyVisibility();
@@ -2461,7 +4101,13 @@ const ensureHighlightPanel = () => {
     persistAISettings();
   });
 
+  autoHighlightPromptTextarea.addEventListener("input", (event) => {
+    aiSettings.autoHighlightPrompt = event.target.value;
+    persistAISettings();
+  });
+
   aiGenerateBtn.addEventListener("click", handleGenerateAiNote);
+  aiAutoHighlightBtn.addEventListener("click", handleGenerateAiHighlights);
 
   document.body.appendChild(panel);
   applyHighlightPanelSideClasses();
@@ -2578,7 +4224,7 @@ const refreshHighlightPanelIfVisible = async () => {
 const applyColorChange = async (color) => {
   if (!activeHighlight || !activeHighlightId) return;
   const nextColor = toHexColor(color || DEFAULT_COLOR);
-  setHighlightMetadata(activeHighlight, {
+  setAllMarksMetadata(activeHighlightId, {
     color: nextColor,
     note: activeHighlight.dataset.hkNote ?? "",
   });
@@ -2614,7 +4260,7 @@ const handleSaveNote = async () => {
     activeHighlight.dataset.hkColor ||
     highlightMenuEls.colorInput?.value ||
     DEFAULT_COLOR;
-  setHighlightMetadata(activeHighlight, { color: normalizedColor, note: trimmedNote });
+  setAllMarksMetadata(activeHighlightId, { color: normalizedColor, note: trimmedNote });
   try {
     await updateHighlightEntry(activeHighlightId, { note: trimmedNote });
     if (highlightMenuEls.noteField) {
@@ -2680,6 +4326,19 @@ const ensureHighlightMenu = () => {
   const noteLabel = document.createElement("label");
   noteLabel.className = "hk-menu-label";
   noteLabel.textContent = "註解";
+  const menuTranslateBtn = document.createElement("button");
+  menuTranslateBtn.type = "button";
+  menuTranslateBtn.className = "hk-menu-translate-btn";
+  menuTranslateBtn.textContent = "翻譯";
+  menuTranslateBtn.title = "翻譯此段標記並附加到備註";
+  menuTranslateBtn.addEventListener("click", () => {
+    if (!activeHighlight) return;
+    const text = activeHighlight.textContent?.trim();
+    if (!text) return;
+    const rect = activeHighlight.getBoundingClientRect();
+    showTranslateCard(text, rect, activeHighlight);
+  });
+  noteLabel.appendChild(menuTranslateBtn);
   const noteField = document.createElement("textarea");
   noteField.className = "hk-menu-note";
   noteField.rows = 6;
@@ -2711,8 +4370,17 @@ const ensureHighlightMenu = () => {
   container.appendChild(status);
 
   colorInput.addEventListener("input", (event) => {
-    const next = event.target.value;
-    applyColorChange(next);
+    const nextColor = toHexColor(event.target.value || DEFAULT_COLOR);
+    if (activeHighlight && activeHighlightId) {
+      setAllMarksMetadata(activeHighlightId, {
+        color: nextColor,
+        note: activeHighlight.dataset.hkNote ?? "",
+      });
+    }
+    currentColor = nextColor;
+  });
+  colorInput.addEventListener("change", (event) => {
+    applyColorChange(event.target.value);
   });
 
   container.addEventListener("mousedown", (event) => {
@@ -2874,6 +4542,12 @@ chrome.storage?.onChanged.addListener((changes, areaName) => {
     highlightPanelState.notesByPage = changes.hkGeneratedNotes.newValue ?? {};
     if (highlightPanelVisible) {
       updateAiNoteSection(highlightPanelState.notesByPage[pageKey]);
+    }
+  }
+  if (changes[CHATGPT_RESPONSE_KEY]) {
+    const responseData = changes[CHATGPT_RESPONSE_KEY].newValue;
+    if (responseData?.sourceUrl === pageKey && isChatGPTBridgeWaiting) {
+      handleChatGPTResponse(responseData);
     }
   }
   if (highlightPanelVisible) {
@@ -3567,20 +5241,47 @@ const resolveRangeSnapshot = (snapshot) => {
   if (!snapshot) {
     return { range: null, snapshot: null, updated: false };
   }
+  const expected = normalizeWhitespace(snapshot.text ?? "");
+
+  const rangeTextMatches = (range) => {
+    if (!range || range.collapsed) return false;
+    if (!expected) return true;
+    return normalizeWhitespace(range.toString()) === expected;
+  };
+
   const directRange = deserializeRange(snapshot);
-  if (directRange) {
+  if (rangeTextMatches(directRange)) {
     return { range: directRange, snapshot, updated: false };
   }
+
   const cssRange = resolveRangeFromCssAnchors(snapshot.anchors, snapshot.text?.length);
-  if (cssRange) {
+  if (rangeTextMatches(cssRange)) {
     const normalized = serializeRange(cssRange.cloneRange());
     return { range: cssRange, snapshot: normalized, updated: true };
   }
+
   const textRange = resolveRangeFromTextAnchors(snapshot.anchors);
-  if (textRange) {
+  if (textRange && !textRange.collapsed) {
     const normalized = serializeRange(textRange.cloneRange());
     return { range: textRange, snapshot: normalized, updated: true };
   }
+
+  // Last resort: text search using snapshot.text directly (handles missing/stale anchors)
+  if (expected) {
+    const syntheticAnchors = {
+      quote: {
+        exact: snapshot.text,
+        prefix: "",
+        suffix: "",
+      },
+    };
+    const fallbackRange = resolveRangeFromTextAnchors(syntheticAnchors);
+    if (fallbackRange && !fallbackRange.collapsed) {
+      const normalized = serializeRange(fallbackRange.cloneRange());
+      return { range: fallbackRange, snapshot: normalized, updated: true };
+    }
+  }
+
   return { range: null, snapshot, updated: false };
 };
 
@@ -3611,13 +5312,17 @@ const setHighlightMetadata = (element, { color, note }) => {
     if (trimmed) {
       element.dataset.hkNote = trimmed;
       element.setAttribute("data-highlight-note", trimmed);
-      element.setAttribute("title", trimmed);
     } else {
       delete element.dataset.hkNote;
       element.removeAttribute("data-highlight-note");
-      element.removeAttribute("title");
     }
   }
+};
+
+const setAllMarksMetadata = (id, meta) => {
+  document.querySelectorAll(`[${HIGHLIGHT_ATTR}="${id}"]`).forEach((el) => {
+    setHighlightMetadata(el, meta);
+  });
 };
 
 const unwrapHighlightElement = (highlightEl) => {
@@ -3634,12 +5339,79 @@ const unwrapHighlightElement = (highlightEl) => {
   parent.normalize();
 };
 
+const getTextNodesInRange = (range) => {
+  const ancestor = range.commonAncestorContainer;
+  if (ancestor.nodeType === Node.TEXT_NODE) return [ancestor];
+  const nodes = [];
+  const walker = document.createTreeWalker(ancestor, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (range.intersectsNode(node)) nodes.push(node);
+  }
+  return nodes;
+};
+
+const wrapRangeTextNodeWalking = (range, color, id) => {
+  const textNodes = getTextNodesInRange(range);
+  if (!textNodes.length) return null;
+  let firstMark = null;
+  for (let i = 0; i < textNodes.length; i++) {
+    const node = textNodes[i];
+    let start = 0;
+    let end = node.length;
+    if (node === range.startContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
+      start = range.startOffset;
+    }
+    if (node === range.endContainer && range.endContainer.nodeType === Node.TEXT_NODE) {
+      end = range.endOffset;
+    }
+    if (start >= end) continue;
+    if (end < node.length) node.splitText(end);
+    const selectedNode = start > 0 ? node.splitText(start) : node;
+    const mark = createHighlightElement(color, id);
+    selectedNode.parentNode.insertBefore(mark, selectedNode);
+    mark.appendChild(selectedNode);
+    if (!firstMark) firstMark = mark;
+  }
+  return firstMark;
+};
+
+const BLOCK_TAGS = new Set([
+  "P", "DIV", "LI", "ARTICLE", "SECTION", "BLOCKQUOTE",
+  "H1", "H2", "H3", "H4", "H5", "H6",
+  "TD", "TH", "HEADER", "FOOTER", "MAIN", "ASIDE", "FIGURE",
+]);
+
+const nearestBlockAncestor = (node) => {
+  let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  while (el && el !== document.body) {
+    if (BLOCK_TAGS.has(el.tagName)) return el;
+    el = el.parentElement;
+  }
+  return document.body;
+};
+
 const wrapRangeWithHighlight = (range, color, id) => {
-  const highlightEl = createHighlightElement(color, id);
-  const extracted = range.extractContents();
-  highlightEl.appendChild(extracted);
-  range.insertNode(highlightEl);
-  return highlightEl;
+  // If range start and end are in the SAME block, use extractContents — one mark,
+  // handles <em>/<strong>/injected spans correctly without breaking anything.
+  const startBlock = nearestBlockAncestor(range.startContainer);
+  const endBlock = nearestBlockAncestor(range.endContainer);
+
+  if (startBlock === endBlock) {
+    try {
+      const mark = createHighlightElement(color, id);
+      const extracted = range.extractContents();
+      mark.appendChild(extracted);
+      range.insertNode(mark);
+      return mark;
+    } catch (_e) {
+      // fall through to text-node walking
+    }
+  }
+
+  // Range crosses block boundaries (e.g. <li> → <li>) — text-node walking
+  // preserves block structure, creates multiple marks sharing the same ID.
+  return wrapRangeTextNodeWalking(range, color, id);
 };
 
 const getStoredHighlights = async (key = pageKey) => {
@@ -3766,12 +5538,9 @@ const restoreHighlights = async () => {
 
       try {
         const highlightEl = wrapRangeWithHighlight(range, highlight.color, highlight.id);
-        setHighlightMetadata(highlightEl, {
+        setAllMarksMetadata(highlight.id, {
           color: highlight.color,
           note: highlight.note ?? "",
-          tags: Array.isArray(highlight.tags)
-            ? highlight.tags
-            : parseTags(highlight.tags ?? ""),
         });
         visibleCount += 1;
         if (resolved.updated && resolved.snapshot) {
@@ -3827,7 +5596,7 @@ const applyHighlight = async (color) => {
 
   const normalizedColor = toHexColor(color || DEFAULT_COLOR);
   const highlightEl = wrapRangeWithHighlight(range, normalizedColor, highlightId);
-  setHighlightMetadata(highlightEl, { color: normalizedColor, note: "" });
+  setAllMarksMetadata(highlightId, { color: normalizedColor, note: "" });
   selection.removeAllRanges();
 
   await saveHighlight({
@@ -3937,6 +5706,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     })();
     return true;
   }
+  if (message?.type === "BUILD_AI_HIGHLIGHT_PROMPT") {
+    (async () => {
+      try {
+        const pageData = {
+          title: document.title,
+          url: pageKey,
+          pageText: getPagePlainText(),
+          highlights: await collectPageHighlights(),
+        };
+        const latestPalette = await refreshPaletteFromStorage();
+        const usageCounts = await collectColorUsageCounts();
+        const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+        const prompt = buildAutoHighlightPrompt(
+          pageData,
+          preferredPalette,
+          usageCounts
+        );
+        sendResponse({ success: true, prompt, count: pageData.highlights.length });
+      } catch (error) {
+        console.debug("建立畫重點 Prompt 失敗", error);
+        sendResponse({ success: false, error: error?.message || "無法建立 Prompt" });
+      }
+    })();
+    return true;
+  }
   if (message?.type === "SHOW_AI_NOTE") {
     const payload = message.payload || {};
     const targetKey = payload.url || pageKey;
@@ -3985,6 +5779,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       );
     return true;
   }
+  if (message?.type === "TRIGGER_AI_AUTO_HIGHLIGHT") {
+    openHighlightPanel({ view: "ai-note" })
+      .then(() => {
+        highlightPanelState.activeTab = "ai-note";
+        applyHighlightPanelTabState();
+        return handleGenerateAiHighlights();
+      })
+      .then(() => sendResponse({ success: true }))
+      .catch((error) => sendResponse({ success: false, error: error?.message }));
+    return true;
+  }
+  if (message?.type === "CLEAR_PAGE_HIGHLIGHTS") {
+    clearPageHighlights()
+      .then(() => sendResponse({ success: true }))
+      .catch((error) => sendResponse({ success: false, error: error?.message }));
+    return true;
+  }
   if (message?.type === "APPLY_HIGHLIGHT") {
     const color = message.color || "#ffeb3b";
     applyHighlight(color)
@@ -4018,6 +5829,206 @@ window.addEventListener("load", () => attemptRestoreHighlights(), {
   once: true,
 });
 
+const ensureNoteTooltip = () => {
+  if (highlightNoteTooltip) return highlightNoteTooltip;
+  const el = document.createElement("div");
+  el.id = HIGHLIGHT_NOTE_TOOLTIP_ID;
+  el.className = "hk-note-tooltip";
+  el.setAttribute("role", "tooltip");
+  document.body.appendChild(el);
+  highlightNoteTooltip = el;
+  return el;
+};
+
+const showNoteTooltip = (text, targetEl) => {
+  if (!text || !targetEl) return;
+  const tooltip = ensureNoteTooltip();
+  tooltip.textContent = text;
+
+  // measure while invisible to avoid position flash
+  tooltip.style.visibility = "hidden";
+  tooltip.style.display = "block";
+
+  const rect = targetEl.getBoundingClientRect();
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const margin = 12;
+
+  const tooltipWidth = tooltip.offsetWidth;
+  const tooltipHeight = tooltip.offsetHeight;
+  const vpWidth = window.innerWidth;
+  const vpHeight = window.innerHeight;
+
+  let top = rect.bottom + scrollY + margin;
+  let left = rect.left + scrollX + rect.width / 2 - tooltipWidth / 2;
+
+  if (left < scrollX + margin) left = scrollX + margin;
+  if (left + tooltipWidth > scrollX + vpWidth - margin) {
+    left = scrollX + vpWidth - tooltipWidth - margin;
+  }
+  if (rect.bottom + margin + tooltipHeight > vpHeight) {
+    top = rect.top + scrollY - margin - tooltipHeight;
+  }
+
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+  tooltip.style.visibility = "visible";
+};
+
+const hideNoteTooltip = () => {
+  if (!highlightNoteTooltip) return;
+  highlightNoteTooltip.style.display = "none";
+  highlightNoteTooltip.style.visibility = "hidden";
+};
+
+// ── Guided Reading ─────────────────────────────────────
+let guidedReadingState = null;
+
+const collectGuidedSteps = () => {
+  const seen = new Set();
+  const steps = [];
+  document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach((el) => {
+    const id = el.getAttribute(HIGHLIGHT_ATTR);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    steps.push({ id, el });
+  });
+  return steps;
+};
+
+const destroyGuidedBar = () => {
+  const existing = document.getElementById("hk-guided-bar");
+  if (existing) existing.remove();
+  if (guidedReadingState?.focusedEl) {
+    guidedReadingState.focusedEl.classList.remove("hk-guided-focus");
+  }
+  guidedReadingState = null;
+};
+
+const renderGuidedBar = () => {
+  const state = guidedReadingState;
+  if (!state) return;
+  const { steps, index } = state;
+  const step = steps[index];
+  const el = step.el;
+
+  if (state.focusedEl && state.focusedEl !== el) {
+    state.focusedEl.classList.remove("hk-guided-focus");
+  }
+  el.classList.add("hk-guided-focus");
+  state.focusedEl = el;
+
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+
+  const bar = document.getElementById("hk-guided-bar");
+  if (!bar) return;
+
+  const note = el.dataset.hkNote?.trim() ?? "";
+  const color = el.style.backgroundColor || "#ffeb3b";
+  const text = el.textContent?.trim() ?? "";
+
+  bar.querySelector(".hk-guided-dot").style.backgroundColor = color;
+  bar.querySelector(".hk-guided-text").textContent = text.length > 80 ? text.slice(0, 80) + "…" : text;
+  bar.querySelector(".hk-guided-note").textContent = note || "";
+  bar.querySelector(".hk-guided-note").style.display = note ? "block" : "none";
+  bar.querySelector(".hk-guided-counter").textContent = `${index + 1} / ${steps.length}`;
+  bar.querySelector(".hk-guided-prev").disabled = index === 0;
+  bar.querySelector(".hk-guided-next").disabled = index === steps.length - 1;
+};
+
+const startGuidedReading = () => {
+  destroyGuidedBar();
+  const steps = collectGuidedSteps();
+  if (!steps.length) {
+    setAiPanelStatus("本頁沒有標記可供閱讀", true);
+    return;
+  }
+
+  guidedReadingState = { steps, index: 0, focusedEl: null };
+
+  const bar = document.createElement("div");
+  bar.id = "hk-guided-bar";
+  bar.className = "hk-guided-bar";
+
+  const topRow = document.createElement("div");
+  topRow.className = "hk-guided-top";
+
+  const dot = document.createElement("span");
+  dot.className = "hk-guided-dot";
+
+  const text = document.createElement("span");
+  text.className = "hk-guided-text";
+
+  const counter = document.createElement("span");
+  counter.className = "hk-guided-counter";
+
+  const exitBtn = document.createElement("button");
+  exitBtn.type = "button";
+  exitBtn.className = "hk-guided-exit";
+  exitBtn.textContent = "✕ 結束";
+  exitBtn.addEventListener("click", destroyGuidedBar);
+
+  topRow.appendChild(dot);
+  topRow.appendChild(text);
+  topRow.appendChild(counter);
+  topRow.appendChild(exitBtn);
+
+  const note = document.createElement("div");
+  note.className = "hk-guided-note";
+
+  const navRow = document.createElement("div");
+  navRow.className = "hk-guided-nav";
+
+  const prevBtn = document.createElement("button");
+  prevBtn.type = "button";
+  prevBtn.className = "hk-guided-prev";
+  prevBtn.textContent = "← 上一個";
+  prevBtn.addEventListener("click", () => {
+    if (guidedReadingState.index > 0) {
+      guidedReadingState.index--;
+      renderGuidedBar();
+    }
+  });
+
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button";
+  nextBtn.className = "hk-guided-next";
+  nextBtn.textContent = "下一個 →";
+  nextBtn.addEventListener("click", () => {
+    if (guidedReadingState.index < guidedReadingState.steps.length - 1) {
+      guidedReadingState.index++;
+      renderGuidedBar();
+    }
+  });
+
+  navRow.appendChild(prevBtn);
+  navRow.appendChild(nextBtn);
+
+  bar.appendChild(topRow);
+  bar.appendChild(note);
+  bar.appendChild(navRow);
+  document.body.appendChild(bar);
+
+  renderGuidedBar();
+};
+
+document.addEventListener("mouseover", (event) => {
+  const target = event.target?.closest?.(`.${HIGHLIGHT_CLASS}`);
+  if (!target) return;
+  const note = target.dataset.hkNote?.trim();
+  if (!note) return;
+  clearTimeout(tooltipHideTimer);
+  showNoteTooltip(note, target);
+});
+
+document.addEventListener("mouseout", (event) => {
+  const from = event.target?.closest?.(`.${HIGHLIGHT_CLASS}`);
+  if (!from) return;
+  const to = event.relatedTarget?.closest?.(`.${HIGHLIGHT_CLASS}`);
+  if (to === from) return;
+  tooltipHideTimer = setTimeout(hideNoteTooltip, 60);
+});
+
 document.addEventListener("mouseup", handleSelectionIntent);
 document.addEventListener("keyup", handleSelectionIntent);
 document.addEventListener("selectionchange", handleSelectionIntent);
@@ -4026,7 +6037,9 @@ document.addEventListener(
   "mousedown",
   (event) => {
     const target = event.target;
-    if (floatingButton && !floatingButton.contains(target)) {
+    const inToolbar = floatingButton && floatingButton.contains(target);
+    const inCard = floatingTranslateCard && floatingTranslateCard.contains(target);
+    if (floatingButton && !inToolbar && !inCard) {
       hideFloatingButton();
     }
     if (
@@ -4042,9 +6055,21 @@ document.addEventListener(
 );
 window.addEventListener(
   "scroll",
-  () => {
+  (event) => {
+    // Ignore internal scrolling inside the highlight menu (e.g. scrolling the
+    // note textarea after pasting a long note), otherwise the menu would close
+    // the moment the textarea overflows.
+    const target = event.target;
+    if (
+      highlightMenu &&
+      target instanceof Node &&
+      highlightMenu.contains(target)
+    ) {
+      return;
+    }
     hideFloatingButton();
     closeHighlightMenu();
+    hideNoteTooltip();
   },
   true
 );
@@ -4176,3 +6201,183 @@ const handleBulkImportChange = (event) => {
   const files = event.target.files;
   mergeBulkImportPayload(files);
 };
+
+// ── ChatGPT Web Bridge (runs on chatgpt.com) ─────────────
+const scrapeChatGPTResponse = () => {
+  const selectors = [
+    '[data-message-author-role="assistant"] .markdown',
+    '[data-message-author-role="assistant"]',
+    'article[data-testid*="conversation-turn"]',
+  ];
+  for (const sel of selectors) {
+    const els = document.querySelectorAll(sel);
+    if (els.length) {
+      const text = els[els.length - 1].innerText?.trim();
+      if (text) return text;
+    }
+  }
+  return null;
+};
+
+const autoPastePromptToChatGPT = (prompt) => {
+  const SELECTORS = [
+    "#prompt-textarea",
+    'div[contenteditable="true"][data-id]',
+    'div[contenteditable="true"].ProseMirror',
+    'div[contenteditable="true"]',
+  ];
+  const findInput = () => {
+    for (const sel of SELECTORS) {
+      const el = document.querySelector(sel);
+      if (el) return el;
+    }
+    return null;
+  };
+  const tryPaste = () => {
+    const el = findInput();
+    if (!el) return false;
+    el.focus();
+    if (el.tagName === "TEXTAREA") {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      if (setter) {
+        setter.call(el, prompt);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
+    } else {
+      el.textContent = "";
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      document.execCommand("insertText", false, prompt);
+      return true;
+    }
+    return false;
+  };
+  if (!tryPaste()) {
+    let attempts = 0;
+    const timer = setInterval(() => {
+      if (tryPaste() || ++attempts > 20) clearInterval(timer);
+    }, 500);
+  }
+};
+
+const showChatGPTImportBanner = (request) => {
+  const existing = document.getElementById("hk-chatgpt-banner");
+  if (existing) existing.remove();
+
+  const banner = document.createElement("div");
+  banner.id = "hk-chatgpt-banner";
+  banner.className = "hk-chatgpt-banner";
+  banner.style.position = "fixed";
+
+  const info = document.createElement("span");
+  info.className = "hk-chatgpt-banner-info";
+  info.textContent =
+    request.type === "note"
+      ? "Highlight Keeper — 點「複製 Prompt」貼到輸入框，完成後點「匯入筆記」"
+      : "Highlight Keeper — 點「複製 Prompt」貼到輸入框，完成後點「匯入重點」";
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "hk-chatgpt-import-btn";
+  copyBtn.style.background = "#2563eb";
+  copyBtn.textContent = "複製 Prompt";
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(request.prompt);
+      copyBtn.textContent = "✓ 已複製";
+      setTimeout(() => { copyBtn.textContent = "複製 Prompt"; }, 2000);
+    } catch (_e) {
+      copyBtn.textContent = "複製失敗";
+    }
+  });
+
+  const importBtn = document.createElement("button");
+  importBtn.type = "button";
+  importBtn.className = "hk-chatgpt-import-btn";
+  importBtn.textContent = request.type === "note" ? "匯入筆記" : "匯入重點";
+
+  importBtn.addEventListener("click", async () => {
+    const response = scrapeChatGPTResponse();
+    if (!response) {
+      importBtn.textContent = "找不到回應，請確認已完成";
+      setTimeout(() => {
+        importBtn.textContent = request.type === "note" ? "匯入筆記" : "匯入重點";
+      }, 2500);
+      return;
+    }
+    importBtn.disabled = true;
+    importBtn.textContent = "匯入中…";
+    try {
+      await chrome.storage.local.set({
+        [CHATGPT_RESPONSE_KEY]: {
+          requestId: request.requestId,
+          type: request.type,
+          text: response,
+          sourceUrl: request.sourceUrl,
+        },
+      });
+      banner.innerHTML = "";
+      const doneMsg = document.createElement("span");
+      doneMsg.style.cssText = "margin: auto; font-weight: 600;";
+      doneMsg.textContent = "✓ 已匯入！請切回原頁面查看結果。";
+      banner.appendChild(doneMsg);
+      banner.style.background = "#166534";
+    } catch (_err) {
+      importBtn.disabled = false;
+      importBtn.textContent = "匯入失敗，請重試";
+    }
+  });
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "hk-chatgpt-close-btn";
+  closeBtn.title = "關閉（取消此次橋接）";
+  closeBtn.textContent = "✕";
+  closeBtn.addEventListener("click", async () => {
+    banner.remove();
+    try {
+      await chrome.storage.local.remove([CHATGPT_REQUEST_KEY]);
+    } catch (_e) {}
+  });
+
+  banner.appendChild(info);
+  banner.appendChild(copyBtn);
+  banner.appendChild(importBtn);
+  banner.appendChild(closeBtn);
+  document.body.appendChild(banner);
+
+  // Try to auto-fill the ChatGPT input box
+  autoPastePromptToChatGPT(request.prompt);
+};
+
+const initChatGPTBridgePage = async () => {
+  if (!window.location.hostname.endsWith("chatgpt.com")) return;
+
+  // Check on page load (newly opened tab)
+  try {
+    const stored = await chrome.storage.local.get(CHATGPT_REQUEST_KEY);
+    const request = stored?.[CHATGPT_REQUEST_KEY];
+    if (request?.requestId) showChatGPTImportBanner(request);
+  } catch (_e) {}
+
+  // Also react when already-open tab receives a new request
+  chrome.storage?.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes[CHATGPT_REQUEST_KEY]) {
+      const request = changes[CHATGPT_REQUEST_KEY].newValue;
+      if (request?.requestId) {
+        showChatGPTImportBanner(request);
+      } else {
+        document.getElementById("hk-chatgpt-banner")?.remove();
+      }
+    }
+  });
+};
+
+initChatGPTBridgePage();

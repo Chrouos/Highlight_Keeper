@@ -7,35 +7,61 @@
   </head>
   <body>
     <main>
-      <h1>頁面標註</h1>
+      <section class="lang-switch" aria-label="Language">
+        <label for="langSelect" data-i18n="popup.langLabel">顯示語言</label>
+        <select id="langSelect">
+          <option value="zh" data-i18n="popup.langZh">繁體中文</option>
+          <option value="en" data-i18n="popup.langEn">English</option>
+        </select>
+      </section>
+      <h1 data-i18n="popup.title">頁面標註</h1>
+      <section class="page-info" data-i18n-aria-label="popup.pageInfoAria" aria-label="頁面資訊">
+        <div class="info-row">
+          <span class="info-label" data-i18n="popup.markCountLabel">本頁標記</span>
+          <span class="info-value" id="markCount">—</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label" data-i18n="popup.aiModeLabel">AI 模式</span>
+          <span class="info-value" id="aiMode">—</span>
+        </div>
+      </section>
       <section class="color-picker">
         <label for="color">
-          標註顏色
+          <span data-i18n="popup.colorLabel">標註顏色</span>
           <input type="color" id="color" value="#ffeb3b" />
         </label>
-        <button type="button" id="addColorBtn" class="add-color-btn">
+        <button type="button" id="addColorBtn" class="add-color-btn" data-i18n="popup.addToPalette">
           加入到色票
         </button>
       </section>
-      <section class="palette-management" aria-label="顏色色票">
+      <section class="palette-management" data-i18n-aria-label="popup.paletteAria" aria-label="顏色色票">
         <header class="palette-header">
-          <span>可用顏色</span>
+          <span data-i18n="popup.availableColors">可用顏色</span>
         </header>
         <div id="paletteList" class="palette-list"></div>
       </section>
-      <section class="panel-controls" aria-label="頁面標註面板">
-        <button type="button" id="openPanelBtn" class="panel-open-btn">
+      <section class="panel-controls" data-i18n-aria-label="popup.panelControlAria" aria-label="頁面標註面板">
+        <button type="button" id="openPanelBtn" class="panel-open-btn" data-i18n="popup.openPanel">
           在頁面開啟面板
         </button>
       </section>
-      <section class="data-tools" aria-label="資料管理">
-        <button type="button" id="openManagerBtn" class="panel-open-btn">
+      <section class="ai-tools" data-i18n-aria-label="popup.aiToolsAria" aria-label="AI 工具">
+        <button type="button" id="aiHighlightBtn" class="panel-open-btn panel-ai-btn" data-i18n="popup.aiAutoHighlight">
+          複製 AI 畫重點 Prompt
+        </button>
+        <button type="button" id="clearPageBtn" class="panel-open-btn panel-clear-btn" data-i18n="popup.clearPage">
+          清除本頁標記
+        </button>
+      </section>
+      <section class="data-tools" data-i18n-aria-label="popup.dataToolsAria" aria-label="資料管理">
+        <button type="button" id="openManagerBtn" class="panel-open-btn" data-i18n="popup.openManager">
           管理所有筆記
         </button>
       </section>
       <section class="status" role="status" aria-live="polite"></section>
-      <p>若有任何問題，私信到 chrouodiu@gmail.com</p>
+      <p data-i18n="popup.contact">若有任何問題，私信到 chrouodiu@gmail.com</p>
     </main>
+    <script src="i18n.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
