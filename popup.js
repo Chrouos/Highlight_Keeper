@@ -241,14 +241,18 @@ const loadPageInfo = async () => {
     if (modeEl) modeEl.textContent = "—";
   }
   try {
+    // Read the count straight from storage — waking the content script for
+    // this forced a full-page text extraction and made the popup feel slow.
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) {
+    if (!tab?.url) {
       if (markEl) markEl.textContent = "—";
       return;
     }
-    const response = await sendMessageToTab(tab.id, { type: "GET_PAGE_HIGHLIGHTS" });
-    const count = response?.data?.highlights?.length;
-    if (markEl) markEl.textContent = Number.isFinite(count) ? String(count) : "0";
+    const stored = await chrome.storage?.local.get(tab.url);
+    const entries = stored?.[tab.url];
+    if (markEl) {
+      markEl.textContent = Array.isArray(entries) ? String(entries.length) : "0";
+    }
   } catch (_e) {
     if (markEl) markEl.textContent = "—";
   }

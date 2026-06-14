@@ -25,6 +25,19 @@
           <span class="info-value" id="aiMode">—</span>
         </div>
       </section>
+      <section class="panel-controls" data-i18n-aria-label="popup.panelControlAria" aria-label="頁面標註面板">
+        <button type="button" id="openPanelBtn" class="panel-open-btn" data-i18n="popup.openPanel">
+          在頁面開啟面板
+        </button>
+      </section>
+      <section class="ai-tools" data-i18n-aria-label="popup.aiToolsAria" aria-label="AI 工具">
+        <button type="button" id="aiHighlightBtn" class="panel-open-btn panel-ai-btn" data-i18n="popup.aiAutoHighlight">
+          複製 AI 畫重點 Prompt
+        </button>
+        <button type="button" id="clearPageBtn" class="panel-open-btn panel-clear-btn" data-i18n="popup.clearPage">
+          清除本頁標記
+        </button>
+      </section>
       <section class="color-picker">
         <label for="color">
           <span data-i18n="popup.colorLabel">標註顏色</span>
@@ -39,19 +52,6 @@
           <span data-i18n="popup.availableColors">可用顏色</span>
         </header>
         <div id="paletteList" class="palette-list"></div>
-      </section>
-      <section class="panel-controls" data-i18n-aria-label="popup.panelControlAria" aria-label="頁面標註面板">
-        <button type="button" id="openPanelBtn" class="panel-open-btn" data-i18n="popup.openPanel">
-          在頁面開啟面板
-        </button>
-      </section>
-      <section class="ai-tools" data-i18n-aria-label="popup.aiToolsAria" aria-label="AI 工具">
-        <button type="button" id="aiHighlightBtn" class="panel-open-btn panel-ai-btn" data-i18n="popup.aiAutoHighlight">
-          複製 AI 畫重點 Prompt
-        </button>
-        <button type="button" id="clearPageBtn" class="panel-open-btn panel-clear-btn" data-i18n="popup.clearPage">
-          清除本頁標記
-        </button>
       </section>
       <section class="data-tools" data-i18n-aria-label="popup.dataToolsAria" aria-label="資料管理">
         <button type="button" id="openManagerBtn" class="panel-open-btn" data-i18n="popup.openManager">

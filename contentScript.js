@@ -119,6 +119,19 @@ let previewData = [];
 const CHATGPT_REQUEST_KEY = "hkChatGPTRequest";
 const CHATGPT_RESPONSE_KEY = "hkChatGPTResponse";
 const HIGHLIGHT_RETRY_DELAYS = [450, 1500, 3500];
+const MINDMAP_STORAGE_KEY = "hkMindmaps";
+const DEFAULT_MINDMAP_PROMPT = `你是一位知識結構分析助手。請「完全根據原文內容」，整理出一張能順著脈絡理解知識的心智圖大綱，讓人由上而下讀就能像看懂一篇文章一樣理解整個主題。
+
+請遵守：
+- 主幹要依原文真正的論述流程排序，呈現一條清楚的理解主線（例如：背景／動機 → 核心概念／能力 → 運作方式 → 實際應用／例子 → 限制或安全 → 結論），不要做成零散、彼此無關的分類堆疊。
+- 每一層都要和上一層有明確關係：子節點是對父節點的「展開、原因、做法、例子或數據」，順著看下來知識是連貫推進的。
+- 內容必須來自原文，可改寫得更精簡好懂，但不要加入原文沒有的資訊或自行臆測。
+- 重要分支延伸到第 3～4 層，節點文字精簡（15 字以內），愈深層愈具體。`;
+// While a batch apply / import is running we write storage many times; this
+// flag stops chrome.storage.onChanged from re-rendering the panel mid-batch.
+let panelRefreshSuppressed = false;
+let panelRefreshDebounceTimer = null;
+let persistAISettingsTimer = null;
 
 // ── Translation API ────────────────────────────────────
 const callGoogleTranslate = async (text, targetLang) => {
@@ -513,9 +526,47 @@ const renderHighlightMenuSwatches = () => {
   });
 };
 
+// 樣板雜訊：導覽、頁首頁尾、側欄、隱藏元素，以及本擴充自己注入的 UI。
+// 這些混進「原文內容」會浪費 token，也會誘使 AI 把選單文字當成重點。
+const BOILERPLATE_SELECTOR = [
+  "nav",
+  "header",
+  "footer",
+  "aside",
+  "script",
+  "style",
+  "noscript",
+  '[role="navigation"]',
+  '[role="banner"]',
+  '[role="contentinfo"]',
+  '[aria-hidden="true"]',
+  ".hk-page-panel",
+  ".hk-mindmap-overlay",
+  "#hk-guided-bar",
+].join(", ");
+
 const getPagePlainText = () => {
-  const raw = document.body?.innerText || "";
-  const normalized = raw.replace(/\n{3,}/g, "\n\n").trim();
+  let sourceText = "";
+  // 1) 優先抓明確的主內容容器（一頁通常只有一個 <main>），最能去掉導覽雜訊。
+  const main =
+    document.querySelector("main") ||
+    document.querySelector('[role="main"]') ||
+    document.querySelector("article");
+  if (main && (main.innerText || "").trim().length >= 200) {
+    sourceText = main.innerText;
+  } else {
+    // 2) 後備：複製 body，移除導覽/頁首/頁尾等樣板後再取文字（不動到實際頁面）。
+    const clone = document.body?.cloneNode(true);
+    if (clone) {
+      clone
+        .querySelectorAll(BOILERPLATE_SELECTOR)
+        .forEach((el) => el.remove());
+      sourceText = clone.innerText || clone.textContent || "";
+    } else {
+      sourceText = document.body?.innerText || "";
+    }
+  }
+  const normalized = sourceText.replace(/\n{3,}/g, "\n\n").trim();
   return normalized.slice(0, 60000);
 };
 
@@ -538,6 +589,16 @@ const persistAISettings = async () => {
   } catch (error) {
     console.debug("儲存 AI 設定失敗", error);
   }
+};
+
+// For high-frequency inputs (prompt textarea, API key) — one write after the
+// user stops typing instead of one write per keystroke.
+const schedulePersistAISettings = () => {
+  if (persistAISettingsTimer) window.clearTimeout(persistAISettingsTimer);
+  persistAISettingsTimer = window.setTimeout(() => {
+    persistAISettingsTimer = null;
+    persistAISettings();
+  }, 400);
 };
 
 const updateAiKeyVisibility = () => {
@@ -619,10 +680,12 @@ const updateGenerateAvailability = () => {
     autoHighlightBtn.textContent = isAutoHighlighting ? "標示中..." : "自動畫重點";
   }
   // 進階「用 API 直接產生」鈕：只有設定好 OpenAI/Gemini Key 時才顯示
+  // （心智圖模式走複製貼上流程，不提供 direct）
   const directBtn = highlightPanelEls?.aiDirectBtn;
   if (directBtn) {
     const canDirect = provider !== "chatgpt" && Boolean(key?.trim());
-    directBtn.hidden = !canDirect;
+    directBtn.dataset.canDirect = canDirect ? "1" : "0";
+    directBtn.hidden = !canDirect || highlightPanelEls?.getAiMode?.() === "mindmap";
     directBtn.disabled = hasRunningTask;
   }
   const cancelBtn = highlightPanelEls?.aiChatGPTCancelBtn;
@@ -686,7 +749,7 @@ const renderCategoryList = () => {
     nameInput.placeholder = "分類名稱";
     nameInput.addEventListener("input", (e) => {
       aiSettings.categories[idx].name = e.target.value;
-      persistAISettings();
+      schedulePersistAISettings();
     });
     const colorInput = document.createElement("input");
     colorInput.type = "color";
@@ -694,7 +757,7 @@ const renderCategoryList = () => {
     colorInput.value = cat.color;
     colorInput.addEventListener("input", (e) => {
       aiSettings.categories[idx].color = e.target.value;
-      persistAISettings();
+      schedulePersistAISettings();
     });
     const delBtn = document.createElement("button");
     delBtn.type = "button";
@@ -728,6 +791,17 @@ const loadAISettings = async () => {
   }
 };
 
+// LLM 常把「指令＋大量原文」整包誤判成「使用者上傳的檔案」，於是反問「你想要我做什麼」
+// 而不直接執行。在最前面下達明確執行命令、最後再用一行把資料與指令收尾，可大幅降低反問。
+const DIRECT_EXEC_HEADER = `【立即執行，不要反問】以下是一組「指令＋資料」，不是要你分析、整理或等待確認的檔案。請直接照指示產生最終結果：不要問我想做什麼、不要重述或確認任務、不要說明你的步驟、不要加開場白或結語，只輸出符合指定格式的內容。`;
+const DIRECT_EXEC_FOOTER = `――――――
+（以上「原文內容／標註」皆為輸入資料。現在請依本訊息最前面的指示與「輸出格式」直接輸出結果，只輸出結果本身。）`;
+const wrapDirectExec = (body) => `${DIRECT_EXEC_HEADER}
+
+${body}
+
+${DIRECT_EXEC_FOOTER}`;
+
 const buildNotePrompt = (pageData) => {
   const basePrompt = aiSettings.prompt?.trim() || DEFAULT_AI_PROMPT;
   const highlightLines = (pageData.highlights || [])
@@ -737,7 +811,7 @@ const buildNotePrompt = (pageData) => {
     })
     .join("\n");
 
-  return `${basePrompt}
+  return wrapDirectExec(`${basePrompt}
 
 ### 網頁資訊
 - 標題：${pageData.title}
@@ -747,8 +821,7 @@ const buildNotePrompt = (pageData) => {
 ${pageData.pageText}
 
 ### 使用者標註
-${highlightLines || "（尚未加入標註）"}
-`;
+${highlightLines || "（尚未加入標註）"}`);
 };
 
 const normalizeWhitespace = (input) =>
@@ -786,7 +859,7 @@ const sortPaletteByUsage = (palette, counts = {}) => {
   });
 };
 
-const buildAutoHighlightPrompt = (pageData, palette, usageCounts) => {
+const buildAutoHighlightBody = (pageData, palette, usageCounts) => {
   const basePrompt =
     aiSettings.autoHighlightPrompt?.trim() || DEFAULT_AUTO_HIGHLIGHT_PROMPT;
   const highlightLines = (pageData.highlights || [])
@@ -856,6 +929,310 @@ ${pageData.pageText}
 ### 已有標註
 ${highlightLines || "（尚未加入標註）"}
 `;
+};
+
+const buildAutoHighlightPrompt = (pageData, palette, usageCounts) =>
+  wrapDirectExec(buildAutoHighlightBody(pageData, palette, usageCounts));
+
+// ── Combined（重點＋摘要）與心智圖 Prompt ────────────────────
+// One prompt → one response containing both highlight blocks and a summary,
+// separated by `===重點===` / `===摘要===` section markers.
+const buildCombinedPrompt = (pageData, palette, usageCounts) => {
+  const highlightBody = buildAutoHighlightBody(pageData, palette, usageCounts);
+  const notePrompt = aiSettings.prompt?.trim() || DEFAULT_AI_PROMPT;
+  return wrapDirectExec(`${highlightBody}
+
+### 額外任務：摘要筆記
+${notePrompt}
+
+### 最終輸出格式（兩個區塊都要，使用以下分隔線，不要加其他標題）
+===重點===
+（依前述「輸出格式」列出所有重點區塊）
+
+===摘要===
+（五百字以內、有脈絡的筆記內容）`);
+};
+
+const buildMindmapPrompt = (pageData) => {
+  const basePrompt = aiSettings.mindmapPrompt?.trim() || DEFAULT_MINDMAP_PROMPT;
+  const highlightLines = (pageData.highlights || [])
+    .map((item, idx) => {
+      const noteText = item.note ? `（註解：${item.note.trim()}）` : "";
+      return `${idx + 1}. ${normalizeWhitespace(item.text)}${noteText}`;
+    })
+    .join("\n");
+  const noteData = highlightPanelState.notesByPage?.[pageKey];
+  const noteSection = noteData?.note
+    ? `### 既有摘要筆記\n${noteData.note}\n`
+    : "";
+
+  return wrapDirectExec(`${basePrompt}
+
+### 組織原則
+- 以下方「原文內容」為唯一依據與主結構，主幹順序要貼合原文的論述流程。
+- 「使用者畫的重點」只是讀者特別在意的段落，請確保涵蓋並放在對應位置，但不要因此打亂原文脈絡或漏掉其他重要環節。
+
+### 輸出格式（嚴格遵守：第一行為「# 根節點主題」，其餘為「- 」開頭的清單，每深一層多縮排兩個空格，不要輸出任何其他文字。請盡量展開到第 3～4 層）
+# 文章主題
+- 背景／動機（主線起點）
+  - 面向 A
+    - 重點
+      - 具體例子或數據
+- 核心概念／能力
+  - 面向 B
+    - 重點
+- 實際應用／例子
+  - 面向 C
+    - 重點
+      - 補充說明
+- 結論／影響
+
+### 網頁資訊
+- 標題：${pageData.title}
+- URL：${pageData.url}
+
+### 原文內容（主要依據，可能已截斷）
+${pageData.pageText}
+
+${noteSection}### 使用者畫的重點（須涵蓋的讀者關注段落）
+${highlightLines || "（尚未有標註，請完全依原文脈絡組織）"}`);
+};
+
+// Split an AI response into named sections by `===重點===`-style marker lines.
+// Tolerates ＝, 【】, [] and markdown headings around the keyword.
+const AI_SECTION_ALIASES = {
+  highlights: ["重點", "畫重點", "標註", "highlights"],
+  note: ["摘要", "筆記", "摘要筆記", "summary"],
+  mindmap: ["心智圖", "mindmap"],
+};
+
+const splitAiSections = (rawText) => {
+  if (typeof rawText !== "string" || !rawText.trim()) return null;
+  const aliasToKey = new Map();
+  Object.entries(AI_SECTION_ALIASES).forEach(([key, names]) => {
+    names.forEach((name) => aliasToKey.set(name.toLowerCase(), key));
+  });
+  // Single "#" is reserved for category tags (#分類) and the mindmap root
+  // (# 主題) — only ## and deeper count as markdown section heads here.
+  const headRe = /^\s*(?:[=＝—-]{2,}|[【\[]|#{2,4})\s*([^=＝【】\[\]#\s]{1,8})\s*(?:[=＝—-]{2,}|[】\]])?\s*$/;
+  const sections = {};
+  let currentKey = null;
+  let buffer = [];
+  let foundAny = false;
+  const flush = () => {
+    if (!currentKey) return;
+    const body = buffer.join("\n").trim();
+    if (body) sections[currentKey] = body;
+  };
+  for (const line of rawText.split(/\r?\n/)) {
+    const match = line.match(headRe);
+    const key = match ? aliasToKey.get(match[1].trim().toLowerCase()) : undefined;
+    if (key) {
+      flush();
+      currentKey = key;
+      buffer = [];
+      foundAny = true;
+      continue;
+    }
+    buffer.push(line);
+  }
+  flush();
+  return foundAny ? sections : null;
+};
+
+// Parse a `# root` + indented `- ` outline into a tree.
+const parseMindmapOutline = (rawText) => {
+  if (typeof rawText !== "string" || !rawText.trim()) return null;
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+$/, ""))
+    .filter((line) => line.trim());
+  let title = "";
+  const root = { label: "", children: [] };
+  const stack = [{ node: root, depth: -1 }];
+  const itemRe = /^(\s*)(?:[-*•·]|\d+[.)])\s+(.*)$/;
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^#{1,3}\s+(.*)$/);
+    if (headingMatch && !title) {
+      title = headingMatch[1].trim();
+      continue;
+    }
+    const itemMatch = line.match(itemRe);
+    if (!itemMatch) {
+      // bare text before any list item → treat as the title
+      if (!title && stack.length === 1) title = line.trim();
+      continue;
+    }
+    const indent = itemMatch[1].replace(/\t/g, "  ").length;
+    const label = itemMatch[2].replace(/\*\*/g, "").trim();
+    if (!label) continue;
+    const node = { label, children: [] };
+    while (stack.length > 1 && indent <= stack[stack.length - 1].depth) {
+      stack.pop();
+    }
+    stack[stack.length - 1].node.children.push(node);
+    stack.push({ node, depth: indent });
+  }
+  if (!root.children.length) return null;
+  return { title: title || document.title || "心智圖", children: root.children };
+};
+
+const getStoredMindmaps = async () => {
+  if (!storage) return {};
+  try {
+    const stored = await storage.get(MINDMAP_STORAGE_KEY);
+    return stored?.[MINDMAP_STORAGE_KEY] ?? {};
+  } catch (_e) {
+    return {};
+  }
+};
+
+const saveMindmap = async (outlineText, title) => {
+  if (!storage) return;
+  const maps = await getStoredMindmaps();
+  maps[pageKey] = {
+    outline: outlineText,
+    title: title || document.title || "",
+    generatedAt: Date.now(),
+  };
+  await storage.set({ [MINDMAP_STORAGE_KEY]: maps });
+};
+
+// ── 心智圖 overlay ───────────────────────────────────────
+let mindmapOverlay = null;
+const MINDMAP_BRANCH_COLORS = [
+  "#b46d2e",
+  "#5b7a4e",
+  "#4e6e8e",
+  "#8e5a7a",
+  "#a8682f",
+  "#6b5e8e",
+];
+
+const updateMindmapAvailability = (hasMap) => {
+  const btn = highlightPanelEls?.aiMindmapViewBtn;
+  if (btn) btn.hidden = !hasMap;
+};
+
+const closeMindmapOverlay = () => {
+  if (!mindmapOverlay) return;
+  mindmapOverlay.remove();
+  mindmapOverlay = null;
+  document.removeEventListener("keydown", handleMindmapKeydown, true);
+};
+
+const handleMindmapKeydown = (event) => {
+  if (event.key === "Escape") {
+    event.stopPropagation();
+    closeMindmapOverlay();
+  }
+};
+
+const buildMindmapNodeElement = (node, depth, branchColor) => {
+  const wrap = document.createElement("div");
+  wrap.className = `hk-mm-node hk-mm-depth-${Math.min(depth, 4)}`;
+  if (branchColor) wrap.style.setProperty("--hk-mm-branch", branchColor);
+
+  const label = document.createElement("button");
+  label.type = "button";
+  label.className = "hk-mm-label";
+  label.textContent = node.label;
+  wrap.appendChild(label);
+
+  const children = Array.isArray(node.children) ? node.children : [];
+  if (children.length) {
+    const kids = document.createElement("div");
+    kids.className = "hk-mm-children";
+    children.forEach((child, index) => {
+      const childColor =
+        depth === 0
+          ? MINDMAP_BRANCH_COLORS[index % MINDMAP_BRANCH_COLORS.length]
+          : branchColor;
+      kids.appendChild(buildMindmapNodeElement(child, depth + 1, childColor));
+    });
+    wrap.appendChild(kids);
+    label.dataset.count = String(children.length);
+    label.addEventListener("click", () => {
+      wrap.classList.toggle("is-collapsed");
+    });
+  } else {
+    label.classList.add("is-leaf");
+  }
+  return wrap;
+};
+
+const openMindmapOverlay = (tree, meta = {}) => {
+  closeMindmapOverlay();
+  const overlay = document.createElement("div");
+  overlay.className = "hk-mindmap-overlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-label", "心智圖");
+
+  const head = document.createElement("div");
+  head.className = "hk-mindmap-head";
+
+  const title = document.createElement("h2");
+  title.className = "hk-mindmap-title";
+  title.textContent = "心智圖";
+
+  const metaEl = document.createElement("span");
+  metaEl.className = "hk-mindmap-meta";
+  if (meta.generatedAt) metaEl.textContent = formatTimestamp(meta.generatedAt);
+
+  const copyOutlineBtn = document.createElement("button");
+  copyOutlineBtn.type = "button";
+  copyOutlineBtn.className = "hk-mindmap-action";
+  copyOutlineBtn.textContent = "複製大綱";
+  copyOutlineBtn.addEventListener("click", async () => {
+    try {
+      const outline = meta.outline || "";
+      await navigator.clipboard.writeText(outline);
+      copyOutlineBtn.textContent = "已複製 ✓";
+      window.setTimeout(() => {
+        copyOutlineBtn.textContent = "複製大綱";
+      }, 1600);
+    } catch (_e) {
+      copyOutlineBtn.textContent = "複製失敗";
+    }
+  });
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "hk-mindmap-close";
+  closeBtn.setAttribute("aria-label", "關閉心智圖");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", closeMindmapOverlay);
+
+  head.appendChild(title);
+  head.appendChild(metaEl);
+  if (meta.outline) head.appendChild(copyOutlineBtn);
+  head.appendChild(closeBtn);
+
+  const canvas = document.createElement("div");
+  canvas.className = "hk-mindmap-canvas";
+  canvas.appendChild(
+    buildMindmapNodeElement(
+      { label: tree.title, children: tree.children },
+      0,
+      null
+    )
+  );
+
+  overlay.appendChild(head);
+  overlay.appendChild(canvas);
+  document.body.appendChild(overlay);
+  mindmapOverlay = overlay;
+  document.addEventListener("keydown", handleMindmapKeydown, true);
+};
+
+const openStoredMindmap = async () => {
+  const maps = await getStoredMindmaps();
+  const saved = maps[pageKey];
+  if (!saved?.outline) throw new Error("本頁尚未產生心智圖");
+  const tree = parseMindmapOutline(saved.outline);
+  if (!tree) throw new Error("心智圖資料損毀，請重新產生");
+  openMindmapOverlay(tree, saved);
 };
 
 // Escape stray double quotes that appear inside a JSON string literal but were
@@ -1283,6 +1660,141 @@ const applyAutoHighlightRange = async (range, color, reason) => {
   };
 };
 
+// ── Batch auto-highlight ─────────────────────────────────
+// The old path rebuilt the full-document text index for EVERY item and wrote
+// storage once per item (each write re-rendering the panel). Here we build the
+// index once, locate every span, apply from the end of the document backwards
+// (so earlier raw offsets stay valid while the DOM mutates), then persist all
+// entries with a single storage write.
+const findSpanForTextInIndex = (searchIndex, targetText, takenIntervals) => {
+  const normalizedNeedle = normalizeWhitespace(targetText);
+  if (!normalizedNeedle || !searchIndex?.normalizedText) return null;
+  const attempts = [
+    { haystack: searchIndex.normalizedText, needle: normalizedNeedle },
+    {
+      haystack: searchIndex.normalizedTextLower,
+      needle: normalizedNeedle.toLowerCase(),
+    },
+  ];
+  for (const attempt of attempts) {
+    const indexes = findIndexesInText(attempt.haystack, attempt.needle);
+    for (const start of indexes) {
+      const rawSpan = normalizedSpanToRawSpan(
+        searchIndex.normalizedToRaw,
+        start,
+        attempt.needle.length,
+        searchIndex.rawTextLength
+      );
+      if (!rawSpan) continue;
+      const overlaps = takenIntervals.some(
+        (iv) => rawSpan.startRaw < iv.endRaw && rawSpan.endRaw > iv.startRaw
+      );
+      if (overlaps) continue;
+      return rawSpan;
+    }
+  }
+  return null;
+};
+
+const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
+  const searchIndex = buildNormalizedSearchIndex();
+  if (searchIndex) {
+    searchIndex.normalizedTextLower = searchIndex.normalizedText.toLowerCase();
+  }
+  let skippedCount = 0;
+  const located = [];
+  const takenIntervals = [];
+  if (searchIndex) {
+    for (const task of tasks) {
+      const span = findSpanForTextInIndex(searchIndex, task.text, takenIntervals);
+      if (!span) {
+        skippedCount += 1;
+        continue;
+      }
+      takenIntervals.push(span);
+      located.push({ task, span });
+    }
+  } else {
+    skippedCount = tasks.length;
+  }
+
+  // Apply back-to-front: wrapping a later range only splits text nodes inside
+  // it, so cached node references / offsets before it remain valid.
+  located.sort((a, b) => b.span.startRaw - a.span.startRaw);
+
+  const newEntries = [];
+  let appliedCount = 0;
+  for (const { task, span } of located) {
+    try {
+      const range = createRangeFromRawOffsets(
+        searchIndex.nodes,
+        span.startRaw,
+        span.endRaw
+      );
+      if (!range) {
+        skippedCount += 1;
+        continue;
+      }
+      const ancestor =
+        range.commonAncestorContainer instanceof HTMLElement
+          ? range.commonAncestorContainer
+          : range.commonAncestorContainer?.parentElement;
+      if (
+        (ancestor && isEditableElement(ancestor)) ||
+        rangeTouchesExistingHighlight(range)
+      ) {
+        skippedCount += 1;
+        continue;
+      }
+      if (usePreview) {
+        const result = applyPreviewHighlight(range, task.color, task.reason);
+        if (result) {
+          previewData.push(result);
+          appliedCount += 1;
+        } else {
+          skippedCount += 1;
+        }
+        continue;
+      }
+      const snapshot = serializeRange(range.cloneRange());
+      const text = normalizeWhitespace(snapshot.text);
+      if (!text) {
+        skippedCount += 1;
+        continue;
+      }
+      const highlightId = `hk-ai-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      const normalizedColor = toHexColor(task.color || DEFAULT_COLOR);
+      const note = task.reason ? `AI：${task.reason}` : "";
+      wrapRangeWithHighlight(range, normalizedColor, highlightId);
+      setAllMarksMetadata(highlightId, { color: normalizedColor, note });
+      newEntries.push({
+        id: highlightId,
+        color: normalizedColor,
+        text: snapshot.text,
+        range: snapshot,
+        url: pageKey,
+        createdAt: Date.now(),
+        note,
+      });
+      appliedCount += 1;
+    } catch (error) {
+      console.debug("套用 AI 重點失敗", error);
+      skippedCount += 1;
+    }
+  }
+
+  if (newEntries.length) {
+    panelRefreshSuppressed = true;
+    try {
+      const existing = await getStoredHighlights();
+      await setStoredHighlights([...existing, ...newEntries]);
+    } finally {
+      panelRefreshSuppressed = false;
+    }
+  }
+  return { appliedCount, skippedCount };
+};
+
 const callOpenAI = async (key, prompt, options = {}) => {
   const systemPrompt =
     options.systemPrompt ||
@@ -1461,9 +1973,21 @@ const confirmPreviewHighlights = async () => {
   previewData = [];
   hidePreviewConfirmBar();
   updateGenerateAvailability();
-  for (const item of toSave) {
-    item.el.classList.remove("hk-highlight-preview");
-    await saveHighlight(item.data);
+  const entries = [];
+  toSave.forEach((item) => {
+    document
+      .querySelectorAll(`[${HIGHLIGHT_ATTR}="${item.data.id}"]`)
+      .forEach((el) => el.classList.remove("hk-highlight-preview"));
+    entries.push(item.data);
+  });
+  if (entries.length) {
+    panelRefreshSuppressed = true;
+    try {
+      const existing = await getStoredHighlights();
+      await setStoredHighlights([...existing, ...entries]);
+    } finally {
+      panelRefreshSuppressed = false;
+    }
   }
   await ensurePageMetaTitle(pageKey, document.title);
   await refreshHighlightPanelIfVisible();
@@ -1525,6 +2049,67 @@ const launchChatGPTBridge = async (type) => {
   }
 };
 
+const applyNotePayload = async (noteText) => {
+  const notePayload = {
+    note: noteText,
+    provider: "chatgpt",
+    model: "chatgpt-web",
+    generatedAt: Date.now(),
+    url: pageKey,
+  };
+  highlightPanelState.notesByPage = {
+    ...highlightPanelState.notesByPage,
+    [pageKey]: notePayload,
+  };
+  await saveGeneratedNote(pageKey, notePayload);
+  updateAiNoteSection(notePayload);
+  return notePayload;
+};
+
+// Returns {appliedCount, skippedCount, previewing}
+const applyHighlightResponseText = async (text) => {
+  const latestPalette = await refreshPaletteFromStorage();
+  const usageCounts = await collectColorUsageCounts();
+  const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+  // Prefer the non-JSON block format; fall back to legacy JSON.
+  const blockItems = parseHighlightBlocks(text);
+  const parsedPayload = blockItems.length
+    ? blockItems
+    : parseJsonFromModelResponse(text);
+  const tasks = normalizeAutoHighlightItems(parsedPayload, preferredPalette);
+  if (!tasks.length) throw new Error("回覆中沒有可用的重點");
+  const usePreview = aiSettings.usePreview;
+  const { appliedCount, skippedCount } = await applyAutoHighlightTasksBatch(
+    tasks,
+    usePreview
+  );
+  if (!appliedCount) throw new Error("找不到可標註的文字");
+  const previewing = usePreview && previewData.length > 0;
+  if (previewing) {
+    showPreviewConfirmBar(previewData.length);
+  } else {
+    await ensurePageMetaTitle(pageKey, document.title);
+  }
+  return { appliedCount, skippedCount, previewing };
+};
+
+const applyMindmapResponseText = async (text) => {
+  const tree = parseMindmapOutline(text);
+  if (!tree) throw new Error("無法解析心智圖大綱，請確認貼上的是大綱格式");
+  await saveMindmap(text, tree.title);
+  updateMindmapAvailability(true);
+  openMindmapOverlay(tree, { outline: text, generatedAt: Date.now() });
+};
+
+// Outline heuristics: mostly list lines, no 原文： blocks.
+const looksLikeMindmapOutline = (text) => {
+  if (/^原文\s*[:：]/m.test(text)) return false;
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 3) return false;
+  const listLines = lines.filter((l) => /^\s*(?:[-*•·]|\d+[.)])\s+/.test(l));
+  return listLines.length >= 3 && listLines.length >= lines.length * 0.6;
+};
+
 const handleChatGPTResponse = async (responseData) => {
   if (!responseData?.text || !responseData?.requestId) return;
   isChatGPTBridgeWaiting = false;
@@ -1534,66 +2119,47 @@ const handleChatGPTResponse = async (responseData) => {
   } catch (_e) {}
   const { type, text } = responseData;
   try {
-    if (type === "note") {
-      const notePayload = {
-        note: text,
-        provider: "chatgpt",
-        model: "chatgpt-web",
-        generatedAt: Date.now(),
-        url: pageKey,
-      };
-      highlightPanelState.notesByPage = {
-        ...highlightPanelState.notesByPage,
-        [pageKey]: notePayload,
-      };
-      highlightPanelState.activeTab = "ai-note";
-      applyHighlightPanelTabState();
-      await saveGeneratedNote(pageKey, notePayload);
-      updateAiNoteSection(notePayload);
-      setAiPanelStatus("ChatGPT 筆記已匯入");
-    } else {
+    // Smart routing: trust section markers in the response over the selected
+    // mode, so a paste "just works" even if the user forgot to switch chips.
+    const sections = splitAiSections(text);
+    const isMindmap =
+      type === "mindmap" ||
+      (sections?.mindmap && !sections.highlights && !sections.note) ||
+      (!sections && looksLikeMindmapOutline(text));
+    if (isMindmap) {
+      await applyMindmapResponseText(sections?.mindmap ?? text);
+      setAiPanelStatus("心智圖已產生");
+      return;
+    }
+
+    const highlightText =
+      sections?.highlights ?? (type === "note" ? null : text);
+    const noteText = sections?.note ?? (type === "note" ? text : null);
+
+    let result = null;
+    if (highlightText) {
       setAiPanelStatus("套用重點中…");
-      const latestPalette = await refreshPaletteFromStorage();
-      const usageCounts = await collectColorUsageCounts();
-      const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-      // Prefer the new non-JSON block format; fall back to legacy JSON.
-      const blockItems = parseHighlightBlocks(text);
-      const parsedPayload = blockItems.length
-        ? blockItems
-        : parseJsonFromModelResponse(text);
-      const tasks = normalizeAutoHighlightItems(parsedPayload, preferredPalette);
-      if (!tasks.length) throw new Error("ChatGPT 回傳沒有可用的重點");
-      const usePreview = aiSettings.usePreview;
-      const consumedSpans = new Set();
-      let appliedCount = 0;
-      let skippedCount = 0;
-      for (const task of tasks) {
-        const range = findRangeForAutoHighlightText(task.text, consumedSpans);
-        if (!range) { skippedCount++; continue; }
-        try {
-          if (usePreview) {
-            const result = applyPreviewHighlight(range, task.color, task.reason);
-            if (result) { previewData.push(result); appliedCount++; }
-            else skippedCount++;
-          } else {
-            await applyAutoHighlightRange(range, task.color, task.reason);
-            appliedCount++;
-          }
-        } catch (_e) { skippedCount++; }
-      }
-      if (!appliedCount) throw new Error("找不到可標註的文字");
-      if (usePreview && previewData.length) {
-        showPreviewConfirmBar(previewData.length);
-        setAiPanelStatus(`預覽 ${previewData.length} 個重點，請確認後套用`);
-      } else {
-        await ensurePageMetaTitle(pageKey, document.title);
-        await refreshHighlightPanelIfVisible();
-        setAiPanelStatus(
-          skippedCount
-            ? `已自動畫重點 ${appliedCount} 筆，略過 ${skippedCount} 筆`
-            : `已自動畫重點 ${appliedCount} 筆`
-        );
-      }
+      result = await applyHighlightResponseText(highlightText);
+    }
+    if (noteText) {
+      await applyNotePayload(noteText);
+    }
+    if (!highlightText && !noteText) {
+      throw new Error("無法辨識貼上的內容");
+    }
+
+    await refreshHighlightPanelIfVisible();
+    if (result?.previewing) {
+      setAiPanelStatus(
+        `預覽 ${previewData.length} 個重點，請確認後套用${noteText ? "（摘要已匯入）" : ""}`
+      );
+    } else if (result) {
+      const parts = [`已畫重點 ${result.appliedCount} 筆`];
+      if (result.skippedCount) parts.push(`略過 ${result.skippedCount} 筆`);
+      if (noteText) parts.push("摘要已匯入");
+      setAiPanelStatus(parts.join("，"));
+    } else {
+      setAiPanelStatus("摘要筆記已匯入");
     }
   } catch (error) {
     setAiPanelStatus(error?.message || "匯入失敗", true);
@@ -1722,26 +2288,10 @@ const handleGenerateAiHighlights = async () => {
     }
 
     const usePreview = aiSettings.usePreview;
-    const consumedSpans = new Set();
-    let appliedCount = 0;
-    let skippedCount = 0;
-    for (const task of tasks) {
-      const range = findRangeForAutoHighlightText(task.text, consumedSpans);
-      if (!range) { skippedCount++; continue; }
-      try {
-        if (usePreview) {
-          const result = applyPreviewHighlight(range, task.color, task.reason);
-          if (result) { previewData.push(result); appliedCount++; }
-          else skippedCount++;
-        } else {
-          await applyAutoHighlightRange(range, task.color, task.reason);
-          appliedCount++;
-        }
-      } catch (error) {
-        console.debug("套用 AI 自動畫重點失敗", error);
-        skippedCount++;
-      }
-    }
+    const { appliedCount, skippedCount } = await applyAutoHighlightTasksBatch(
+      tasks,
+      usePreview
+    );
 
     if (!appliedCount) {
       throw new Error("找不到可標註的文字，請調整 Prompt 後再試");
@@ -2154,7 +2704,7 @@ const updateHighlightPanelTagFilters = () => {
   clearBtn.addEventListener("click", () => {
     highlightPanelState.activeTag = null;
     updateHighlightPanelTagFilters();
-    renderHighlightPanel();
+    renderPanelViews();
   });
   container.appendChild(clearBtn);
 
@@ -2168,7 +2718,7 @@ const updateHighlightPanelTagFilters = () => {
       highlightPanelState.activeTag =
         highlightPanelState.activeTag === tag ? null : tag;
       updateHighlightPanelTagFilters();
-      renderHighlightPanel();
+      renderPanelViews();
     });
     container.appendChild(chip);
   });
@@ -3272,9 +3822,14 @@ const ensureHighlightPanel = () => {
   searchInput.type = "search";
   searchInput.className = "hk-panel-search-input";
   searchInput.placeholder = "輸入關鍵字或標籤";
+  let searchDebounceTimer = null;
   searchInput.addEventListener("input", (event) => {
     highlightPanelState.searchTerm = event.target.value ?? "";
-    renderHighlightPanel();
+    if (searchDebounceTimer) window.clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = window.setTimeout(() => {
+      searchDebounceTimer = null;
+      renderPanelViews();
+    }, 150);
   });
   searchWrapper.appendChild(searchInput);
   searchControls.appendChild(searchWrapper);
@@ -3289,7 +3844,7 @@ const ensureHighlightPanel = () => {
     const value = event.target.value;
     highlightPanelState.searchPageFilter =
       value === "__all__" ? null : value || null;
-    renderHighlightPanel();
+    renderPanelViews();
   });
   searchControls.appendChild(pageFilterSelect);
 
@@ -3776,40 +4331,42 @@ const ensureHighlightPanel = () => {
   searchPlaceholder.className = "hk-panel-placeholder";
   searchPlaceholder.textContent = "目前沒有符合的筆記。";
 
-  // ── 統一 AI 卡片：複製 → 貼到 GPT → 貼回 ─────────────────
-  let aiMode = "note"; // "note" | "highlight"
+  // ── AI 工作流卡片（最外層）：① 複製 Prompt → ② 貼回即套用 ──
+  // 單一流程：一個 Prompt 同時取得整頁重點與摘要筆記。
+  // 心智圖改走獨立的副次動作（見下方 aiMindmapCopyBtn），主流程不再有模式切換。
+  const aiMode = "combined";
   const aiCard = document.createElement("div");
   aiCard.className = "hk-ai-card";
 
-  // 模式切換
-  const aiModeToggle = document.createElement("div");
-  aiModeToggle.className = "hk-ai-mode-toggle";
-  const aiModeNoteBtn = document.createElement("button");
-  aiModeNoteBtn.type = "button";
-  aiModeNoteBtn.className = "hk-ai-mode-btn is-active";
-  aiModeNoteBtn.textContent = "📝 摘要筆記";
-  const aiModeHlBtn = document.createElement("button");
-  aiModeHlBtn.type = "button";
-  aiModeHlBtn.className = "hk-ai-mode-btn";
-  aiModeHlBtn.textContent = "✦ 自動畫重點";
-  aiModeToggle.appendChild(aiModeNoteBtn);
-  aiModeToggle.appendChild(aiModeHlBtn);
+  const aiCardHint = document.createElement("p");
+  aiCardHint.className = "hk-ai-hint";
+  aiCardHint.textContent = "一個 Prompt 同時取得整頁重點與摘要筆記";
 
-  // 主按鈕：複製給 GPT
+  // 步驟一：複製 Prompt
+  const aiStep1 = document.createElement("div");
+  aiStep1.className = "hk-ai-step";
+  const aiStep1Num = document.createElement("span");
+  aiStep1Num.className = "hk-ai-step-num";
+  aiStep1Num.textContent = "1";
   const aiCopyBtn = document.createElement("button");
   aiCopyBtn.type = "button";
   aiCopyBtn.className = "hk-ai-copy-btn";
-  aiCopyBtn.textContent = "複製給 GPT";
+  aiCopyBtn.textContent = "複製 Prompt";
+  aiStep1.appendChild(aiStep1Num);
+  aiStep1.appendChild(aiCopyBtn);
 
-  const aiCardHint = document.createElement("p");
-  aiCardHint.className = "hk-ai-hint";
-  aiCardHint.textContent = "複製後貼到 ChatGPT，再把回覆貼回下面。";
-
-  // 貼回區
+  // 步驟二：貼回（paste 即自動套用）
+  const aiStep2 = document.createElement("div");
+  aiStep2.className = "hk-ai-step";
+  const aiStep2Num = document.createElement("span");
+  aiStep2Num.className = "hk-ai-step-num";
+  aiStep2Num.textContent = "2";
   const aiPasteArea = document.createElement("textarea");
   aiPasteArea.className = "hk-ai-paste";
-  aiPasteArea.rows = 3;
-  aiPasteArea.placeholder = "把 ChatGPT 的回覆貼在這裡…";
+  aiPasteArea.rows = 2;
+  aiPasteArea.placeholder = "回覆貼在這裡，貼上即自動套用";
+  aiStep2.appendChild(aiStep2Num);
+  aiStep2.appendChild(aiPasteArea);
 
   const aiApplyBtn = document.createElement("button");
   aiApplyBtn.type = "button";
@@ -3823,79 +4380,104 @@ const ensureHighlightPanel = () => {
   aiDirectBtn.textContent = "用 API 直接產生";
   aiDirectBtn.hidden = true;
 
-  // 指引閱讀（次要）
+  // 次要動作：查看心智圖／指引閱讀
+  const aiMindmapViewBtn = document.createElement("button");
+  aiMindmapViewBtn.type = "button";
+  aiMindmapViewBtn.className = "hk-ai-secondary hk-ai-mindmap-view";
+  aiMindmapViewBtn.textContent = "✦ 查看心智圖";
+  aiMindmapViewBtn.hidden = true;
+  aiMindmapViewBtn.addEventListener("click", () => {
+    openStoredMindmap().catch((error) =>
+      setAiPanelStatus(error?.message || "無法開啟心智圖", true)
+    );
+  });
+
   const actionGuidedReadingBtn = document.createElement("button");
   actionGuidedReadingBtn.type = "button";
-  actionGuidedReadingBtn.className = "hk-ai-guided";
+  actionGuidedReadingBtn.className = "hk-ai-secondary hk-ai-guided";
   actionGuidedReadingBtn.textContent = "▷ 指引閱讀";
   actionGuidedReadingBtn.addEventListener("click", () => startGuidedReading());
 
-  const setAiMode = (mode) => {
-    aiMode = mode === "highlight" ? "highlight" : "note";
-    aiModeNoteBtn.classList.toggle("is-active", aiMode === "note");
-    aiModeHlBtn.classList.toggle("is-active", aiMode === "highlight");
-    aiPasteArea.placeholder =
-      aiMode === "highlight"
-        ? "把 ChatGPT 回覆（原文／#分類／重點）貼在這裡…"
-        : "把 ChatGPT 的回覆貼在這裡…";
-    aiDirectBtn.textContent =
-      aiMode === "highlight" ? "用 API 直接畫重點" : "用 API 直接產生筆記";
+  // 心智圖 Prompt：獨立副次動作，不影響主流程（重點＋摘要）
+  const aiMindmapCopyBtn = document.createElement("button");
+  aiMindmapCopyBtn.type = "button";
+  aiMindmapCopyBtn.className = "hk-ai-secondary hk-ai-mindmap-copy";
+  aiMindmapCopyBtn.textContent = "✦ 複製心智圖 Prompt";
+
+  // 依模式組出 Prompt（combined = 重點＋摘要，mindmap = 心智圖大綱）
+  const buildAiPrompt = async (mode) => {
+    const pageData = {
+      title: document.title,
+      url: pageKey,
+      pageText: getPagePlainText(),
+      highlights: await collectPageHighlights(),
+    };
+    if (mode === "mindmap") return buildMindmapPrompt(pageData);
+    const latestPalette = await refreshPaletteFromStorage();
+    const usageCounts = await collectColorUsageCounts();
+    const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+    return buildCombinedPrompt(pageData, preferredPalette, usageCounts);
   };
-  aiModeNoteBtn.addEventListener("click", () => setAiMode("note"));
-  aiModeHlBtn.addEventListener("click", () => setAiMode("highlight"));
 
   const flashCopyBtn = (msg) => {
     aiCopyBtn.textContent = msg;
     aiCopyBtn.classList.add("is-done");
     window.setTimeout(() => {
-      aiCopyBtn.textContent = "複製給 GPT";
+      aiCopyBtn.textContent = "複製 Prompt";
       aiCopyBtn.classList.remove("is-done");
     }, 1600);
   };
 
   aiCopyBtn.addEventListener("click", async () => {
     try {
-      const pageData = {
-        title: document.title,
-        url: pageKey,
-        pageText: getPagePlainText(),
-        highlights: await collectPageHighlights(),
-      };
-      let prompt;
-      if (aiMode === "highlight") {
-        const latestPalette = await refreshPaletteFromStorage();
-        const usageCounts = await collectColorUsageCounts();
-        const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-        prompt = buildAutoHighlightPrompt(pageData, preferredPalette, usageCounts);
-      } else {
-        prompt = buildNotePrompt(pageData);
-      }
+      const prompt = await buildAiPrompt("combined");
       await navigator.clipboard.writeText(prompt);
       flashCopyBtn("已複製 ✓");
-      setAiPanelStatus("已複製，貼到 ChatGPT 後把回覆貼回下面");
+      setAiPanelStatus("已複製，貼到 ChatGPT／Claude 送出，回覆貼回第 2 步");
     } catch (error) {
       setAiPanelStatus(error?.message || "複製失敗", true);
     }
   });
 
-  aiApplyBtn.addEventListener("click", () => {
+  aiMindmapCopyBtn.addEventListener("click", async () => {
+    try {
+      const prompt = await buildAiPrompt("mindmap");
+      await navigator.clipboard.writeText(prompt);
+      setAiPanelStatus("已複製心智圖 Prompt，送出後把大綱貼回第 2 步");
+    } catch (error) {
+      setAiPanelStatus(error?.message || "複製失敗", true);
+    }
+  });
+
+  const applyPastedAiResponse = () => {
     const text = aiPasteArea.value.trim();
     if (!text) {
-      setAiPanelStatus("請先貼上 ChatGPT 回覆", true);
+      setAiPanelStatus("請先貼上 AI 回覆", true);
       return;
     }
+    aiPasteArea.value = "";
     handleChatGPTResponse({
       requestId: "manual",
-      type: aiMode === "highlight" ? "highlight" : "note",
+      type: aiMode,
       text,
       sourceUrl: pageKey,
     });
-    aiPasteArea.value = "";
-  });
+  };
 
-  aiDirectBtn.addEventListener("click", () => {
-    if (aiMode === "highlight") handleGenerateAiHighlights();
-    else handleGenerateAiNote();
+  // 貼上即自動套用（setTimeout 讓 textarea 先吃到剪貼簿內容）
+  aiPasteArea.addEventListener("paste", () => {
+    window.setTimeout(() => {
+      if (aiPasteArea.value.trim()) {
+        setAiPanelStatus("偵測到貼上，套用中…");
+        applyPastedAiResponse();
+      }
+    }, 30);
+  });
+  aiApplyBtn.addEventListener("click", applyPastedAiResponse);
+
+  aiDirectBtn.addEventListener("click", async () => {
+    await handleGenerateAiHighlights();
+    await handleGenerateAiNote();
   });
 
   const aiCardActions = document.createElement("div");
@@ -3903,13 +4485,18 @@ const ensureHighlightPanel = () => {
   aiCardActions.appendChild(aiApplyBtn);
   aiCardActions.appendChild(aiDirectBtn);
 
-  aiCard.appendChild(aiModeToggle);
-  aiCard.appendChild(aiCopyBtn);
+  const aiCardSecondary = document.createElement("div");
+  aiCardSecondary.className = "hk-ai-secondary-row";
+  aiCardSecondary.appendChild(aiMindmapCopyBtn);
+  aiCardSecondary.appendChild(aiMindmapViewBtn);
+  aiCardSecondary.appendChild(actionGuidedReadingBtn);
+
   aiCard.appendChild(aiCardHint);
-  aiCard.appendChild(aiStatus);
-  aiCard.appendChild(aiPasteArea);
+  aiCard.appendChild(aiStep1);
+  aiCard.appendChild(aiStep2);
   aiCard.appendChild(aiCardActions);
-  aiCard.appendChild(actionGuidedReadingBtn);
+  aiCard.appendChild(aiStatus);
+  aiCard.appendChild(aiCardSecondary);
 
   // ── Settings drawer (overlay, slides over the panel body) ─
   const drawer = document.createElement("div");
@@ -3973,9 +4560,10 @@ const ensureHighlightPanel = () => {
   drawerCloseBtn.addEventListener("click", () => toggleDrawer(false));
 
   // ── Assemble panel ─────────────────────────────────────
+  // AI 卡片放在最外層（header 下、分頁上），任何分頁都看得到、隨時可貼
   panel.appendChild(header);
+  panel.appendChild(aiCard);
   panel.appendChild(tabs);
-  pageTabPanel.appendChild(aiCard);
   pageTabPanel.appendChild(aiNoteSection);
   pageTabPanel.appendChild(pageList);
   pageTabPanel.appendChild(pagePlaceholder);
@@ -3993,12 +4581,13 @@ const ensureHighlightPanel = () => {
     container: panel,
     dragHandle: header,
     aiCard,
-    aiModeNoteBtn,
-    aiModeHlBtn,
+    getAiMode: () => aiMode,
     aiCopyBtn,
     aiPasteArea,
     aiApplyBtn,
     aiDirectBtn,
+    aiMindmapCopyBtn,
+    aiMindmapViewBtn,
     actionGuidedReadingBtn,
     settingsBtn,
     drawer,
@@ -4087,23 +4676,23 @@ const ensureHighlightPanel = () => {
   openaiInput.addEventListener("input", (event) => {
     aiSettings.openaiKey = event.target.value;
     updateGenerateAvailability();
-    persistAISettings();
+    schedulePersistAISettings();
   });
 
   geminiInput.addEventListener("input", (event) => {
     aiSettings.geminiKey = event.target.value;
     updateGenerateAvailability();
-    persistAISettings();
+    schedulePersistAISettings();
   });
 
   promptTextarea.addEventListener("input", (event) => {
     aiSettings.prompt = event.target.value;
-    persistAISettings();
+    schedulePersistAISettings();
   });
 
   autoHighlightPromptTextarea.addEventListener("input", (event) => {
     aiSettings.autoHighlightPrompt = event.target.value;
-    persistAISettings();
+    schedulePersistAISettings();
   });
 
   aiGenerateBtn.addEventListener("click", handleGenerateAiNote);
@@ -4116,20 +4705,17 @@ const ensureHighlightPanel = () => {
   applyAiSettingsToUI();
   applyHighlightPanelFontScale();
   setAiPanelStatus("");
+  getStoredMindmaps()
+    .then((maps) => updateMindmapAvailability(Boolean(maps[pageKey])))
+    .catch(() => {});
   return panel;
 };
 
-const renderHighlightPanel = async () => {
-  ensureHighlightPanel();
+// View-only pass: renders lists from cached state without touching storage.
+// Used for search keystrokes / filter changes, where re-reading all of
+// chrome.storage on every input made the panel feel sluggish.
+const renderPanelViews = () => {
   if (!highlightPanelEls) return;
-
-  highlightPanelState.activeKey = pageKey;
-
-  await refreshHighlightPanelData();
-  applyHighlightPanelSideClasses();
-  await renderPageTagEditor();
-  updateHighlightPanelTagFilters();
-  updateSearchPageFilterOptions();
 
   const pageEntries = collectPanelEntries("current").sort(
     (a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)
@@ -4154,14 +4740,40 @@ const renderHighlightPanel = async () => {
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   renderSearchEntries(searchEntries);
 
-  if (highlightPanelEls?.searchInput) {
-    highlightPanelEls.searchInput.value = highlightPanelState.searchTerm;
+  const searchInputEl = highlightPanelEls?.searchInput;
+  if (searchInputEl && searchInputEl.value !== highlightPanelState.searchTerm) {
+    searchInputEl.value = highlightPanelState.searchTerm;
   }
 
   applyHighlightPanelTabState();
+  updateAiNoteSection(highlightPanelState.notesByPage[pageKey]);
+};
 
-  const noteKey = pageKey;
-  updateAiNoteSection(highlightPanelState.notesByPage[noteKey]);
+const renderHighlightPanel = async () => {
+  ensureHighlightPanel();
+  if (!highlightPanelEls) return;
+
+  highlightPanelState.activeKey = pageKey;
+
+  await refreshHighlightPanelData();
+  applyHighlightPanelSideClasses();
+  await renderPageTagEditor();
+  updateHighlightPanelTagFilters();
+  updateSearchPageFilterOptions();
+  renderPanelViews();
+};
+
+// Coalesces storage-change re-renders into one render per burst.
+const schedulePanelRefresh = () => {
+  if (!highlightPanelVisible || panelRefreshSuppressed) return;
+  if (panelRefreshDebounceTimer) window.clearTimeout(panelRefreshDebounceTimer);
+  panelRefreshDebounceTimer = window.setTimeout(() => {
+    panelRefreshDebounceTimer = null;
+    if (!highlightPanelVisible || panelRefreshSuppressed) return;
+    renderHighlightPanel().catch((error) =>
+      console.debug("重新整理標註面板失敗", error)
+    );
+  }, 180);
 };
 
 const openHighlightPanel = async (options = {}) => {
@@ -4550,15 +5162,17 @@ chrome.storage?.onChanged.addListener((changes, areaName) => {
       handleChatGPTResponse(responseData);
     }
   }
-  if (highlightPanelVisible) {
+  if (changes[MINDMAP_STORAGE_KEY]) {
+    const maps = changes[MINDMAP_STORAGE_KEY].newValue ?? {};
+    updateMindmapAvailability(Boolean(maps[pageKey]));
+  }
+  {
     const affectedKeys = Object.keys(changes);
     const shouldRefresh =
       affectedKeys.includes(pageKey) ||
       affectedKeys.some((key) => isValidPageKey(key));
     if (shouldRefresh) {
-      renderHighlightPanel().catch((error) =>
-        console.debug("重新整理標註面板失敗", error)
-      );
+      schedulePanelRefresh();
     }
   }
 });
@@ -6077,11 +6691,9 @@ window.addEventListener(
   "resize",
   () => {
     closeHighlightMenu();
-    if (highlightPanelVisible) {
-      renderHighlightPanel().catch((error) =>
-        console.debug("重新渲染標註面板失敗", error)
-      );
-    }
+    // No data changed on resize — just keep the floating panel inside the
+    // viewport. (A full re-render here re-read all of storage and caused
+    // visible jank while resizing.)
     if (highlightPanelState.position && highlightPanel) {
       setHighlightPanelPosition(
         highlightPanelState.position.x,
