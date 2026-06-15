@@ -14,10 +14,13 @@
 }
 
 /* Inline children (<em>, <a>, <span>) on some sites (e.g. ar5iv cross-refs)
-   set their own background; force transparent so the highlight shows through. */
+   set their own background / pill / outline; neutralise them so the highlight
+   reads as one continuous mark instead of looking split at links & punctuation. */
 .hk-highlight * {
   background-color: transparent !important;
   background-image: none !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 .hk-highlight::selection {

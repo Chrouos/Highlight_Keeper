@@ -4,7 +4,45 @@ const MAX_SELECTOR_DEPTH = 6;
 const TEXT_CONTEXT_CHARS = 60;
 const TEXT_PARENT_SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT"]);
 
-const pageKey = new URL(window.location.href).href;
+// 把網址正規化成穩定的儲存鍵：去掉 #錨點與常見追蹤參數（utm_*、fbclid…），
+// 否則同一篇文章帶不同追蹤參數會被當成不同頁，已畫的重點就會「不見」。
+// 注意：只剝除已知的追蹤參數，保留 ?id=、?v= 等決定內容的真參數。
+const TRACKING_PARAMS = new Set([
+  "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "yclid", "ttclid",
+  "twclid", "igshid", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "spm",
+  "scm", "vero_id", "oly_enc_id", "oly_anon_id", "_openstat",
+]);
+const normalizePageKey = (href) => {
+  try {
+    const url = new URL(href);
+    url.hash = "";
+    const params = url.searchParams;
+    const drop = [];
+    params.forEach((_value, key) => {
+      const lower = key.toLowerCase();
+      if (lower.startsWith("utm_") || TRACKING_PARAMS.has(lower)) drop.push(key);
+    });
+    drop.forEach((key) => params.delete(key));
+    const query = params.toString();
+    url.search = query ? `?${query}` : "";
+    return url.href;
+  } catch (_e) {
+    return href;
+  }
+};
+
+// 優先用頁面宣告的 canonical 連結當鍵：它是去掉所有追蹤／信件參數後最穩定的
+// 文章網址（例如 Substack 的 /p/slug）。沒有 canonical 才退回剝參數的網址。
+const resolvePageKey = () => {
+  try {
+    const link = document.querySelector('link[rel="canonical"]');
+    const href = link?.href;
+    if (href && /^https?:/i.test(href)) return normalizePageKey(href);
+  } catch (_e) {}
+  return normalizePageKey(window.location.href);
+};
+
+const pageKey = resolvePageKey();
 
 const storage = chrome.storage?.local;
 const DEFAULT_COLOR = "#ffeb3b";
@@ -6005,7 +6043,39 @@ const nearestBlockAncestor = (node) => {
   return document.body;
 };
 
+// 把 range 兩端的空白（含換行、不斷行空白、全形空白）往內縮，避免標註背景與
+// 註解點線下線「多跑出來一點點」：通常是選取或 AI 比對時把尾端空白也圈了進來。
+const HL_WS = new Set([" ", "\t", "\n", "\r", " ", "　", "​"]);
+const trimRangeWhitespace = (range) => {
+  let guard = 0;
+  while (guard++ < 10000) {
+    const { startContainer, startOffset } = range;
+    if (
+      startContainer.nodeType === Node.TEXT_NODE &&
+      startOffset < (startContainer.nodeValue?.length ?? 0) &&
+      HL_WS.has(startContainer.nodeValue[startOffset])
+    ) {
+      range.setStart(startContainer, startOffset + 1);
+    } else break;
+  }
+  guard = 0;
+  while (guard++ < 10000) {
+    const { endContainer, endOffset } = range;
+    if (
+      endContainer.nodeType === Node.TEXT_NODE &&
+      endOffset > 0 &&
+      HL_WS.has(endContainer.nodeValue?.[endOffset - 1])
+    ) {
+      range.setEnd(endContainer, endOffset - 1);
+    } else break;
+  }
+  return range;
+};
+
 const wrapRangeWithHighlight = (range, color, id) => {
+  // 先把兩端空白縮掉，否則尾端空白會讓背景／下線多出來一截。
+  trimRangeWhitespace(range);
+  if (range.collapsed) return null;
   // If range start and end are in the SAME block, use extractContents — one mark,
   // handles <em>/<strong>/injected spans correctly without breaking anything.
   const startBlock = nearestBlockAncestor(range.startContainer);
@@ -6179,7 +6249,91 @@ const restoreHighlights = async () => {
   }
 };
 
+// 同一篇文章的識別碼：當 pageKey 沒有查詢字串（canonical 乾淨網址）時，
+// 用「origin + 路徑」比對，才能把帶不同信件／追蹤參數的舊鍵也認出來；
+// 若 pageKey 仍帶查詢字串（查詢決定內容的站，如 youtube ?v=），則嚴格比對正規化網址。
+const pageKeyHasQuery = (() => {
+  try {
+    return Boolean(new URL(pageKey).search);
+  } catch (_e) {
+    return false;
+  }
+})();
+const articleIdentity = (url) => {
+  try {
+    const u = new URL(url);
+    return pageKeyHasQuery
+      ? normalizePageKey(url)
+      : `${u.origin}${u.pathname}`;
+  } catch (_e) {
+    return null;
+  }
+};
+
+// 把舊版用「完整網址（含追蹤／信件參數）」存的資料，搬到正規化後的 pageKey。
+// 掃描整個 storage，找出與本文同一識別碼的舊鍵並合併；搬完刪掉舊鍵。一次性、冪等。
+let legacyMigrationPromise = null;
+const migrateLegacyPageData = () => {
+  if (legacyMigrationPromise) return legacyMigrationPromise;
+  legacyMigrationPromise = (async () => {
+    if (!storage) return;
+    try {
+      const targetId = articleIdentity(pageKey);
+      if (!targetId) return;
+      const all = await storage.get(null);
+      const writes = {};
+      const removes = [];
+
+      // 1) 標註：頂層以 http(s) 網址為鍵、值為陣列。把同一識別碼的舊鍵併入 pageKey。
+      const merged = Array.isArray(all[pageKey]) ? [...all[pageKey]] : [];
+      const seenIds = new Set(merged.map((it) => it?.id).filter(Boolean));
+      let touchedHighlights = false;
+      for (const key of Object.keys(all)) {
+        if (key === pageKey || !/^https?:/i.test(key)) continue;
+        if (!Array.isArray(all[key])) continue;
+        if (articleIdentity(key) !== targetId) continue;
+        for (const item of all[key]) {
+          const normalized =
+            item && typeof item === "object" ? { ...item, url: pageKey } : item;
+          if (normalized?.id && seenIds.has(normalized.id)) continue;
+          if (normalized?.id) seenIds.add(normalized.id);
+          merged.push(normalized);
+        }
+        removes.push(key);
+        touchedHighlights = true;
+      }
+      if (touchedHighlights && merged.length) writes[pageKey] = merged;
+
+      // 2) 心智圖、3) 生成筆記、4) 頁面 meta（皆為 { [url]: value } 物件）
+      const moveSubKey = (storeKey) => {
+        const map = all[storeKey];
+        if (!map || typeof map !== "object") return;
+        let changed = false;
+        const next = { ...map };
+        for (const key of Object.keys(map)) {
+          if (key === pageKey || !/^https?:/i.test(key)) continue;
+          if (articleIdentity(key) !== targetId) continue;
+          if (next[pageKey] === undefined) next[pageKey] = map[key];
+          delete next[key];
+          changed = true;
+        }
+        if (changed) writes[storeKey] = next;
+      };
+      moveSubKey(MINDMAP_STORAGE_KEY);
+      moveSubKey("hkGeneratedNotes");
+      moveSubKey(PAGE_META_KEY);
+
+      if (Object.keys(writes).length) await storage.set(writes);
+      if (removes.length) await storage.remove(removes);
+    } catch (error) {
+      console.debug("舊版標註資料搬移失敗", error);
+    }
+  })();
+  return legacyMigrationPromise;
+};
+
 const attemptRestoreHighlights = async (attempt = 0) => {
+  if (attempt === 0) await migrateLegacyPageData();
   await ensurePageMetaTitle(pageKey, document.title);
   const { total, visible } = await restoreHighlights();
   if (!total) return;
