@@ -3623,10 +3623,23 @@ const createPanelEntryElement = (entry, options = {}) => {
   return item;
 };
 
+// 依目前的失聯數量，更新本頁清單上方的常駐提示。
+const updateOrphanNotice = () => {
+  const el = highlightPanelEls?.pageOrphanNotice;
+  if (!el) return;
+  if (orphanHighlightCount > 0) {
+    el.textContent = `⚠ 有 ${orphanHighlightCount} 筆標註找不到對應文字，可能是頁面內容已變動。`;
+    el.style.display = "block";
+  } else {
+    el.style.display = "none";
+  }
+};
+
 const renderPageEntries = (entries) => {
   const list = highlightPanelEls?.pageList;
   const placeholder = highlightPanelEls?.pagePlaceholder;
   if (!list || !placeholder) return;
+  updateOrphanNotice();
   highlightPanelState.currentEntries = entries;
   list.innerHTML = "";
   if (!entries.length) {
@@ -4355,6 +4368,11 @@ const ensureHighlightPanel = () => {
   aiNoteSection.appendChild(aiNoteContent);
   aiNoteSection.appendChild(aiNoteEmpty);
 
+  // 失聯（orphan）標註提示：重整後找不到對應文字時常駐顯示在本頁清單上方。
+  const pageOrphanNotice = document.createElement("div");
+  pageOrphanNotice.className = "hk-panel-orphan-notice";
+  pageOrphanNotice.style.display = "none";
+
   const pageList = document.createElement("div");
   pageList.className = "hk-panel-list hk-panel-page-list";
 
@@ -4603,6 +4621,7 @@ const ensureHighlightPanel = () => {
   panel.appendChild(aiCard);
   panel.appendChild(tabs);
   pageTabPanel.appendChild(aiNoteSection);
+  pageTabPanel.appendChild(pageOrphanNotice);
   pageTabPanel.appendChild(pageList);
   pageTabPanel.appendChild(pagePlaceholder);
   searchTabPanel.appendChild(searchControls);
@@ -4634,6 +4653,7 @@ const ensureHighlightPanel = () => {
     tabs,
     pageList,
     pagePlaceholder,
+    pageOrphanNotice,
     searchList,
     searchPlaceholder,
     searchInput,
@@ -6104,9 +6124,50 @@ const getStoredHighlights = async (key = pageKey) => {
   return existing[key] ?? [];
 };
 
+// 輕量 toast：固定在畫面底部、自動消失。用於把「存檔失敗」這類過去被
+// console.debug 默默吞掉的錯誤，明確告訴使用者。
+let hkToastTimer = null;
+const showHkToast = (message, { isError = false, duration = 4000 } = {}) => {
+  try {
+    let toast = document.getElementById("hk-toast");
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = "hk-toast";
+      toast.className = "hk-toast";
+      toast.setAttribute("role", "status");
+      toast.setAttribute("aria-live", "polite");
+      (document.body || document.documentElement).appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.toggle("is-error", isError);
+    toast.classList.add("is-visible");
+    if (hkToastTimer) window.clearTimeout(hkToastTimer);
+    hkToastTimer = window.setTimeout(() => {
+      toast.classList.remove("is-visible");
+    }, duration);
+  } catch (_e) {
+    /* 連 toast 都失敗就算了，不要再丟錯打斷流程 */
+  }
+};
+
+const isQuotaError = (error) => {
+  const msg = (error?.message || chrome.runtime?.lastError?.message || "").toLowerCase();
+  return msg.includes("quota") || msg.includes("exceeded");
+};
+
 const setStoredHighlights = async (highlights, key = pageKey) => {
   if (!storage) return;
-  await storage.set({ [key]: highlights });
+  try {
+    await storage.set({ [key]: highlights });
+  } catch (error) {
+    showHkToast(
+      isQuotaError(error)
+        ? "儲存空間不足，這筆標註可能沒存成功。請到「管理所有筆記」清理舊資料。"
+        : "標註儲存失敗，請重試。",
+      { isError: true }
+    );
+    throw error;
+  }
 };
 
 const getPageMeta = async () => {
@@ -6332,14 +6393,43 @@ const migrateLegacyPageData = () => {
   return legacyMigrationPromise;
 };
 
+// 重整後找不到對應文字（頁面改版／內容被移除）的標註數，給面板與提示用。
+let orphanHighlightCount = 0;
+let orphanNotified = false;
+const notifyOrphanHighlights = (orphanCount, total) => {
+  orphanHighlightCount = orphanCount;
+  updateOrphanNotice();
+  if (orphanNotified || orphanCount <= 0) return;
+  orphanNotified = true;
+  showHkToast(
+    `有 ${orphanCount} 筆標註找不到對應文字（頁面內容可能已變動），共 ${total} 筆。`,
+    { isError: true, duration: 6500 }
+  );
+};
+
 const attemptRestoreHighlights = async (attempt = 0) => {
   if (attempt === 0) await migrateLegacyPageData();
   await ensurePageMetaTitle(pageKey, document.title);
   const { total, visible } = await restoreHighlights();
-  if (!total) return;
-  if (visible >= total || attempt >= HIGHLIGHT_RETRY_DELAYS.length) return;
-  const nextDelay = HIGHLIGHT_RETRY_DELAYS[attempt] ?? 1200;
-  window.setTimeout(() => attemptRestoreHighlights(attempt + 1), nextDelay);
+  if (!total) {
+    orphanHighlightCount = 0;
+    updateOrphanNotice();
+    return;
+  }
+  if (visible >= total) {
+    // 全部還原成功（可能是這次或之前重試補上的）→ 清掉殘留的失聯狀態。
+    orphanHighlightCount = 0;
+    updateOrphanNotice();
+    return;
+  }
+  if (attempt < HIGHLIGHT_RETRY_DELAYS.length) {
+    // 還有重試額度：內容可能還在延遲載入，先別判定為失聯。
+    const nextDelay = HIGHLIGHT_RETRY_DELAYS[attempt] ?? 1200;
+    window.setTimeout(() => attemptRestoreHighlights(attempt + 1), nextDelay);
+    return;
+  }
+  // 重試用盡仍有缺 → 視為失聯，提示使用者。
+  notifyOrphanHighlights(total - visible, total);
 };
 
 const applyHighlight = async (color) => {
