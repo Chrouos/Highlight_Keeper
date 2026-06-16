@@ -283,6 +283,56 @@ body {
 }
 
 /* ── Page cards ───────────────────────────────────────── */
+/* ── 排序 / 標籤篩選控制列 ─────────────────────────────── */
+.hk-manager-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 4px 0 12px;
+}
+.hk-manager-sort-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #78716c;
+}
+.hk-manager-sort {
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid #e7e5e4;
+  border-radius: 8px;
+  background: #fff;
+  color: #1c1917;
+  cursor: pointer;
+}
+.hk-manager-tag-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hk-manager-filter-chip {
+  appearance: none;
+  border: 1px solid #e7e5e4;
+  border-radius: 999px;
+  background: #fff;
+  color: #57534e;
+  font-size: 12px;
+  padding: 3px 11px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.hk-manager-filter-chip:hover {
+  border-color: #d97706;
+  color: #d97706;
+}
+.hk-manager-filter-chip.is-active {
+  background: #d97706;
+  border-color: #d97706;
+  color: #fff;
+}
+
 .hk-manager-card {
   position: relative;
   border: 1.5px solid #f0ece4;
@@ -587,6 +637,32 @@ body {
   line-height: 1.6;
   font-size: 13px;
   color: #1c1917;
+}
+
+/* ── 心智圖 in detail ──────────────────────────────────── */
+.hk-manager-detail-mindmap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.hk-manager-detail-mindmap-head h4 {
+  margin: 0;
+}
+.hk-manager-detail-mindmap {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #292524;
+  background: #faf8f5;
+  border: 1px solid #f0ece4;
+  border-radius: 8px;
+  padding: 10px 12px;
+  max-height: 260px;
+  overflow: auto;
 }
 
 /* ── Tags in detail ───────────────────────────────────── */

@@ -104,6 +104,17 @@
           <h2>頁面清單</h2>
           <span id="pageCount" class="hk-manager-count"></span>
         </header>
+        <div class="hk-manager-controls">
+          <label class="hk-manager-sort-label">
+            排序
+            <select id="managerSort" class="hk-manager-sort">
+              <option value="updated">最後更新</option>
+              <option value="count">筆記數</option>
+              <option value="title">標題</option>
+            </select>
+          </label>
+          <div id="managerTagFilter" class="hk-manager-tag-filter"></div>
+        </div>
         <div id="pageList" class="hk-manager-list"></div>
       </section>
       <section id="managerStatus" class="hk-manager-status" role="status" aria-live="polite"></section>

@@ -17,6 +17,8 @@ const state = {
   notes: {},
   mindmaps: {},
   searchTerm: "",
+  sortBy: "updated",
+  activeTag: "",
 };
 let detailCurrentPageUrl = "";
 let githubSettings = { ...GITHUB_DEFAULT_SETTINGS };
@@ -28,6 +30,8 @@ const downloadBtn = document.getElementById("downloadAllBtn");
 const importInput = document.getElementById("bulkImportInput");
 const closeBtn = document.getElementById("closeManagerBtn");
 const searchInput = document.getElementById("managerSearch");
+const sortSelect = document.getElementById("managerSort");
+const tagFilterEl = document.getElementById("managerTagFilter");
 const githubTokenInput = document.getElementById("githubToken");
 const githubRepoInput = document.getElementById("githubRepo");
 const githubBranchInput = document.getElementById("githubBranch");
@@ -311,18 +315,77 @@ const matchesSearch = (page, term) => {
   return haystacks.some((text) => text.includes(normalized));
 };
 
+const sortPages = (pages) => {
+  const sorted = [...pages];
+  if (state.sortBy === "count") {
+    sorted.sort((a, b) => (b.total || 0) - (a.total || 0));
+  } else if (state.sortBy === "title") {
+    sorted.sort((a, b) =>
+      String(a.title).localeCompare(String(b.title), undefined, {
+        sensitivity: "base",
+      })
+    );
+  } else {
+    sorted.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+  return sorted;
+};
+
+// 收集所有頁面的標籤聯集，畫成可點選的篩選晶片。
+const renderTagFilter = () => {
+  if (!tagFilterEl) return;
+  const tagSet = new Set();
+  state.pages.forEach((page) => {
+    (Array.isArray(page.tags) ? page.tags : []).forEach((tag) => {
+      const trimmed = String(tag).trim();
+      if (trimmed) tagSet.add(trimmed);
+    });
+  });
+  tagFilterEl.innerHTML = "";
+  if (!tagSet.size) {
+    tagFilterEl.style.display = "none";
+    return;
+  }
+  tagFilterEl.style.display = "flex";
+  const makeChip = (label, value) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "hk-manager-filter-chip";
+    chip.textContent = label;
+    chip.classList.toggle("is-active", state.activeTag === value);
+    chip.addEventListener("click", () => {
+      state.activeTag = state.activeTag === value ? "" : value;
+      renderPageList();
+    });
+    return chip;
+  };
+  tagFilterEl.appendChild(makeChip("全部", ""));
+  Array.from(tagSet)
+    .sort((a, b) => a.localeCompare(b))
+    .forEach((tag) => tagFilterEl.appendChild(makeChip(tag, tag)));
+};
+
 const renderPageList = () => {
   if (!listEl || !pageCountEl) return;
   listEl.innerHTML = "";
-  const filtered = state.pages.filter((page) =>
+  renderTagFilter();
+  let filtered = state.pages.filter((page) =>
     matchesSearch(page, state.searchTerm)
   );
+  if (state.activeTag) {
+    filtered = filtered.filter(
+      (page) =>
+        Array.isArray(page.tags) && page.tags.includes(state.activeTag)
+    );
+  }
+  filtered = sortPages(filtered);
   pageCountEl.textContent = `共 ${filtered.length} 個頁面`;
   if (!filtered.length) {
     const empty = document.createElement("p");
-    empty.textContent = state.searchTerm
-      ? "沒有符合搜尋條件的頁面。"
-      : "目前尚未建立任何筆記。";
+    empty.textContent =
+      state.searchTerm || state.activeTag
+        ? "沒有符合條件的頁面。"
+        : "目前尚未建立任何筆記。";
     empty.className = "hk-manager-meta";
     listEl.appendChild(empty);
     return;
@@ -701,8 +764,30 @@ const ensureDetailOverlay = () => {
   aiSection.appendChild(aiTitle);
   aiSection.appendChild(aiContent);
 
+  const mindmapSection = document.createElement("section");
+  mindmapSection.className =
+    "hk-manager-detail-section hk-manager-detail-section-mindmap";
+  mindmapSection.id = "hk-manager-detail-mindmap";
+  const mindmapHead = document.createElement("div");
+  mindmapHead.className = "hk-manager-detail-mindmap-head";
+  const mindmapTitle = document.createElement("h4");
+  mindmapTitle.textContent = "心智圖";
+  const mindmapCopyBtn = document.createElement("button");
+  mindmapCopyBtn.type = "button";
+  mindmapCopyBtn.id = "hk-manager-detail-mindmap-copy";
+  mindmapCopyBtn.className = "hk-manager-btn hk-manager-btn-muted";
+  mindmapCopyBtn.textContent = "複製大綱";
+  mindmapHead.appendChild(mindmapTitle);
+  mindmapHead.appendChild(mindmapCopyBtn);
+  const mindmapContent = document.createElement("pre");
+  mindmapContent.id = "hk-manager-detail-mindmap-content";
+  mindmapContent.className = "hk-manager-detail-mindmap";
+  mindmapSection.appendChild(mindmapHead);
+  mindmapSection.appendChild(mindmapContent);
+
   body.appendChild(entriesSection);
   body.appendChild(aiSection);
+  body.appendChild(mindmapSection);
 
   dialog.appendChild(header);
   dialog.appendChild(body);
@@ -847,6 +932,36 @@ const renderPageDetail = (page) => {
   } else {
     aiContent.textContent = "尚未產生 AI 紀錄。";
     aiSection.style.display = "";
+  }
+
+  // 心智圖：有大綱才顯示這個區塊
+  const mindmapSection = overlay.querySelector("#hk-manager-detail-mindmap");
+  const mindmapContent = overlay.querySelector(
+    "#hk-manager-detail-mindmap-content"
+  );
+  const mindmapCopyBtn = overlay.querySelector(
+    "#hk-manager-detail-mindmap-copy"
+  );
+  if (mindmapSection && mindmapContent && mindmapCopyBtn) {
+    const outline = state.mindmaps?.[page.url]?.outline?.trim();
+    if (outline) {
+      mindmapSection.style.display = "";
+      mindmapContent.textContent = outline;
+      mindmapCopyBtn.disabled = false;
+      mindmapCopyBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(outline);
+          setStatus("已複製心智圖大綱");
+        } catch (error) {
+          console.debug("複製心智圖大綱失敗", error);
+          setStatus("複製失敗", true);
+        }
+      };
+    } else {
+      mindmapSection.style.display = "none";
+      mindmapContent.textContent = "";
+      mindmapCopyBtn.onclick = null;
+    }
   }
 };
 
@@ -1396,6 +1511,10 @@ const init = () => {
   });
   searchInput?.addEventListener("input", (event) => {
     state.searchTerm = event.target.value ?? "";
+    renderPageList();
+  });
+  sortSelect?.addEventListener("change", (event) => {
+    state.sortBy = event.target.value || "updated";
     renderPageList();
   });
   bindGithubInput(githubTokenInput, "token");
