@@ -44,6 +44,18 @@ const resolvePageKey = () => {
 
 const pageKey = resolvePageKey();
 
+// ── i18n（與 popup／manager 共用 i18n.js 的字典；manifest 已先注入 i18n.js） ──
+const HkI18n = typeof window !== "undefined" ? window.HkI18n : null;
+const t = (key, params) => (HkI18n ? HkI18n.t(key, params) : key);
+HkI18n?.initI18n?.();
+// 語言切換時：面板是用 JS textContent 直接建立的，整個重建最單純可靠
+// （面板狀態 highlightPanelState 另外保存，分頁/側邊不受影響）。
+HkI18n?.onLangChange?.(() => {
+  try {
+    rebuildHighlightPanelForLang?.();
+  } catch (_e) {}
+});
+
 const storage = chrome.storage?.local;
 const DEFAULT_COLOR = "#ffeb3b";
 const DEFAULT_PALETTE = [
@@ -711,11 +723,11 @@ const updateGenerateAvailability = () => {
   const hasRunningTask = isGeneratingNote || isAutoHighlighting || isChatGPTBridgeWaiting || previewData.length > 0;
   if (generateBtn) {
     generateBtn.disabled = hasRunningTask || !hasKey;
-    generateBtn.textContent = isGeneratingNote ? "產生中..." : "產生筆記";
+    generateBtn.textContent = isGeneratingNote ? t("panel.generating") : t("panel.generateNote");
   }
   if (autoHighlightBtn) {
     autoHighlightBtn.disabled = hasRunningTask || !hasKey;
-    autoHighlightBtn.textContent = isAutoHighlighting ? "標示中..." : "自動畫重點";
+    autoHighlightBtn.textContent = isAutoHighlighting ? t("panel.marking") : t("panel.autoHighlightBtn");
   }
   // 進階「用 API 直接產生」鈕：只有設定好 OpenAI/Gemini Key 時才顯示
   // （心智圖模式走複製貼上流程，不提供 direct）
@@ -784,7 +796,7 @@ const renderCategoryList = () => {
     nameInput.type = "text";
     nameInput.className = "hk-panel-ai-cat-name";
     nameInput.value = cat.name;
-    nameInput.placeholder = "分類名稱";
+    nameInput.placeholder = t("panel.categoryPlaceholder");
     nameInput.addEventListener("input", (e) => {
       aiSettings.categories[idx].name = e.target.value;
       schedulePersistAISettings();
@@ -1406,7 +1418,7 @@ const repairLlmJson = (text) => {
 
 const parseJsonFromModelResponse = (rawText) => {
   if (typeof rawText !== "string" || !rawText.trim()) {
-    throw new Error("AI 回傳內容為空");
+    throw new Error(t("ai.errResponseEmpty"));
   }
   const trimmed = rawText.trim();
   try {
@@ -1440,7 +1452,7 @@ const parseJsonFromModelResponse = (rawText) => {
   } catch (_error) {
     // fall through to throw
   }
-  throw new Error("AI 回傳不是有效 JSON");
+  throw new Error(t("ai.errInvalidJson"));
 };
 
 // Parse the non-JSON highlight format produced by the copy/paste flow:
@@ -1872,7 +1884,7 @@ const callOpenAI = async (key, prompt, options = {}) => {
   const json = await response.json();
   const text = json?.choices?.[0]?.message?.content;
   if (!text) {
-    throw new Error("OpenAI 回傳內容為空");
+    throw new Error(t("ai.errOpenaiEmpty"));
   }
   return text.trim();
 };
@@ -1922,7 +1934,7 @@ const callGemini = async (key, prompt, options = {}) => {
   const parts = json?.candidates?.[0]?.content?.parts;
   const text = parts?.map((part) => part.text).join("\n");
   if (!text) {
-    throw new Error("Gemini 回傳內容為空");
+    throw new Error(t("ai.errGeminiEmpty"));
   }
   return text.trim();
 };
@@ -1944,7 +1956,7 @@ const clearPageHighlights = async () => {
   document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach(unwrapHighlightElement);
   await setStoredHighlights([], pageKey);
   await refreshHighlightPanelIfVisible();
-  setAiPanelStatus("已清除本頁所有標記，可重新標記");
+  setAiPanelStatus(t("ai.statusClearedAndReady"));
 };
 
 const applyPreviewHighlight = (range, color, reason) => {
@@ -1984,12 +1996,12 @@ const showPreviewConfirmBar = (count) => {
     const confirmBtn = document.createElement("button");
     confirmBtn.type = "button";
     confirmBtn.className = "hk-preview-bar-confirm";
-    confirmBtn.textContent = "確認套用";
+    confirmBtn.textContent = t("panel.previewConfirm");
     confirmBtn.addEventListener("click", () => confirmPreviewHighlights());
     const cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
     cancelBtn.className = "hk-preview-bar-cancel";
-    cancelBtn.textContent = "取消";
+    cancelBtn.textContent = t("panel.previewCancel");
     cancelBtn.addEventListener("click", () => cancelPreviewHighlights());
     bar.appendChild(msg);
     bar.appendChild(confirmBtn);
@@ -2038,7 +2050,7 @@ const cancelPreviewHighlights = () => {
   hidePreviewConfirmBar();
   updateGenerateAvailability();
   toRemove.forEach((item) => unwrapHighlightElement(item.el));
-  setAiPanelStatus("已取消預覽");
+  setAiPanelStatus(t("ai.statusPreviewCancelled"));
 };
 
 const cancelChatGPTBridge = async () => {
@@ -2054,7 +2066,7 @@ const launchChatGPTBridge = async (type) => {
   if (isChatGPTBridgeWaiting) return;
   isChatGPTBridgeWaiting = true;
   updateGenerateAvailability();
-  setAiPanelStatus("準備中…");
+  setAiPanelStatus(t("ai.statusPreparing"));
   try {
     const pageData = {
       title: document.title,
@@ -2079,11 +2091,11 @@ const launchChatGPTBridge = async (type) => {
       await navigator.clipboard.writeText(prompt);
     } catch (_e) {}
     window.open("https://chatgpt.com/", "_blank");
-    setAiPanelStatus("已開啟 ChatGPT，請在跳出的頁面點「複製 Prompt」並送出");
+    setAiPanelStatus(t("ai.statusChatgptOpened"));
   } catch (error) {
     isChatGPTBridgeWaiting = false;
     updateGenerateAvailability();
-    setAiPanelStatus(error?.message || "無法啟動 ChatGPT 橋接", true);
+    setAiPanelStatus(error?.message || t("ai.errChatgptBridge"), true);
   }
 };
 
@@ -2121,7 +2133,7 @@ const applyHighlightResponseText = async (text) => {
     tasks,
     usePreview
   );
-  if (!appliedCount) throw new Error("找不到可標註的文字");
+  if (!appliedCount) throw new Error(t("ai.errNoMatchingText"));
   const previewing = usePreview && previewData.length > 0;
   if (previewing) {
     showPreviewConfirmBar(previewData.length);
@@ -2176,7 +2188,7 @@ const handleChatGPTResponse = async (responseData) => {
 
     let result = null;
     if (highlightText) {
-      setAiPanelStatus("套用重點中…");
+      setAiPanelStatus(t("ai.statusApplyingHighlights"));
       result = await applyHighlightResponseText(highlightText);
     }
     if (noteText) {
@@ -2200,7 +2212,7 @@ const handleChatGPTResponse = async (responseData) => {
       setAiPanelStatus("摘要筆記已匯入");
     }
   } catch (error) {
-    setAiPanelStatus(error?.message || "匯入失敗", true);
+    setAiPanelStatus(error?.message || t("ai.errImport"), true);
   }
 };
 
@@ -2216,7 +2228,7 @@ const handleGenerateAiNote = async () => {
       : aiSettings.geminiKey?.trim();
 
   if (!apiKey) {
-    setAiPanelStatus("請先輸入 API Key", true);
+    setAiPanelStatus(t("ai.errNoApiKey"), true);
     updateGenerateAvailability();
     return;
   }
@@ -2224,7 +2236,7 @@ const handleGenerateAiNote = async () => {
   try {
     isGeneratingNote = true;
     updateGenerateAvailability();
-    setAiPanelStatus("產生筆記中…");
+    setAiPanelStatus(t("ai.statusGeneratingNote"));
     const pageData = {
       title: document.title,
       url: pageKey,
@@ -2257,10 +2269,10 @@ const handleGenerateAiNote = async () => {
     applyHighlightPanelTabState();
     await saveGeneratedNote(pageData.url, notePayload);
     updateAiNoteSection(notePayload);
-    setAiPanelStatus("已完成筆記產生");
+    setAiPanelStatus(t("ai.statusNoteDone"));
   } catch (error) {
     console.debug("產生 AI 筆記失敗", error);
-    setAiPanelStatus(error?.message || "無法產生筆記", true);
+    setAiPanelStatus(error?.message || t("ai.errGenerateNote"), true);
   } finally {
     isGeneratingNote = false;
     updateGenerateAvailability();
@@ -2281,7 +2293,7 @@ const handleGenerateAiHighlights = async () => {
       : aiSettings.geminiKey?.trim();
 
   if (!apiKey) {
-    setAiPanelStatus("請先輸入 API Key", true);
+    setAiPanelStatus(t("ai.errNoApiKey"), true);
     updateGenerateAvailability();
     return;
   }
@@ -2289,7 +2301,7 @@ const handleGenerateAiHighlights = async () => {
   try {
     isAutoHighlighting = true;
     updateGenerateAvailability();
-    setAiPanelStatus("分析重點中…");
+    setAiPanelStatus(t("ai.statusAnalyzing"));
 
     let scopedText = getPagePlainText();
     if (aiSettings.selectionOnly) {
@@ -2297,7 +2309,7 @@ const handleGenerateAiHighlights = async () => {
       if (selText) {
         scopedText = selText;
       } else {
-        setAiPanelStatus("未選取文字，改為分析整頁");
+        setAiPanelStatus(t("ai.statusFallbackWholePage"));
       }
     }
 
@@ -2322,7 +2334,7 @@ const handleGenerateAiHighlights = async () => {
     const parsedPayload = parseJsonFromModelResponse(rawResponse);
     const tasks = normalizeAutoHighlightItems(parsedPayload, preferredPalette);
     if (!tasks.length) {
-      throw new Error("AI 沒有回傳可用的重點項目");
+      throw new Error(t("ai.errNoUsableItems"));
     }
 
     const usePreview = aiSettings.usePreview;
@@ -2332,7 +2344,7 @@ const handleGenerateAiHighlights = async () => {
     );
 
     if (!appliedCount) {
-      throw new Error("找不到可標註的文字，請調整 Prompt 後再試");
+      throw new Error(t("ai.errNoMatchAdjust"));
     }
 
     if (usePreview && previewData.length) {
@@ -2349,7 +2361,7 @@ const handleGenerateAiHighlights = async () => {
     }
   } catch (error) {
     console.debug("AI 自動畫重點失敗", error);
-    setAiPanelStatus(error?.message || "無法自動畫重點", true);
+    setAiPanelStatus(error?.message || t("ai.errAutoHighlight"), true);
   } finally {
     isAutoHighlighting = false;
     updateGenerateAvailability();
@@ -2729,7 +2741,7 @@ const updateHighlightPanelTagFilters = () => {
   if (!highlightPanelState.allTags.length) {
     const hint = document.createElement("span");
     hint.className = "hk-panel-tags-empty";
-    hint.textContent = "尚未建立標籤";
+    hint.textContent = t("panel.tagsEmpty");
     container.appendChild(hint);
     return;
   }
@@ -2737,7 +2749,7 @@ const updateHighlightPanelTagFilters = () => {
   const clearBtn = document.createElement("button");
   clearBtn.type = "button";
   clearBtn.className = "hk-panel-tag-chip hk-panel-tag-clear";
-  clearBtn.textContent = "全部";
+  clearBtn.textContent = t("panel.tagsAll");
   clearBtn.classList.toggle("is-active", !highlightPanelState.activeTag);
   clearBtn.addEventListener("click", () => {
     highlightPanelState.activeTag = null;
@@ -2890,12 +2902,12 @@ const deleteHighlightFromPanel = async (entry) => {
         unwrapHighlightElement(targetEl);
       }
     }
-    setPanelStatus("已刪除標註");
+    setPanelStatus(t("ai.statusHighlightDeleted"));
     await refreshHighlightPanelData();
     await renderHighlightPanel();
   } catch (error) {
     console.debug("刪除標註失敗", error);
-    setPanelStatus("刪除失敗", true);
+    setPanelStatus(t("ai.errDeleteHighlight"), true);
   }
 };
 
@@ -2973,7 +2985,7 @@ const updateAiNoteSection = (noteData) => {
       : modelLabel;
     aiNoteMeta.textContent = generatedLabel;
     aiNoteCopyBtn.disabled = false;
-    aiNoteCopyBtn.textContent = "複製";
+    aiNoteCopyBtn.textContent = t("panel.aiNotesCopy");
     aiNoteCopyBtn.onclick = async () => {
       if (aiNoteCopyBtn._hkResetTimer) {
         window.clearTimeout(aiNoteCopyBtn._hkResetTimer);
@@ -2981,28 +2993,29 @@ const updateAiNoteSection = (noteData) => {
       }
       try {
         await navigator.clipboard.writeText(displayNote);
-        aiNoteCopyBtn.textContent = "已複製";
+        aiNoteCopyBtn.textContent = t("panel.aiNotesCopied");
       } catch (error) {
         console.debug("複製 AI 筆記失敗", error);
-        aiNoteCopyBtn.textContent = "複製失敗";
+        aiNoteCopyBtn.textContent = t("panel.aiNotesCopyFail");
         aiNoteCopyBtn.classList.add("is-error");
       } finally {
         aiNoteCopyBtn._hkResetTimer = window.setTimeout(() => {
-          aiNoteCopyBtn.textContent = "複製";
+          aiNoteCopyBtn.textContent = t("panel.aiNotesCopy");
           aiNoteCopyBtn.classList.remove("is-error");
           aiNoteCopyBtn._hkResetTimer = null;
         }, 1800);
       }
     };
   } else {
-    aiNoteSection.style.display = "none";
+    // 常駐顯示：沒有摘要時改顯示提示，而非整張卡片隱藏。
+    aiNoteSection.style.display = "flex";
     aiNoteContent.textContent = "";
     aiNoteContent.style.display = "none";
     aiNoteEmpty.style.display = "block";
     aiNoteMeta.textContent = "";
     aiNoteCopyBtn.disabled = true;
     aiNoteCopyBtn.onclick = null;
-    aiNoteCopyBtn.textContent = "複製";
+    aiNoteCopyBtn.textContent = t("panel.aiNotesCopy");
   }
 };
 
@@ -3042,7 +3055,7 @@ const buildHighlightExportEntry = (entry) => {
 const exportHighlights = async (mode) => {
   const entries = getCurrentPanelEntries();
   if (!entries.length) {
-    setPanelStatus("沒有可匯出的標註", true);
+    setPanelStatus(t("ai.errNoHighlightExport"), true);
     return;
   }
   const lines = entries.map(({ text, note }) => {
@@ -3055,10 +3068,10 @@ const exportHighlights = async (mode) => {
   if (mode === "copy" && navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(payloadText);
-      setPanelStatus("已複製純文字");
+      setPanelStatus(t("ai.statusTextCopied"));
     } catch (error) {
       console.debug("複製標註失敗", error);
-      setPanelStatus("複製失敗", true);
+      setPanelStatus(t("ai.errTextCopy"), true);
     }
     return;
   }
@@ -3067,7 +3080,7 @@ const exportHighlights = async (mode) => {
     .map((entry) => buildHighlightExportEntry(entry))
     .filter(Boolean);
   if (!exportEntries.length) {
-    setPanelStatus("沒有可匯出的標註", true);
+    setPanelStatus(t("ai.errNoHighlightExport"), true);
     return;
   }
   const payload = {
@@ -3091,7 +3104,7 @@ const exportHighlights = async (mode) => {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
-  setPanelStatus("已下載 JSON");
+  setPanelStatus(t("ai.statusJsonDownloaded"));
 };
 
 const parseImportedHighlightsPayload = (rawText) => {
@@ -3099,7 +3112,7 @@ const parseImportedHighlightsPayload = (rawText) => {
   try {
     parsed = JSON.parse(rawText);
   } catch (_error) {
-    throw new Error("JSON 格式不正確");
+    throw new Error(t("ai.errJsonInvalid"));
   }
   if (Array.isArray(parsed)) return parsed;
   if (parsed && Array.isArray(parsed.entries)) return parsed.entries;
@@ -3194,12 +3207,12 @@ const normalizeImportedHighlightEntry = (entry, index) => {
 };
 
 const importHighlightsFromEntries = async (rawEntries) => {
-  if (!storage) throw new Error("無法存取瀏覽器儲存空間");
+  if (!storage) throw new Error(t("ai.errStorageAccess"));
   const normalized = rawEntries
     .map((entry, index) => normalizeImportedHighlightEntry(entry, index))
     .filter(Boolean);
   if (!normalized.length) {
-    throw new Error("沒有可匯入的標註");
+    throw new Error(t("ai.errNoHighlightImport"));
   }
   const grouped = new Map();
   normalized.forEach((entry) => {
@@ -3246,7 +3259,7 @@ const handleImportFileChange = async (event) => {
     const text = await file.text();
     const rawEntries = parseImportedHighlightsPayload(text);
     if (!rawEntries.length) {
-      throw new Error("檔案中沒有標註資料");
+      throw new Error(t("ai.errNoHighlightInFile"));
     }
     const importedCount = await importHighlightsFromEntries(rawEntries);
     setPanelStatus(`已匯入 ${importedCount} 則標註`);
@@ -3255,7 +3268,7 @@ const handleImportFileChange = async (event) => {
     attemptRestoreHighlights();
   } catch (error) {
     console.debug("匯入標註失敗", error);
-    setPanelStatus(error.message || "匯入失敗", true);
+    setPanelStatus(error.message || t("ai.errImportFailed"), true);
   } finally {
     event.target.value = "";
   }
@@ -3282,7 +3295,7 @@ const renderPageTagEditor = async () => {
 
   tagInput.disabled = false;
   addTagBtn.disabled = false;
-  pageTagHint.textContent = "輸入後按 Enter 或按新增；點擊標籤可移除";
+  pageTagHint.textContent = t("panel.tagInputHint");
 
   pageTagList.innerHTML = "";
   pageTagList.classList.remove("is-disabled");
@@ -3290,7 +3303,7 @@ const renderPageTagEditor = async () => {
   if (!currentPageTags.length) {
     const empty = document.createElement("span");
     empty.className = "hk-panel-tags-empty";
-    empty.textContent = "尚未為此頁設定標籤";
+    empty.textContent = t("panel.tagEmptyState");
     pageTagList.appendChild(empty);
   } else {
     currentPageTags.forEach((tag) => {
@@ -3298,7 +3311,7 @@ const renderPageTagEditor = async () => {
       chip.type = "button";
       chip.className = "hk-panel-tag-chip";
       chip.textContent = tag;
-      chip.title = "移除此標籤";
+      chip.title = t("panel.tagRemoveTitle");
       chip.addEventListener("click", async () => {
         const nextTags = currentPageTags.filter((item) => item !== tag);
         await setPageTags(activeKey, nextTags);
@@ -3712,7 +3725,7 @@ const ensureHighlightPanel = () => {
 
   const title = document.createElement("h2");
   title.className = "hk-panel-title";
-  title.textContent = "此頁標註";
+  title.textContent = t("panel.title");
 
   // Font controls live in the settings drawer now
   const fontControls = document.createElement("div");
@@ -3774,7 +3787,7 @@ const ensureHighlightPanel = () => {
   pageTabBtn.id = "hk-panel-tab-page";
   pageTabBtn.setAttribute("role", "tab");
   pageTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-page");
-  pageTabBtn.textContent = "本頁";
+  pageTabBtn.textContent = t("panel.tabPage");
   pageTabBtn.addEventListener("click", () => {
     if (highlightPanelState.activeTab === "page") return;
     highlightPanelState.activeTab = "page";
@@ -3791,7 +3804,7 @@ const ensureHighlightPanel = () => {
   archiveTabBtn.setAttribute("role", "tab");
   archiveTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-archive");
   archiveTabBtn.dataset.tabLegacy = "1";
-  archiveTabBtn.textContent = "存檔";
+  archiveTabBtn.textContent = t("panel.tabArchive");
   archiveTabBtn.addEventListener("click", () => {
     if (highlightPanelState.activeTab === "archive") return;
     highlightPanelState.activeTab = "archive";
@@ -3807,7 +3820,7 @@ const ensureHighlightPanel = () => {
   searchTabBtn.id = "hk-panel-tab-search";
   searchTabBtn.setAttribute("role", "tab");
   searchTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-search");
-  searchTabBtn.textContent = "全部";
+  searchTabBtn.textContent = t("panel.tagsAll");
   searchTabBtn.addEventListener("click", () => {
     if (highlightPanelState.activeTab === "search") return;
     highlightPanelState.activeTab = "search";
@@ -3824,7 +3837,7 @@ const ensureHighlightPanel = () => {
   aiTabBtn.setAttribute("role", "tab");
   aiTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-ai-note");
   aiTabBtn.dataset.tabLegacy = "1";
-  aiTabBtn.textContent = "AI 筆記";
+  aiTabBtn.textContent = t("panel.tabAiNote");
   aiTabBtn.addEventListener("click", () => {
     if (highlightPanelState.activeTab === "ai-note") return;
     highlightPanelState.activeTab = "ai-note";
@@ -3868,11 +3881,11 @@ const ensureHighlightPanel = () => {
 
   const searchWrapper = document.createElement("label");
   searchWrapper.className = "hk-panel-search";
-  searchWrapper.textContent = "搜尋筆記";
+  searchWrapper.textContent = t("panel.searchHeader");
   const searchInput = document.createElement("input");
   searchInput.type = "search";
   searchInput.className = "hk-panel-search-input";
-  searchInput.placeholder = "輸入關鍵字或標籤";
+  searchInput.placeholder = t("panel.searchPlaceholder");
   let searchDebounceTimer = null;
   searchInput.addEventListener("input", (event) => {
     highlightPanelState.searchTerm = event.target.value ?? "";
@@ -3912,10 +3925,10 @@ const ensureHighlightPanel = () => {
   const clearPageBtn = document.createElement("button");
   clearPageBtn.type = "button";
   clearPageBtn.className = "hk-panel-clear-page-btn";
-  clearPageBtn.textContent = "清除本頁標記";
-  clearPageBtn.title = "刪除此頁所有標記，可重新 AI 標示";
+  clearPageBtn.textContent = t("panel.clearPage");
+  clearPageBtn.title = t("panel.clearPageTitle");
   clearPageBtn.addEventListener("click", async () => {
-    if (!window.confirm("確定要刪除本頁所有標記嗎？")) return;
+    if (!window.confirm(t("panel.clearConfirm"))) return;
     await clearPageHighlights();
   });
   pageTagSection.appendChild(clearPageBtn);
@@ -3925,16 +3938,16 @@ const ensureHighlightPanel = () => {
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className = "hk-panel-export-btn";
-  copyBtn.textContent = "複製內容";
+  copyBtn.textContent = t("panel.copyContent");
   copyBtn.addEventListener("click", () => exportHighlights("copy"));
   const downloadBtn = document.createElement("button");
   downloadBtn.type = "button";
   downloadBtn.className = "hk-panel-export-btn";
-  downloadBtn.textContent = "下載 JSON";
+  downloadBtn.textContent = t("panel.downloadJson");
   downloadBtn.addEventListener("click", () => exportHighlights("download"));
   const importLabel = document.createElement("label");
   importLabel.className = "hk-panel-export-btn hk-panel-import-label";
-  importLabel.textContent = "匯入 JSON";
+  importLabel.textContent = t("panel.importJson");
   exportActions.appendChild(copyBtn);
   exportActions.appendChild(downloadBtn);
   exportActions.appendChild(importLabel);
@@ -3991,22 +4004,22 @@ const ensureHighlightPanel = () => {
   pageArchiveSection.className = "hk-panel-archive";
   const pageArchiveHint = document.createElement("p");
   pageArchiveHint.className = "hk-panel-archive-hint";
-  pageArchiveHint.textContent = "本頁筆記";
+  pageArchiveHint.textContent = t("panel.archivePageHint");
   const pageArchiveActions = document.createElement("div");
   pageArchiveActions.className = "hk-panel-archive-actions";
   const archiveCopyBtn = document.createElement("button");
   archiveCopyBtn.type = "button";
   archiveCopyBtn.className = "hk-panel-export-btn";
-  archiveCopyBtn.textContent = "複製文字";
+  archiveCopyBtn.textContent = t("panel.archiveCopy");
   archiveCopyBtn.addEventListener("click", () => exportHighlights("copy"));
   const archiveDownloadBtn = document.createElement("button");
   archiveDownloadBtn.type = "button";
   archiveDownloadBtn.className = "hk-panel-export-btn";
-  archiveDownloadBtn.textContent = "下載 JSON";
+  archiveDownloadBtn.textContent = t("panel.archiveDownload");
   archiveDownloadBtn.addEventListener("click", () => exportHighlights("download"));
   const archiveImportLabel = document.createElement("label");
   archiveImportLabel.className = "hk-panel-export-btn hk-panel-import-label";
-  archiveImportLabel.textContent = "匯入 JSON";
+  archiveImportLabel.textContent = t("panel.archiveImport");
   const archiveImportInput = document.createElement("input");
   archiveImportInput.type = "file";
   archiveImportInput.accept = "application/json";
@@ -4023,17 +4036,17 @@ const ensureHighlightPanel = () => {
   archiveSection.className = "hk-panel-archive";
   const archiveHint = document.createElement("p");
   archiveHint.className = "hk-panel-archive-hint";
-  archiveHint.textContent = "全部筆記";
+  archiveHint.textContent = t("panel.archiveAllHint");
   const archiveButtons = document.createElement("div");
   archiveButtons.className = "hk-panel-archive-actions";
   const archiveAllDownloadBtn = document.createElement("button");
   archiveAllDownloadBtn.type = "button";
   archiveAllDownloadBtn.className = "hk-panel-export-btn";
-  archiveAllDownloadBtn.textContent = "下載全部筆記";
+  archiveAllDownloadBtn.textContent = t("panel.archiveAllDownload");
   archiveAllDownloadBtn.addEventListener("click", handleDownloadAllHighlights);
   const archiveAllImportLabel = document.createElement("label");
   archiveAllImportLabel.className = "hk-panel-export-btn hk-panel-import-label";
-  archiveAllImportLabel.textContent = "匯入全部筆記";
+  archiveAllImportLabel.textContent = t("panel.archiveAllImport");
   const archiveAllImportInput = document.createElement("input");
   archiveAllImportInput.type = "file";
   archiveAllImportInput.accept = "application/json";
@@ -4069,7 +4082,7 @@ const ensureHighlightPanel = () => {
   providerLabel.className = "hk-panel-ai-label";
   const providerSelectId = "hk-panel-ai-provider";
   providerLabel.setAttribute("for", providerSelectId);
-  providerLabel.textContent = "服務提供者";
+  providerLabel.textContent = t("panel.providerLabel");
   const aiProviderSelect = document.createElement("select");
   aiProviderSelect.id = providerSelectId;
   aiProviderSelect.className = "hk-panel-ai-select";
@@ -4093,7 +4106,7 @@ const ensureHighlightPanel = () => {
   const modelSelectId = "hk-panel-ai-model";
   modelLabel.setAttribute("for", modelSelectId);
   modelLabel.className = "hk-panel-ai-label";
-  modelLabel.textContent = "模型";
+  modelLabel.textContent = t("panel.modelLabel");
   const aiModelSelect = document.createElement("select");
   aiModelSelect.id = modelSelectId;
   aiModelSelect.className = "hk-panel-ai-select";
@@ -4143,11 +4156,11 @@ const ensureHighlightPanel = () => {
   chatgptGroup.dataset.provider = "chatgpt";
   const chatgptInfo = document.createElement("p");
   chatgptInfo.className = "hk-panel-ai-chatgpt-info";
-  chatgptInfo.textContent = "無需 API Key。點擊功能按鈕後，Prompt 會自動複製到剪貼簿並開啟 ChatGPT。取得回應後貼入各區塊下方即可套用。";
+  chatgptInfo.textContent = t("panel.chatgptInfo");
   const chatgptCancelBtn = document.createElement("button");
   chatgptCancelBtn.type = "button";
   chatgptCancelBtn.className = "hk-panel-ai-chatgpt-cancel";
-  chatgptCancelBtn.textContent = "取消等待";
+  chatgptCancelBtn.textContent = t("panel.chatgptCancel");
   chatgptCancelBtn.hidden = true;
   chatgptCancelBtn.addEventListener("click", () => cancelChatGPTBridge());
   chatgptGroup.appendChild(chatgptInfo);
@@ -4175,10 +4188,10 @@ const ensureHighlightPanel = () => {
   aiHlHead.className = "hk-panel-ai-block-head";
   const aiHlTitle = document.createElement("span");
   aiHlTitle.className = "hk-panel-ai-block-title";
-  aiHlTitle.textContent = "自動畫重點";
+  aiHlTitle.textContent = t("panel.autoHighlightTitle");
   const aiHlDesc = document.createElement("p");
   aiHlDesc.className = "hk-panel-ai-block-desc";
-  aiHlDesc.textContent = "AI 分析頁面內容，自動找出重要段落並套上顏色標記";
+  aiHlDesc.textContent = t("panel.autoHighlightDesc");
   aiHlHead.appendChild(aiHlTitle);
   aiHlHead.appendChild(aiHlDesc);
 
@@ -4199,20 +4212,20 @@ const ensureHighlightPanel = () => {
   const aiAutoHighlightBtn = document.createElement("button");
   aiAutoHighlightBtn.type = "button";
   aiAutoHighlightBtn.className = "hk-panel-ai-generate hk-panel-ai-auto-highlight";
-  aiAutoHighlightBtn.textContent = "自動畫重點";
+  aiAutoHighlightBtn.textContent = t("panel.autoHighlightBtn");
 
   // ChatGPT manual paste for highlight
   const chatgptHlPasteArea = document.createElement("textarea");
   chatgptHlPasteArea.className = "hk-panel-ai-textarea hk-panel-ai-chatgpt-paste-area";
   chatgptHlPasteArea.rows = 3;
-  chatgptHlPasteArea.placeholder = "貼上 ChatGPT 回應後點「套用重點」…";
+  chatgptHlPasteArea.placeholder = t("panel.chatgptPasteHl");
   const chatgptHlApplyBtn = document.createElement("button");
   chatgptHlApplyBtn.type = "button";
   chatgptHlApplyBtn.className = "hk-panel-ai-chatgpt-apply-btn";
-  chatgptHlApplyBtn.textContent = "套用重點";
+  chatgptHlApplyBtn.textContent = t("panel.applyHighlights");
   chatgptHlApplyBtn.addEventListener("click", () => {
     const text = chatgptHlPasteArea.value.trim();
-    if (!text) { setAiPanelStatus("請先貼上 ChatGPT 回應", true); return; }
+    if (!text) { setAiPanelStatus(t("ai.pasteFirst"), true); return; }
     handleChatGPTResponse({ requestId: "manual", type: "highlight", text, sourceUrl: pageKey });
     chatgptHlPasteArea.value = "";
   });
@@ -4222,13 +4235,13 @@ const ensureHighlightPanel = () => {
   catField.className = "hk-panel-ai-field";
   const catLabel = document.createElement("label");
   catLabel.className = "hk-panel-ai-label";
-  catLabel.textContent = "標記分類";
+  catLabel.textContent = t("panel.categoryLabel");
   const catList = document.createElement("div");
   catList.className = "hk-panel-ai-cat-list";
   const catAddBtn = document.createElement("button");
   catAddBtn.type = "button";
   catAddBtn.className = "hk-panel-ai-cat-add";
-  catAddBtn.textContent = "+ 新增分類";
+  catAddBtn.textContent = t("panel.addCategory");
   catAddBtn.addEventListener("click", () => {
     if (!Array.isArray(aiSettings.categories)) aiSettings.categories = [];
     aiSettings.categories.push({ name: "新分類", color: "#a8a8a8" });
@@ -4238,7 +4251,7 @@ const ensureHighlightPanel = () => {
   const catResetBtn = document.createElement("button");
   catResetBtn.type = "button";
   catResetBtn.className = "hk-panel-ai-cat-reset";
-  catResetBtn.textContent = "重置為預設分類";
+  catResetBtn.textContent = t("panel.resetCategories");
   catResetBtn.addEventListener("click", () => {
     aiSettings.categories = [...DEFAULT_AI_CATEGORIES];
     persistAISettings();
@@ -4292,10 +4305,10 @@ const ensureHighlightPanel = () => {
   aiNoteGenHead.className = "hk-panel-ai-block-head";
   const aiNoteGenTitle = document.createElement("span");
   aiNoteGenTitle.className = "hk-panel-ai-block-title";
-  aiNoteGenTitle.textContent = "AI 摘要筆記";
+  aiNoteGenTitle.textContent = t("panel.noteSummaryTitle");
   const aiNoteGenDesc = document.createElement("p");
   aiNoteGenDesc.className = "hk-panel-ai-block-desc";
-  aiNoteGenDesc.textContent = "整篇文章的大致摘要，整理成有脈絡的筆記";
+  aiNoteGenDesc.textContent = t("panel.noteSummaryDesc");
   aiNoteGenHead.appendChild(aiNoteGenTitle);
   aiNoteGenHead.appendChild(aiNoteGenDesc);
 
@@ -4316,20 +4329,20 @@ const ensureHighlightPanel = () => {
   const aiGenerateBtn = document.createElement("button");
   aiGenerateBtn.type = "button";
   aiGenerateBtn.className = "hk-panel-ai-generate";
-  aiGenerateBtn.textContent = "產生筆記";
+  aiGenerateBtn.textContent = t("panel.generateNote");
 
   // ChatGPT manual paste for note
   const chatgptNotePasteArea = document.createElement("textarea");
   chatgptNotePasteArea.className = "hk-panel-ai-textarea hk-panel-ai-chatgpt-paste-area";
   chatgptNotePasteArea.rows = 3;
-  chatgptNotePasteArea.placeholder = "貼上 ChatGPT 回應後點「套用筆記」…";
+  chatgptNotePasteArea.placeholder = t("panel.chatgptPasteNote");
   const chatgptNoteApplyBtn = document.createElement("button");
   chatgptNoteApplyBtn.type = "button";
   chatgptNoteApplyBtn.className = "hk-panel-ai-chatgpt-apply-btn";
-  chatgptNoteApplyBtn.textContent = "套用筆記";
+  chatgptNoteApplyBtn.textContent = t("panel.applyNote");
   chatgptNoteApplyBtn.addEventListener("click", () => {
     const text = chatgptNotePasteArea.value.trim();
-    if (!text) { setAiPanelStatus("請先貼上 ChatGPT 回應", true); return; }
+    if (!text) { setAiPanelStatus(t("ai.pasteFirst"), true); return; }
     handleChatGPTResponse({ requestId: "manual", type: "note", text, sourceUrl: pageKey });
     chatgptNotePasteArea.value = "";
   });
@@ -4341,32 +4354,49 @@ const ensureHighlightPanel = () => {
   aiNoteGenBlock.appendChild(chatgptNoteApplyBtn);
   aiSettingsSection.appendChild(aiNoteGenBlock);
 
+  // 摘要卡：常駐在本頁頂部、可一鍵收合，讓人隨時快速看整頁摘要。
   const aiNoteSection = document.createElement("section");
   aiNoteSection.className = "hk-panel-ai-note";
   const aiNoteHeader = document.createElement("div");
   aiNoteHeader.className = "hk-panel-ai-note-header";
+  const aiNoteToggle = document.createElement("button");
+  aiNoteToggle.type = "button";
+  aiNoteToggle.className = "hk-panel-ai-note-toggle";
+  aiNoteToggle.setAttribute("aria-label", t("panel.toggleSummary"));
+  aiNoteToggle.textContent = "▾";
   const aiNoteTitle = document.createElement("span");
   aiNoteTitle.className = "hk-panel-ai-note-title";
-  aiNoteTitle.textContent = "AI 筆記";
+  aiNoteTitle.textContent = t("panel.aiNotesTitle");
+  aiNoteTitle.style.cursor = "pointer";
   const aiNoteMeta = document.createElement("span");
   aiNoteMeta.className = "hk-panel-ai-note-meta";
   const aiNoteCopyBtn = document.createElement("button");
   aiNoteCopyBtn.type = "button";
   aiNoteCopyBtn.className = "hk-panel-ai-note-copy";
-  aiNoteCopyBtn.textContent = "複製";
+  aiNoteCopyBtn.textContent = t("panel.aiNotesCopy");
   aiNoteCopyBtn.disabled = true;
+  aiNoteHeader.appendChild(aiNoteToggle);
   aiNoteHeader.appendChild(aiNoteTitle);
   aiNoteHeader.appendChild(aiNoteMeta);
   aiNoteHeader.appendChild(aiNoteCopyBtn);
+  const aiNoteBody = document.createElement("div");
+  aiNoteBody.className = "hk-panel-ai-note-body";
   const aiNoteContent = document.createElement("pre");
   aiNoteContent.className = "hk-panel-ai-note-content";
   aiNoteContent.textContent = "";
   const aiNoteEmpty = document.createElement("div");
   aiNoteEmpty.className = "hk-panel-ai-note-empty";
-  aiNoteEmpty.textContent = "尚未產生筆記。";
+  aiNoteEmpty.textContent = t("panel.emptyNote");
+  aiNoteBody.appendChild(aiNoteContent);
+  aiNoteBody.appendChild(aiNoteEmpty);
   aiNoteSection.appendChild(aiNoteHeader);
-  aiNoteSection.appendChild(aiNoteContent);
-  aiNoteSection.appendChild(aiNoteEmpty);
+  aiNoteSection.appendChild(aiNoteBody);
+  const toggleSummaryCard = () => {
+    const collapsed = aiNoteSection.classList.toggle("is-collapsed");
+    aiNoteToggle.textContent = collapsed ? "▸" : "▾";
+  };
+  aiNoteToggle.addEventListener("click", toggleSummaryCard);
+  aiNoteTitle.addEventListener("click", toggleSummaryCard);
 
   // 失聯（orphan）標註提示：重整後找不到對應文字時常駐顯示在本頁清單上方。
   const pageOrphanNotice = document.createElement("div");
@@ -4378,14 +4408,14 @@ const ensureHighlightPanel = () => {
 
   const pagePlaceholder = document.createElement("p");
   pagePlaceholder.className = "hk-panel-placeholder";
-  pagePlaceholder.textContent = "本頁尚未建立標註。";
+  pagePlaceholder.textContent = t("panel.emptyPage");
 
   const searchList = document.createElement("div");
   searchList.className = "hk-panel-list hk-panel-search-list";
 
   const searchPlaceholder = document.createElement("p");
   searchPlaceholder.className = "hk-panel-placeholder";
-  searchPlaceholder.textContent = "目前沒有符合的筆記。";
+  searchPlaceholder.textContent = t("panel.emptySearch");
 
   // ── AI 工作流卡片（最外層）：① 複製 Prompt → ② 貼回即套用 ──
   // 單一流程：一個 Prompt 同時取得整頁重點與摘要筆記。
@@ -4453,6 +4483,21 @@ const ensureHighlightPanel = () => {
   actionGuidedReadingBtn.className = "hk-ai-secondary hk-ai-guided";
   actionGuidedReadingBtn.textContent = "▷ 指引閱讀";
   actionGuidedReadingBtn.addEventListener("click", () => startGuidedReading());
+
+  // 一鍵清除本頁標記（從設定抽屜拉到面板明顯處）
+  const aiClearPageBtn = document.createElement("button");
+  aiClearPageBtn.type = "button";
+  aiClearPageBtn.className = "hk-ai-secondary hk-ai-clear-page";
+  aiClearPageBtn.textContent = "🗑 " + t("panel.clearPageShort");
+  aiClearPageBtn.title = t("panel.clearPageTitle");
+  aiClearPageBtn.addEventListener("click", async () => {
+    if (!window.confirm(t("panel.clearConfirm"))) return;
+    try {
+      await clearPageHighlights();
+    } catch (error) {
+      setAiPanelStatus(error?.message || t("popup.errClear"), true);
+    }
+  });
 
   // 心智圖 Prompt：獨立副次動作，不影響主流程（重點＋摘要）
   const aiMindmapCopyBtn = document.createElement("button");
@@ -4546,6 +4591,7 @@ const ensureHighlightPanel = () => {
   aiCardSecondary.appendChild(aiMindmapCopyBtn);
   aiCardSecondary.appendChild(aiMindmapViewBtn);
   aiCardSecondary.appendChild(actionGuidedReadingBtn);
+  aiCardSecondary.appendChild(aiClearPageBtn);
 
   aiCard.appendChild(aiCardHint);
   aiCard.appendChild(aiStep1);
@@ -4875,6 +4921,22 @@ const closeHighlightPanel = () => {
   highlightPanel.style.display = "none";
   highlightPanel.setAttribute("aria-hidden", "true");
   return true;
+};
+
+// 語言切換時整個重建面板，讓所有 JS 建立的標籤跟著新語言；保留開啟狀態。
+const rebuildHighlightPanelForLang = () => {
+  if (!highlightPanel) return;
+  const wasVisible = highlightPanelVisible;
+  try {
+    highlightPanel.remove();
+  } catch (_e) {}
+  highlightPanel = null;
+  highlightPanelEls = null;
+  if (wasVisible) {
+    openHighlightPanel().catch((error) =>
+      console.debug("語言切換重建面板失敗", error)
+    );
+  }
 };
 
 const toggleHighlightPanel = async () => {
@@ -6798,7 +6860,7 @@ const startGuidedReading = () => {
   destroyGuidedBar();
   const steps = collectGuidedSteps();
   if (!steps.length) {
-    setAiPanelStatus("本頁沒有標記可供閱讀", true);
+    setAiPanelStatus(t("ai.errNoHighlightGuided"), true);
     return;
   }
 

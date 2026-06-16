@@ -760,6 +760,10 @@
 
 .hk-ai-secondary:hover { color: var(--hk-accent); }
 
+/* 清除本頁：用危險色提示，避免誤點後才發現 */
+.hk-ai-clear-page { color: var(--hk-danger, #b3261e); margin-left: auto; }
+.hk-ai-clear-page:hover { color: #8c1d18; }
+
 .hk-ai-mindmap-view {
   color: var(--hk-accent);
   font-weight: 600;
@@ -1385,6 +1389,23 @@
   align-items: baseline;
   gap: 10px;
 }
+
+.hk-panel-ai-note-toggle {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--hk-ink-soft);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: calc(12px * var(--hk-panel-font-scale, 1));
+  line-height: 1;
+  align-self: center;
+}
+.hk-panel-ai-note-toggle:hover { color: var(--hk-accent); }
+
+/* 收合：隱藏內容，只留標題列 */
+.hk-panel-ai-note.is-collapsed { gap: 0; }
+.hk-panel-ai-note.is-collapsed .hk-panel-ai-note-body { display: none; }
 
 .hk-panel-ai-note-title {
   font-family: var(--hk-serif);
