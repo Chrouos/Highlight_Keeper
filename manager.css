@@ -284,6 +284,7 @@ body {
 
 /* ── Page cards ───────────────────────────────────────── */
 .hk-manager-card {
+  position: relative;
   border: 1.5px solid #f0ece4;
   border-radius: 12px;
   padding: 16px 18px;
@@ -294,6 +295,32 @@ body {
   cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease,
     transform 0.15s ease, background 0.15s ease;
+}
+
+/* 刪除整頁：平時淡出，hover 卡片或按鈕時才明顯，避免誤點 */
+.hk-manager-card-delete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  appearance: none;
+  border: 1px solid #e7c9c6;
+  border-radius: 6px;
+  background: #fff;
+  color: #b3261e;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.hk-manager-card:hover .hk-manager-card-delete,
+.hk-manager-card-delete:focus-visible {
+  opacity: 1;
+}
+.hk-manager-card-delete:hover {
+  background: #b3261e;
+  color: #fff;
 }
 
 .hk-manager-card:hover,
@@ -492,6 +519,35 @@ body {
 
 .hk-manager-detail-item:hover {
   border-color: #e7e5e4;
+}
+
+.hk-manager-detail-item-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.hk-manager-detail-item-head .hk-manager-detail-text {
+  flex: 1;
+  margin: 0;
+}
+
+.hk-manager-detail-item-delete {
+  flex-shrink: 0;
+  appearance: none;
+  border: 1px solid #e7c9c6;
+  border-radius: 6px;
+  background: #fff;
+  color: #b3261e;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.hk-manager-detail-item-delete:hover {
+  background: #b3261e;
+  color: #fff;
 }
 
 .hk-manager-detail-text {

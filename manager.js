@@ -8,10 +8,14 @@ const GITHUB_DEFAULT_SETTINGS = {
   path: "backups/highlight-keeper.json",
 };
 
+const MINDMAP_KEY = "hkMindmaps";
+const GENERATED_NOTES_KEY = "hkGeneratedNotes";
+
 const state = {
   pages: [],
   meta: {},
   notes: {},
+  mindmaps: {},
   searchTerm: "",
 };
 let detailCurrentPageUrl = "";
@@ -182,19 +186,6 @@ const bindGithubInput = (element, key) => {
   });
 };
 
-const parseImportedHighlightsPayload = (rawText) => {
-  let parsed;
-  try {
-    parsed = JSON.parse(rawText);
-  } catch (_error) {
-    throw new Error("JSON 格式不正確");
-  }
-  if (Array.isArray(parsed)) return parsed;
-  if (parsed && Array.isArray(parsed.entries)) return parsed.entries;
-  if (parsed && typeof parsed === "object") return [parsed];
-  return [];
-};
-
 const sanitizeImportedAnchors = (anchors) => {
   if (!anchors || typeof anchors !== "object") return undefined;
   const sanitizeBoundary = (boundary) => {
@@ -276,7 +267,8 @@ const normalizeImportedHighlightEntry = (entry, index) => {
 const fetchAllPages = async () => {
   const all = await chrome.storage.local.get(null);
   const meta = all[PAGE_META_KEY] || {};
-  const notes = all.hkGeneratedNotes || {};
+  const notes = all[GENERATED_NOTES_KEY] || {};
+  const mindmaps = all[MINDMAP_KEY] || {};
   const pages = Object.entries(all)
     .filter(([key, value]) => isValidPageKey(key) && Array.isArray(value))
     .map(([url, entries]) => {
@@ -297,6 +289,7 @@ const fetchAllPages = async () => {
   state.pages = pages;
   state.meta = meta;
   state.notes = notes;
+  state.mindmaps = mindmaps;
 };
 
 const matchesSearch = (page, term) => {
@@ -338,6 +331,33 @@ const renderPageList = () => {
     const card = document.createElement("article");
     card.className = "hk-manager-card";
     card.addEventListener("click", () => openPageDetail(page));
+
+    const deletePageBtn = document.createElement("button");
+    deletePageBtn.type = "button";
+    deletePageBtn.className = "hk-manager-card-delete";
+    deletePageBtn.textContent = "刪除";
+    deletePageBtn.title = "刪除整頁筆記";
+    deletePageBtn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const ok = await openConfirmDialog({
+        title: "刪除整頁",
+        message: `確定刪除「${page.title}」的所有標註、摘要與心智圖嗎？此動作無法復原。`,
+        confirmLabel: "刪除",
+        cancelLabel: "取消",
+      });
+      if (!ok) return;
+      try {
+        await deletePage(page.url);
+        if (detailCurrentPageUrl === page.url) closePageDetail();
+        await refreshManager();
+        setStatus("已刪除整頁筆記");
+      } catch (error) {
+        console.debug("刪除整頁失敗", error);
+        setStatus("刪除失敗", true);
+      }
+    });
+    card.appendChild(deletePageBtn);
+
     const title = document.createElement("h3");
     title.textContent = page.title;
     card.appendChild(title);
@@ -347,6 +367,7 @@ const renderPageList = () => {
     urlLink.rel = "noopener";
     urlLink.className = "hk-manager-url";
     urlLink.textContent = page.url;
+    urlLink.addEventListener("click", (event) => event.stopPropagation());
     card.appendChild(urlLink);
     const meta = document.createElement("div");
     meta.className = "hk-manager-meta";
@@ -367,16 +388,82 @@ const refreshManager = async () => {
   renderPageList();
 };
 
+// 刪除整頁：清掉標註、頁面 meta、AI 摘要與心智圖。無法復原。
+const deletePage = async (url) => {
+  const stored = await chrome.storage.local.get([
+    PAGE_META_KEY,
+    GENERATED_NOTES_KEY,
+    MINDMAP_KEY,
+  ]);
+  const meta = { ...(stored[PAGE_META_KEY] || {}) };
+  const notes = { ...(stored[GENERATED_NOTES_KEY] || {}) };
+  const maps = { ...(stored[MINDMAP_KEY] || {}) };
+  delete meta[url];
+  delete notes[url];
+  delete maps[url];
+  await chrome.storage.local.remove(url);
+  await chrome.storage.local.set({
+    [PAGE_META_KEY]: meta,
+    [GENERATED_NOTES_KEY]: notes,
+    [MINDMAP_KEY]: maps,
+  });
+};
+
+// 刪除單筆標註：優先用 id 比對，沒有 id 才退回索引。
+const deleteHighlightEntry = async (url, entry, index) => {
+  const stored = await chrome.storage.local.get(url);
+  const entries = Array.isArray(stored[url]) ? stored[url] : [];
+  const next = entry?.id
+    ? entries.filter((item) => item?.id !== entry.id)
+    : entries.filter((_, i) => i !== index);
+  if (next.length === entries.length) return false;
+  await chrome.storage.local.set({ [url]: next });
+  return true;
+};
+
 const buildFullExportPayload = () => ({
   type: "highlight-keeper-bulk",
-  version: 1,
+  version: 2,
   exportedAt: Date.now(),
   pages: state.pages.map((page) => ({
     url: page.url,
     title: state.meta[page.url]?.title || "",
+    tags: Array.isArray(page.tags) ? page.tags : [],
     entries: page.entries,
+    note: state.notes[page.url] || null,
+    mindmap: state.mindmaps[page.url] || null,
   })),
 });
+
+// 把 bulk 備份的 pages 陣列正規化成 {url,title,tags,entries,note,mindmap}。
+const normalizeBulkPages = (pages) => {
+  if (!Array.isArray(pages)) return [];
+  return pages
+    .map((page) => {
+      if (!page || typeof page !== "object") return null;
+      const url =
+        typeof page.url === "string"
+          ? page.url
+          : typeof page.pageUrl === "string"
+          ? page.pageUrl
+          : null;
+      if (!url || !isValidPageKey(url)) return null;
+      const entries = Array.isArray(page.entries) ? page.entries : [];
+      if (!entries.length) return null;
+      return {
+        url,
+        title: typeof page.title === "string" ? page.title : "",
+        tags: Array.isArray(page.tags)
+          ? page.tags.map((t) => String(t).trim()).filter(Boolean)
+          : [],
+        entries,
+        note: page.note && typeof page.note === "object" ? page.note : null,
+        mindmap:
+          page.mindmap && typeof page.mindmap === "object" ? page.mindmap : null,
+      };
+    })
+    .filter(Boolean);
+};
 
 const parseGithubBackupPayload = (rawText) => {
   let parsed;
@@ -393,25 +480,7 @@ const parseGithubBackupPayload = (rawText) => {
   if (!pages.length) {
     throw new Error("GitHub 備份中沒有頁面資料");
   }
-  const normalized = pages
-    .map((page) => {
-      if (!page || typeof page !== "object") return null;
-      const url =
-        typeof page.url === "string"
-          ? page.url
-          : typeof page.pageUrl === "string"
-          ? page.pageUrl
-          : null;
-      if (!url || !isValidPageKey(url)) return null;
-      const entries = Array.isArray(page.entries) ? page.entries : [];
-      if (!entries.length) return null;
-      return {
-        url,
-        title: typeof page.title === "string" ? page.title : "",
-        entries,
-      };
-    })
-    .filter(Boolean);
+  const normalized = normalizeBulkPages(pages);
   if (!normalized.length) {
     throw new Error("GitHub 備份裡沒有可匯入的筆記");
   }
@@ -692,13 +761,45 @@ const renderPageDetail = (page) => {
     empty.textContent = "尚無筆記。";
     entriesList.appendChild(empty);
   } else {
-    page.entries.forEach((entry) => {
+    page.entries.forEach((entry, index) => {
       const item = document.createElement("article");
       item.className = "hk-manager-detail-item";
+
+      const itemHead = document.createElement("div");
+      itemHead.className = "hk-manager-detail-item-head";
       const text = document.createElement("p");
       text.className = "hk-manager-detail-text";
       text.textContent = entry.text || "(無內容)";
-      item.appendChild(text);
+      itemHead.appendChild(text);
+      const delEntryBtn = document.createElement("button");
+      delEntryBtn.type = "button";
+      delEntryBtn.className = "hk-manager-detail-item-delete";
+      delEntryBtn.textContent = "刪除";
+      delEntryBtn.title = "刪除這筆標註";
+      delEntryBtn.addEventListener("click", async () => {
+        const ok = await openConfirmDialog({
+          title: "刪除標註",
+          message: "確定刪除這筆標註嗎？此動作無法復原。",
+          confirmLabel: "刪除",
+          cancelLabel: "取消",
+        });
+        if (!ok) return;
+        try {
+          await deleteHighlightEntry(page.url, entry, index);
+          await fetchAllPages();
+          const updated = state.pages.find((p) => p.url === page.url);
+          if (updated) renderPageDetail(updated);
+          else closePageDetail();
+          renderPageList();
+          setStatus("已刪除標註");
+        } catch (error) {
+          console.debug("刪除標註失敗", error);
+          setStatus("刪除失敗", true);
+        }
+      });
+      itemHead.appendChild(delEntryBtn);
+      item.appendChild(itemHead);
+
       const trimmedNote = entry.note?.trim();
       if (trimmedNote) {
         const note = document.createElement("p");
@@ -1046,6 +1147,47 @@ const savePageMetaTitles = async (updates) => {
   });
 };
 
+// 還原 AI 摘要與心智圖（v2 備份才有；只覆蓋有帶資料的頁面）。
+const saveNotesAndMindmaps = async (noteUpdates, mindmapUpdates) => {
+  if (!Object.keys(noteUpdates).length && !Object.keys(mindmapUpdates).length) {
+    return;
+  }
+  const stored = await chrome.storage.local.get([
+    GENERATED_NOTES_KEY,
+    MINDMAP_KEY,
+  ]);
+  const nextNotes = { ...(stored[GENERATED_NOTES_KEY] || {}), ...noteUpdates };
+  const nextMaps = { ...(stored[MINDMAP_KEY] || {}), ...mindmapUpdates };
+  await chrome.storage.local.set({
+    [GENERATED_NOTES_KEY]: nextNotes,
+    [MINDMAP_KEY]: nextMaps,
+  });
+};
+
+// 從一批已決定要匯入的頁面，組出 meta（title+tags）／notes／mindmaps 並寫入。
+const applyImportedPageExtras = async (pages) => {
+  const metaUpdates = {};
+  const noteUpdates = {};
+  const mindmapUpdates = {};
+  pages.forEach((page) => {
+    const metaEntry = { ...(state.meta[page.url] || {}) };
+    let touched = false;
+    if (page.title) {
+      metaEntry.title = page.title;
+      touched = true;
+    }
+    if (Array.isArray(page.tags) && page.tags.length) {
+      metaEntry.tags = page.tags;
+      touched = true;
+    }
+    if (touched) metaUpdates[page.url] = metaEntry;
+    if (page.note) noteUpdates[page.url] = page.note;
+    if (page.mindmap) mindmapUpdates[page.url] = page.mindmap;
+  });
+  await savePageMetaTitles(metaUpdates);
+  await saveNotesAndMindmaps(noteUpdates, mindmapUpdates);
+};
+
 const applyGithubBackupPages = async (pages) => {
   if (!Array.isArray(pages) || !pages.length) {
     setGithubStatus("GitHub 備份中沒有可匯入的頁面", true);
@@ -1109,17 +1251,8 @@ const applyGithubBackupPages = async (pages) => {
   const updates = Object.fromEntries(
     pagesToImport.map((page) => [page.url, page.entries])
   );
-  const metaUpdates = {};
-  pagesToImport.forEach((page) => {
-    if (page.title) {
-      metaUpdates[page.url] = {
-        ...(state.meta[page.url] || {}),
-        title: page.title,
-      };
-    }
-  });
   await chrome.storage.local.set(updates);
-  await savePageMetaTitles(metaUpdates);
+  await applyImportedPageExtras(pagesToImport);
   const importedCount = pagesToImport.length;
   const skippedOverlap = overlapping.length - overwrittenCount;
   const statusParts = [
@@ -1156,55 +1289,86 @@ const downloadHighlightsFromGithub = async () => {
 const importMultipleFiles = async (files) => {
   if (!files?.length) return;
   setStatus("解析匯入檔案中…");
-  const filePromises = Array.from(files).map(async (file) => {
-    const text = await file.text();
-    return parseImportedHighlightsPayload(text);
+  const texts = await Promise.all(Array.from(files).map((file) => file.text()));
+
+  // 兩種格式並存：bulk（{pages:[...]}，含摘要/心智圖/標籤）與舊的單筆標註陣列。
+  const bulkByUrl = new Map();
+  const looseEntries = [];
+  texts.forEach((text) => {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch (_error) {
+      return;
+    }
+    if (Array.isArray(parsed?.pages)) {
+      normalizeBulkPages(parsed.pages).forEach((page) => {
+        if (!bulkByUrl.has(page.url)) bulkByUrl.set(page.url, page);
+      });
+    } else {
+      const arr = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.entries)
+        ? parsed.entries
+        : parsed && typeof parsed === "object"
+        ? [parsed]
+        : [];
+      looseEntries.push(...arr);
+    }
   });
-  const fileEntries = await Promise.all(filePromises);
-  const flattened = fileEntries.flat();
-  const normalized = flattened
+
+  // 單筆標註：正規化後分組成頁面（無摘要/心智圖）；bulk 已涵蓋的頁面就略過。
+  const looseByUrl = new Map();
+  looseEntries
     .map((entry, index) => normalizeImportedHighlightEntry(entry, index))
-    .filter(Boolean);
-  if (!normalized.length) {
+    .filter(Boolean)
+    .forEach((entry) => {
+      if (bulkByUrl.has(entry.url)) return;
+      if (!looseByUrl.has(entry.url)) {
+        looseByUrl.set(entry.url, {
+          url: entry.url,
+          title: entry.title || "",
+          tags: [],
+          entries: [],
+          note: null,
+          mindmap: null,
+        });
+      }
+      looseByUrl.get(entry.url).entries.push(entry);
+    });
+
+  const candidatePages = [...bulkByUrl.values(), ...looseByUrl.values()];
+  if (!candidatePages.length) {
     setStatus("沒有可匯入的筆記", true);
     return;
   }
-  const grouped = new Map();
-  normalized.forEach((entry) => {
-    if (!grouped.has(entry.url)) {
-      grouped.set(entry.url, []);
-    }
-    grouped.get(entry.url).push(entry);
-  });
-  const urls = Array.from(grouped.keys());
-  const existing = await chrome.storage.local.get(urls);
-  const updates = {};
-  const metaUpdates = {};
+
+  const existing = await chrome.storage.local.get(candidatePages.map((p) => p.url));
+  const toImport = [];
   const skipped = [];
-  grouped.forEach((list, url) => {
-    const current = existing[url];
+  candidatePages.forEach((page) => {
+    const current = existing[page.url];
     if (Array.isArray(current) && current.length) {
-      skipped.push(url);
+      skipped.push(page.url);
       return;
     }
-    updates[url] = list.map(({ title, ...rest }) => rest);
-    const titleEntry = list.find((item) => item.title);
-    if (titleEntry?.title) {
-      metaUpdates[url] = {
-        ...(state.meta[url] || {}),
-        title: titleEntry.title,
-      };
-    }
+    toImport.push(page);
   });
-  const importedPages = Object.keys(updates).length;
-  if (!importedPages) {
+  if (!toImport.length) {
     setStatus("所有頁面皆已有筆記，已忽略匯入。", true);
     return;
   }
+
+  const updates = Object.fromEntries(
+    toImport.map((page) => [
+      page.url,
+      page.entries.map(({ title, ...rest }) => rest),
+    ])
+  );
   await chrome.storage.local.set(updates);
-  await savePageMetaTitles(metaUpdates);
+  await applyImportedPageExtras(toImport);
   setStatus(
-    `成功匯入 ${importedPages} 個頁面，跳過 ${skipped.length} 個已存在的頁面。`
+    `成功匯入 ${toImport.length} 個頁面，跳過 ${skipped.length} 個已存在的頁面。`
   );
   await refreshManager();
 };
