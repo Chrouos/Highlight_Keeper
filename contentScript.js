@@ -190,7 +190,7 @@ const callGoogleTranslate = async (text, targetLang) => {
     `?client=gtx&sl=auto&tl=${encodeURIComponent(targetLang)}&dt=t&dt=ld` +
     `&q=${encodeURIComponent(text)}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`翻譯請求失敗 (${res.status})`);
+  if (!res.ok) throw new Error(t("translate.errRequest", { status: res.status }));
   const data = await res.json();
   const translated = (data[0] ?? []).map((c) => c[0] ?? "").join("");
   const detected = data[8]?.[0]?.[0] || data[2] || "auto";
@@ -232,7 +232,7 @@ const showTranslateCard = async (text, anchorRect, highlightEl = null) => {
 
   const detectedSpan = document.createElement("span");
   detectedSpan.className = "hk-tc-detected";
-  detectedSpan.textContent = "偵測語言中…";
+  detectedSpan.textContent = t("translate.detecting");
 
   const controls = document.createElement("div");
   controls.className = "hk-tc-controls";
@@ -254,7 +254,7 @@ const showTranslateCard = async (text, anchorRect, highlightEl = null) => {
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "hk-tc-close";
-  closeBtn.setAttribute("aria-label", "關閉");
+  closeBtn.setAttribute("aria-label", t("translate.closeAria"));
   closeBtn.textContent = "×";
   closeBtn.addEventListener("click", hideTranslateCard);
 
@@ -267,7 +267,7 @@ const showTranslateCard = async (text, anchorRect, highlightEl = null) => {
 
   const resultEl = document.createElement("div");
   resultEl.className = "hk-tc-result";
-  resultEl.textContent = "翻譯中…";
+  resultEl.textContent = t("translate.translating");
   card.appendChild(resultEl);
 
   // position (viewport coords — card uses position:fixed)
@@ -310,7 +310,7 @@ const showTranslateCard = async (text, anchorRect, highlightEl = null) => {
 
   let lastTranslated = null;
   const doTranslate = async (targetLang) => {
-    resultEl.textContent = "翻譯中…";
+    resultEl.textContent = t("translate.translating");
     resultEl.className = "hk-tc-result";
     try {
       const { translated, detected } = await callGoogleTranslate(text, targetLang);
@@ -321,7 +321,7 @@ const showTranslateCard = async (text, anchorRect, highlightEl = null) => {
         appendTranslationToNote(translated);
       }
     } catch (err) {
-      resultEl.textContent = err?.message || "翻譯失敗";
+      resultEl.textContent = err?.message || t("translate.errFallback");
       resultEl.className = "hk-tc-result hk-tc-error";
     }
   };
@@ -350,8 +350,8 @@ const ensureFloatingButton = () => {
   const hlBtn = document.createElement("button");
   hlBtn.type = "button";
   hlBtn.className = "hk-floating-btn";
-  hlBtn.setAttribute("aria-label", "標註選取文字");
-  hlBtn.title = "標註";
+  hlBtn.setAttribute("aria-label", t("toolbar.highlightAria"));
+  hlBtn.title = t("toolbar.highlightTitle");
   hlBtn.textContent = "HL";
 
   if (chrome?.runtime?.id && typeof chrome.runtime.getURL === "function") {
@@ -394,9 +394,9 @@ const ensureFloatingButton = () => {
   const trBtn = document.createElement("button");
   trBtn.type = "button";
   trBtn.className = "hk-floating-tr-btn";
-  trBtn.setAttribute("aria-label", "翻譯選取文字");
-  trBtn.title = "翻譯";
-  trBtn.textContent = "譯";
+  trBtn.setAttribute("aria-label", t("toolbar.translateAria"));
+  trBtn.title = t("toolbar.translateTitle");
+  trBtn.textContent = t("toolbar.translateText");
 
   trBtn.addEventListener("mousedown", (e) => e.preventDefault());
   trBtn.addEventListener("click", (e) => {
@@ -1125,7 +1125,7 @@ const parseMindmapOutline = (rawText) => {
     stack.push({ node, depth: indent });
   }
   if (!root.children.length) return null;
-  return { title: title || document.title || "心智圖", children: root.children };
+  return { title: title || document.title || t("mindmap.title"), children: root.children };
 };
 
 const getStoredMindmaps = async () => {
@@ -1217,14 +1217,14 @@ const openMindmapOverlay = (tree, meta = {}) => {
   const overlay = document.createElement("div");
   overlay.className = "hk-mindmap-overlay";
   overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-label", "心智圖");
+  overlay.setAttribute("aria-label", t("mindmap.title"));
 
   const head = document.createElement("div");
   head.className = "hk-mindmap-head";
 
   const title = document.createElement("h2");
   title.className = "hk-mindmap-title";
-  title.textContent = "心智圖";
+  title.textContent = t("mindmap.title");
 
   const metaEl = document.createElement("span");
   metaEl.className = "hk-mindmap-meta";
@@ -1233,24 +1233,24 @@ const openMindmapOverlay = (tree, meta = {}) => {
   const copyOutlineBtn = document.createElement("button");
   copyOutlineBtn.type = "button";
   copyOutlineBtn.className = "hk-mindmap-action";
-  copyOutlineBtn.textContent = "複製大綱";
+  copyOutlineBtn.textContent = t("mindmap.copyOutline");
   copyOutlineBtn.addEventListener("click", async () => {
     try {
       const outline = meta.outline || "";
       await navigator.clipboard.writeText(outline);
-      copyOutlineBtn.textContent = "已複製 ✓";
+      copyOutlineBtn.textContent = t("mindmap.copied");
       window.setTimeout(() => {
-        copyOutlineBtn.textContent = "複製大綱";
+        copyOutlineBtn.textContent = t("mindmap.copyOutline");
       }, 1600);
     } catch (_e) {
-      copyOutlineBtn.textContent = "複製失敗";
+      copyOutlineBtn.textContent = t("mindmap.copyFail");
     }
   });
 
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "hk-mindmap-close";
-  closeBtn.setAttribute("aria-label", "關閉心智圖");
+  closeBtn.setAttribute("aria-label", t("mindmap.close"));
   closeBtn.textContent = "×";
   closeBtn.addEventListener("click", closeMindmapOverlay);
 
@@ -1279,9 +1279,9 @@ const openMindmapOverlay = (tree, meta = {}) => {
 const openStoredMindmap = async () => {
   const maps = await getStoredMindmaps();
   const saved = maps[pageKey];
-  if (!saved?.outline) throw new Error("本頁尚未產生心智圖");
+  if (!saved?.outline) throw new Error(t("mindmap.errNone"));
   const tree = parseMindmapOutline(saved.outline);
-  if (!tree) throw new Error("心智圖資料損毀，請重新產生");
+  if (!tree) throw new Error(t("mindmap.errCorrupt"));
   openMindmapOverlay(tree, saved);
 };
 
@@ -1878,7 +1878,7 @@ const callOpenAI = async (key, prompt, options = {}) => {
     if (options.jsonMode && response.status === 400) {
       return callOpenAI(key, prompt, { ...options, jsonMode: false });
     }
-    throw new Error(`OpenAI API 錯誤：${errorText}`);
+    throw new Error(t("ai.errOpenaiApi", { error: errorText }));
   }
 
   const json = await response.json();
@@ -1927,7 +1927,7 @@ const callGemini = async (key, prompt, options = {}) => {
     if (options.jsonMode && response.status === 400) {
       return callGemini(key, prompt, { ...options, jsonMode: false });
     }
-    throw new Error(`Gemini API 錯誤：${errorText}`);
+    throw new Error(t("ai.errGeminiApi", { error: errorText }));
   }
 
   const json = await response.json();
@@ -2009,7 +2009,7 @@ const showPreviewConfirmBar = (count) => {
     document.body.appendChild(bar);
   }
   const msg = document.getElementById("hk-preview-bar-msg");
-  if (msg) msg.textContent = `預覽 ${count} 個重點，確認後正式套用`;
+  if (msg) msg.textContent = t("panel.previewMessage", { count });
   bar.hidden = false;
 };
 
@@ -2041,7 +2041,7 @@ const confirmPreviewHighlights = async () => {
   }
   await ensurePageMetaTitle(pageKey, document.title);
   await refreshHighlightPanelIfVisible();
-  setAiPanelStatus(`已套用 ${toSave.length} 個重點`);
+  setAiPanelStatus(t("ai.applied", { count: toSave.length }));
 };
 
 const cancelPreviewHighlights = () => {
@@ -2127,7 +2127,7 @@ const applyHighlightResponseText = async (text) => {
     ? blockItems
     : parseJsonFromModelResponse(text);
   const tasks = normalizeAutoHighlightItems(parsedPayload, preferredPalette);
-  if (!tasks.length) throw new Error("回覆中沒有可用的重點");
+  if (!tasks.length) throw new Error(t("ai.errNoUsableHighlights"));
   const usePreview = aiSettings.usePreview;
   const { appliedCount, skippedCount } = await applyAutoHighlightTasksBatch(
     tasks,
@@ -2145,7 +2145,7 @@ const applyHighlightResponseText = async (text) => {
 
 const applyMindmapResponseText = async (text) => {
   const tree = parseMindmapOutline(text);
-  if (!tree) throw new Error("無法解析心智圖大綱，請確認貼上的是大綱格式");
+  if (!tree) throw new Error(t("mindmap.errParse"));
   await saveMindmap(text, tree.title);
   updateMindmapAvailability(true);
   openMindmapOverlay(tree, { outline: text, generatedAt: Date.now() });
@@ -2178,7 +2178,7 @@ const handleChatGPTResponse = async (responseData) => {
       (!sections && looksLikeMindmapOutline(text));
     if (isMindmap) {
       await applyMindmapResponseText(sections?.mindmap ?? text);
-      setAiPanelStatus("心智圖已產生");
+      setAiPanelStatus(t("mindmap.done"));
       return;
     }
 
@@ -2195,21 +2195,21 @@ const handleChatGPTResponse = async (responseData) => {
       await applyNotePayload(noteText);
     }
     if (!highlightText && !noteText) {
-      throw new Error("無法辨識貼上的內容");
+      throw new Error(t("ai.errUnrecognized"));
     }
 
     await refreshHighlightPanelIfVisible();
     if (result?.previewing) {
       setAiPanelStatus(
-        `預覽 ${previewData.length} 個重點，請確認後套用${noteText ? "（摘要已匯入）" : ""}`
+        t("ai.statusPreviewN", { count: previewData.length }) + (noteText ? t("ai.summaryImportedSuffix") : "")
       );
     } else if (result) {
-      const parts = [`已畫重點 ${result.appliedCount} 筆`];
-      if (result.skippedCount) parts.push(`略過 ${result.skippedCount} 筆`);
-      if (noteText) parts.push("摘要已匯入");
+      const parts = [t("ai.appliedCount", { applied: result.appliedCount })];
+      if (result.skippedCount) parts.push(t("ai.skippedCount", { skipped: result.skippedCount }));
+      if (noteText) parts.push(t("ai.summaryImported"));
       setAiPanelStatus(parts.join("，"));
     } else {
-      setAiPanelStatus("摘要筆記已匯入");
+      setAiPanelStatus(t("ai.noteImported"));
     }
   } catch (error) {
     setAiPanelStatus(error?.message || t("ai.errImport"), true);
@@ -2349,14 +2349,14 @@ const handleGenerateAiHighlights = async () => {
 
     if (usePreview && previewData.length) {
       showPreviewConfirmBar(previewData.length);
-      setAiPanelStatus(`預覽 ${previewData.length} 個重點，請確認後套用`);
+      setAiPanelStatus(t("ai.statusPreviewN", { count: previewData.length }));
     } else {
       await ensurePageMetaTitle(pageKey, document.title);
       await refreshHighlightPanelIfVisible();
       setAiPanelStatus(
         skippedCount
-          ? `已自動畫重點 ${appliedCount} 筆，略過 ${skippedCount} 筆`
-          : `已自動畫重點 ${appliedCount} 筆`
+          ? t("ai.statusAppliedWithSkip", { applied: appliedCount, skipped: skippedCount })
+          : t("ai.statusAppliedN", { applied: appliedCount })
       );
     }
   } catch (error) {
@@ -3262,7 +3262,7 @@ const handleImportFileChange = async (event) => {
       throw new Error(t("ai.errNoHighlightInFile"));
     }
     const importedCount = await importHighlightsFromEntries(rawEntries);
-    setPanelStatus(`已匯入 ${importedCount} 則標註`);
+    setPanelStatus(t("ai.importedCount", { count: importedCount }));
     await refreshHighlightPanelData();
     await renderHighlightPanel();
     attemptRestoreHighlights();
@@ -3590,7 +3590,7 @@ const createPanelEntryElement = (entry, options = {}) => {
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
   deleteBtn.className = "hk-panel-delete-btn";
-  deleteBtn.textContent = "刪除";
+  deleteBtn.textContent = t("popup.deleteColor");
   deleteBtn.addEventListener("click", async (event) => {
     event.stopPropagation();
     await deleteHighlightFromPanel(entry);
@@ -3641,7 +3641,7 @@ const updateOrphanNotice = () => {
   const el = highlightPanelEls?.pageOrphanNotice;
   if (!el) return;
   if (orphanHighlightCount > 0) {
-    el.textContent = `⚠ 有 ${orphanHighlightCount} 筆標註找不到對應文字，可能是頁面內容已變動。`;
+    el.textContent = t("panel.orphanNotice", { count: orphanHighlightCount });
     el.style.display = "block";
   } else {
     el.style.display = "none";
@@ -3734,7 +3734,7 @@ const ensureHighlightPanel = () => {
   const fontDecreaseBtn = document.createElement("button");
   fontDecreaseBtn.type = "button";
   fontDecreaseBtn.className = "hk-panel-font-btn";
-  fontDecreaseBtn.setAttribute("aria-label", "縮小文字");
+  fontDecreaseBtn.setAttribute("aria-label", t("panel.fontDecreaseTitle"));
   fontDecreaseBtn.textContent = "A−";
   fontDecreaseBtn.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -3744,7 +3744,7 @@ const ensureHighlightPanel = () => {
   const fontIncreaseBtn = document.createElement("button");
   fontIncreaseBtn.type = "button";
   fontIncreaseBtn.className = "hk-panel-font-btn";
-  fontIncreaseBtn.setAttribute("aria-label", "放大文字");
+  fontIncreaseBtn.setAttribute("aria-label", t("panel.fontIncreaseTitle"));
   fontIncreaseBtn.textContent = "A+";
   fontIncreaseBtn.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -3757,14 +3757,14 @@ const ensureHighlightPanel = () => {
   const settingsBtn = document.createElement("button");
   settingsBtn.type = "button";
   settingsBtn.className = "hk-panel-iconbtn hk-panel-settings-btn";
-  settingsBtn.setAttribute("aria-label", "設定");
+  settingsBtn.setAttribute("aria-label", t("panel.settings"));
   settingsBtn.setAttribute("aria-expanded", "false");
   settingsBtn.innerHTML = "&#9881;"; // ⚙
 
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "hk-panel-close";
-  closeBtn.setAttribute("aria-label", "關閉標註面板");
+  closeBtn.setAttribute("aria-label", t("panel.closePanel"));
   closeBtn.textContent = "×";
   closeBtn.addEventListener("click", () => closeHighlightPanel());
 
@@ -3779,7 +3779,7 @@ const ensureHighlightPanel = () => {
   const tabs = document.createElement("div");
   tabs.className = "hk-panel-tabs";
   tabs.setAttribute("role", "tablist");
-  tabs.setAttribute("aria-label", "面板內容切換");
+  tabs.setAttribute("aria-label", t("panel.tabsAria"));
 
   const pageTabBtn = document.createElement("button");
   pageTabBtn.type = "button";
@@ -3977,12 +3977,12 @@ const ensureHighlightPanel = () => {
   const tagInput = document.createElement("input");
   tagInput.type = "text";
   tagInput.className = "hk-panel-tag-input";
-  tagInput.placeholder = "輸入標籤後按 Enter";
+  tagInput.placeholder = t("panel.tagInputPlaceholder");
 
   const suggestionDropdown = document.createElement("div");
   suggestionDropdown.className = "hk-panel-tag-suggestions";
   suggestionDropdown.setAttribute("role", "listbox");
-  suggestionDropdown.setAttribute("aria-label", "標籤建議");
+  suggestionDropdown.setAttribute("aria-label", t("panel.tagSuggestions"));
 
   tagInputWrapper.appendChild(tagInput);
   tagInputWrapper.appendChild(suggestionDropdown);
@@ -3991,7 +3991,7 @@ const ensureHighlightPanel = () => {
   const addTagBtn = document.createElement("button");
   addTagBtn.type = "button";
   addTagBtn.className = "hk-panel-tag-add";
-  addTagBtn.textContent = "新增";
+  addTagBtn.textContent = t("panel.tagAdd");
   tagInputRow.appendChild(addTagBtn);
 
   pageTagSection.appendChild(tagInputRow);
@@ -4426,7 +4426,7 @@ const ensureHighlightPanel = () => {
 
   const aiCardHint = document.createElement("p");
   aiCardHint.className = "hk-ai-hint";
-  aiCardHint.textContent = "一個 Prompt 同時取得整頁重點與摘要筆記";
+  aiCardHint.textContent = t("aiCard.hint");
 
   // 步驟一：複製 Prompt
   const aiStep1 = document.createElement("div");
@@ -4437,7 +4437,7 @@ const ensureHighlightPanel = () => {
   const aiCopyBtn = document.createElement("button");
   aiCopyBtn.type = "button";
   aiCopyBtn.className = "hk-ai-copy-btn";
-  aiCopyBtn.textContent = "複製 Prompt";
+  aiCopyBtn.textContent = t("bridge.copyPrompt");
   aiStep1.appendChild(aiStep1Num);
   aiStep1.appendChild(aiCopyBtn);
 
@@ -4450,38 +4450,38 @@ const ensureHighlightPanel = () => {
   const aiPasteArea = document.createElement("textarea");
   aiPasteArea.className = "hk-ai-paste";
   aiPasteArea.rows = 2;
-  aiPasteArea.placeholder = "回覆貼在這裡，貼上即自動套用";
+  aiPasteArea.placeholder = t("aiCard.pastePlaceholder");
   aiStep2.appendChild(aiStep2Num);
   aiStep2.appendChild(aiPasteArea);
 
   const aiApplyBtn = document.createElement("button");
   aiApplyBtn.type = "button";
   aiApplyBtn.className = "hk-ai-apply";
-  aiApplyBtn.textContent = "套用";
+  aiApplyBtn.textContent = t("aiCard.apply");
 
   // 進階：有 API Key 時可一鍵直接產生
   const aiDirectBtn = document.createElement("button");
   aiDirectBtn.type = "button";
   aiDirectBtn.className = "hk-ai-direct";
-  aiDirectBtn.textContent = "用 API 直接產生";
+  aiDirectBtn.textContent = t("aiCard.directGenerate");
   aiDirectBtn.hidden = true;
 
   // 次要動作：查看心智圖／指引閱讀
   const aiMindmapViewBtn = document.createElement("button");
   aiMindmapViewBtn.type = "button";
   aiMindmapViewBtn.className = "hk-ai-secondary hk-ai-mindmap-view";
-  aiMindmapViewBtn.textContent = "✦ 查看心智圖";
+  aiMindmapViewBtn.textContent = t("mindmap.view");
   aiMindmapViewBtn.hidden = true;
   aiMindmapViewBtn.addEventListener("click", () => {
     openStoredMindmap().catch((error) =>
-      setAiPanelStatus(error?.message || "無法開啟心智圖", true)
+      setAiPanelStatus(error?.message || t("mindmap.errOpen"), true)
     );
   });
 
   const actionGuidedReadingBtn = document.createElement("button");
   actionGuidedReadingBtn.type = "button";
   actionGuidedReadingBtn.className = "hk-ai-secondary hk-ai-guided";
-  actionGuidedReadingBtn.textContent = "▷ 指引閱讀";
+  actionGuidedReadingBtn.textContent = t("aiCard.guidedReading");
   actionGuidedReadingBtn.addEventListener("click", () => startGuidedReading());
 
   // 一鍵清除本頁標記（從設定抽屜拉到面板明顯處）
@@ -4503,7 +4503,7 @@ const ensureHighlightPanel = () => {
   const aiMindmapCopyBtn = document.createElement("button");
   aiMindmapCopyBtn.type = "button";
   aiMindmapCopyBtn.className = "hk-ai-secondary hk-ai-mindmap-copy";
-  aiMindmapCopyBtn.textContent = "✦ 複製心智圖 Prompt";
+  aiMindmapCopyBtn.textContent = t("mindmap.copyPrompt");
 
   // 依模式組出 Prompt（combined = 重點＋摘要，mindmap = 心智圖大綱）
   const buildAiPrompt = async (mode) => {
@@ -4524,7 +4524,7 @@ const ensureHighlightPanel = () => {
     aiCopyBtn.textContent = msg;
     aiCopyBtn.classList.add("is-done");
     window.setTimeout(() => {
-      aiCopyBtn.textContent = "複製 Prompt";
+      aiCopyBtn.textContent = t("bridge.copyPrompt");
       aiCopyBtn.classList.remove("is-done");
     }, 1600);
   };
@@ -4534,9 +4534,9 @@ const ensureHighlightPanel = () => {
       const prompt = await buildAiPrompt("combined");
       await navigator.clipboard.writeText(prompt);
       flashCopyBtn("已複製 ✓");
-      setAiPanelStatus("已複製，貼到 ChatGPT／Claude 送出，回覆貼回第 2 步");
+      setAiPanelStatus(t("aiCard.copiedHint"));
     } catch (error) {
-      setAiPanelStatus(error?.message || "複製失敗", true);
+      setAiPanelStatus(error?.message || t("bridge.copyFail"), true);
     }
   });
 
@@ -4544,16 +4544,16 @@ const ensureHighlightPanel = () => {
     try {
       const prompt = await buildAiPrompt("mindmap");
       await navigator.clipboard.writeText(prompt);
-      setAiPanelStatus("已複製心智圖 Prompt，送出後把大綱貼回第 2 步");
+      setAiPanelStatus(t("aiCard.mindmapCopiedHint"));
     } catch (error) {
-      setAiPanelStatus(error?.message || "複製失敗", true);
+      setAiPanelStatus(error?.message || t("bridge.copyFail"), true);
     }
   });
 
   const applyPastedAiResponse = () => {
     const text = aiPasteArea.value.trim();
     if (!text) {
-      setAiPanelStatus("請先貼上 AI 回覆", true);
+      setAiPanelStatus(t("aiCard.pasteFirst"), true);
       return;
     }
     aiPasteArea.value = "";
@@ -4569,7 +4569,7 @@ const ensureHighlightPanel = () => {
   aiPasteArea.addEventListener("paste", () => {
     window.setTimeout(() => {
       if (aiPasteArea.value.trim()) {
-        setAiPanelStatus("偵測到貼上，套用中…");
+        setAiPanelStatus(t("aiCard.pasteDetected"));
         applyPastedAiResponse();
       }
     }, 30);
@@ -4604,19 +4604,19 @@ const ensureHighlightPanel = () => {
   const drawer = document.createElement("div");
   drawer.className = "hk-panel-drawer";
   drawer.setAttribute("role", "region");
-  drawer.setAttribute("aria-label", "面板設定");
+  drawer.setAttribute("aria-label", t("panel.settingsTitle"));
 
   const drawerHeader = document.createElement("div");
   drawerHeader.className = "hk-panel-drawer-header";
 
   const drawerTitle = document.createElement("h3");
   drawerTitle.className = "hk-panel-drawer-title";
-  drawerTitle.textContent = "面板設定";
+  drawerTitle.textContent = t("panel.settingsTitle");
 
   const drawerCloseBtn = document.createElement("button");
   drawerCloseBtn.type = "button";
   drawerCloseBtn.className = "hk-panel-close";
-  drawerCloseBtn.setAttribute("aria-label", "關閉設定");
+  drawerCloseBtn.setAttribute("aria-label", t("panel.closeSettings"));
   drawerCloseBtn.textContent = "×";
 
   drawerHeader.appendChild(drawerTitle);
@@ -5031,7 +5031,7 @@ const ensureHighlightMenu = () => {
 
   const header = document.createElement("div");
   header.className = "hk-menu-header";
-  header.textContent = "標註設定";
+  header.textContent = t("detail.heading");
   container.appendChild(header);
 
   const colorWrapper = document.createElement("div");
@@ -5039,7 +5039,7 @@ const ensureHighlightMenu = () => {
 
   const colorLabel = document.createElement("label");
   colorLabel.className = "hk-menu-label";
-  colorLabel.textContent = "顏色";
+  colorLabel.textContent = t("detail.colorLabel");
 
   const colorInput = document.createElement("input");
   colorInput.type = "color";
@@ -5057,12 +5057,12 @@ const ensureHighlightMenu = () => {
   noteWrapper.className = "hk-menu-section";
   const noteLabel = document.createElement("label");
   noteLabel.className = "hk-menu-label";
-  noteLabel.textContent = "註解";
+  noteLabel.textContent = t("detail.noteLabel");
   const menuTranslateBtn = document.createElement("button");
   menuTranslateBtn.type = "button";
   menuTranslateBtn.className = "hk-menu-translate-btn";
-  menuTranslateBtn.textContent = "翻譯";
-  menuTranslateBtn.title = "翻譯此段標記並附加到備註";
+  menuTranslateBtn.textContent = t("detail.translate");
+  menuTranslateBtn.title = t("detail.translateTitle");
   menuTranslateBtn.addEventListener("click", () => {
     if (!activeHighlight) return;
     const text = activeHighlight.textContent?.trim();
@@ -5074,7 +5074,7 @@ const ensureHighlightMenu = () => {
   const noteField = document.createElement("textarea");
   noteField.className = "hk-menu-note";
   noteField.rows = 6;
-  noteField.placeholder = "輸入註解...";
+  noteField.placeholder = t("detail.notePlaceholder");
   noteWrapper.appendChild(noteLabel);
   noteWrapper.appendChild(noteField);
   container.appendChild(noteWrapper);
@@ -5084,13 +5084,13 @@ const ensureHighlightMenu = () => {
   const saveNoteBtn = document.createElement("button");
   saveNoteBtn.type = "button";
   saveNoteBtn.className = "hk-menu-btn hk-menu-btn-primary";
-  saveNoteBtn.textContent = "儲存註解";
+  saveNoteBtn.textContent = t("detail.saveNote");
   saveNoteBtn.addEventListener("click", handleSaveNote);
 
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
   deleteBtn.className = "hk-menu-btn hk-menu-btn-danger";
-  deleteBtn.textContent = "刪除標註";
+  deleteBtn.textContent = t("detail.deleteHighlight");
   deleteBtn.addEventListener("click", handleDeleteHighlight);
 
   actions.appendChild(saveNoteBtn);
@@ -6464,7 +6464,7 @@ const notifyOrphanHighlights = (orphanCount, total) => {
   if (orphanNotified || orphanCount <= 0) return;
   orphanNotified = true;
   showHkToast(
-    `有 ${orphanCount} 筆標註找不到對應文字（頁面內容可能已變動），共 ${total} 筆。`,
+    t("panel.orphanToast", { orphan: orphanCount, total }),
     { isError: true, duration: 6500 }
   );
 };
@@ -6498,17 +6498,17 @@ const applyHighlight = async (color) => {
   const selection = window.getSelection();
 
   if (!selection || selection.rangeCount === 0) {
-    throw new Error("請先選取要標註的文字。");
+    throw new Error(t("highlight.errNoSelection"));
   }
 
   const range = selection.getRangeAt(0);
 
   if (selection.isCollapsed || range.collapsed) {
-    throw new Error("選取內容為空，請選擇文字後再試。");
+    throw new Error(t("highlight.errEmptySelection"));
   }
 
   if (isEditableElement(range.commonAncestorContainer)) {
-    throw new Error("無法在可編輯欄位內標註。");
+    throw new Error(t("highlight.errEditable"));
   }
 
   const snapshot = serializeRange(range.cloneRange());
@@ -6885,7 +6885,7 @@ const startGuidedReading = () => {
   const exitBtn = document.createElement("button");
   exitBtn.type = "button";
   exitBtn.className = "hk-guided-exit";
-  exitBtn.textContent = "✕ 結束";
+  exitBtn.textContent = t("guided.exit");
   exitBtn.addEventListener("click", destroyGuidedBar);
 
   topRow.appendChild(dot);
@@ -6902,7 +6902,7 @@ const startGuidedReading = () => {
   const prevBtn = document.createElement("button");
   prevBtn.type = "button";
   prevBtn.className = "hk-guided-prev";
-  prevBtn.textContent = "← 上一個";
+  prevBtn.textContent = t("guided.prev");
   prevBtn.addEventListener("click", () => {
     if (guidedReadingState.index > 0) {
       guidedReadingState.index--;
@@ -6913,7 +6913,7 @@ const startGuidedReading = () => {
   const nextBtn = document.createElement("button");
   nextBtn.type = "button";
   nextBtn.className = "hk-guided-next";
-  nextBtn.textContent = "下一個 →";
+  nextBtn.textContent = t("guided.next");
   nextBtn.addEventListener("click", () => {
     if (guidedReadingState.index < guidedReadingState.steps.length - 1) {
       guidedReadingState.index++;
@@ -7018,7 +7018,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 const collectAllPageHighlights = async () => {
-  if (!storage) throw new Error("無法使用儲存空間");
+  if (!storage) throw new Error(t("ai.errStorageUnavailable"));
   const everything = await storage.get(null);
   const meta = everything[PAGE_META_KEY] || {};
   const pages = Object.entries(everything)
@@ -7074,7 +7074,7 @@ const mergeBulkImportPayload = async (files) => {
       .map((entry, index) => normalizeImportedHighlightEntry(entry, index))
       .filter(Boolean);
     if (!normalized.length) {
-      throw new Error("沒有可匯入的筆記");
+      throw new Error(t("manager.errNoImport"));
     }
     const grouped = new Map();
     normalized.forEach((entry) => {
@@ -7095,7 +7095,7 @@ const mergeBulkImportPayload = async (files) => {
       updates[url] = list.map(({ title, ...rest }) => rest);
     });
     if (!Object.keys(updates).length) {
-      throw new Error("所有頁面皆已有筆記，已全部跳過");
+      throw new Error(t("ai.allSkipped"));
     }
     await storage.set(updates);
     await Promise.all(
@@ -7104,7 +7104,7 @@ const mergeBulkImportPayload = async (files) => {
         .map((entry) => ensurePageMetaTitle(entry.url, entry.title))
     );
     setArchiveStatus(
-      `成功匯入 ${Object.keys(updates).length} 個頁面，跳過 ${skipped.length} 個頁面`
+      t("ai.bulkImported", { imported: Object.keys(updates).length, skipped: skipped.length })
     );
     await refreshHighlightPanelData();
     await renderHighlightPanel();
@@ -7197,40 +7197,40 @@ const showChatGPTImportBanner = (request) => {
   info.className = "hk-chatgpt-banner-info";
   info.textContent =
     request.type === "note"
-      ? "Highlight Keeper — 點「複製 Prompt」貼到輸入框，完成後點「匯入筆記」"
-      : "Highlight Keeper — 點「複製 Prompt」貼到輸入框，完成後點「匯入重點」";
+      ? t("bridge.bannerNote")
+      : t("bridge.bannerHighlights");
 
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className = "hk-chatgpt-import-btn";
   copyBtn.style.background = "#2563eb";
-  copyBtn.textContent = "複製 Prompt";
+  copyBtn.textContent = t("bridge.copyPrompt");
   copyBtn.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(request.prompt);
-      copyBtn.textContent = "✓ 已複製";
+      copyBtn.textContent = t("bridge.copied");
       setTimeout(() => { copyBtn.textContent = "複製 Prompt"; }, 2000);
     } catch (_e) {
-      copyBtn.textContent = "複製失敗";
+      copyBtn.textContent = t("bridge.copyFail");
     }
   });
 
   const importBtn = document.createElement("button");
   importBtn.type = "button";
   importBtn.className = "hk-chatgpt-import-btn";
-  importBtn.textContent = request.type === "note" ? "匯入筆記" : "匯入重點";
+  importBtn.textContent = request.type === "note" ? t("bridge.importNote") : t("bridge.importHighlights");
 
   importBtn.addEventListener("click", async () => {
     const response = scrapeChatGPTResponse();
     if (!response) {
-      importBtn.textContent = "找不到回應，請確認已完成";
+      importBtn.textContent = t("bridge.noResponse");
       setTimeout(() => {
-        importBtn.textContent = request.type === "note" ? "匯入筆記" : "匯入重點";
+        importBtn.textContent = request.type === "note" ? t("bridge.importNote") : t("bridge.importHighlights");
       }, 2500);
       return;
     }
     importBtn.disabled = true;
-    importBtn.textContent = "匯入中…";
+    importBtn.textContent = t("bridge.importing");
     try {
       await chrome.storage.local.set({
         [CHATGPT_RESPONSE_KEY]: {
@@ -7243,19 +7243,19 @@ const showChatGPTImportBanner = (request) => {
       banner.innerHTML = "";
       const doneMsg = document.createElement("span");
       doneMsg.style.cssText = "margin: auto; font-weight: 600;";
-      doneMsg.textContent = "✓ 已匯入！請切回原頁面查看結果。";
+      doneMsg.textContent = t("bridge.importSuccess");
       banner.appendChild(doneMsg);
       banner.style.background = "#166534";
     } catch (_err) {
       importBtn.disabled = false;
-      importBtn.textContent = "匯入失敗，請重試";
+      importBtn.textContent = t("bridge.importFail");
     }
   });
 
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "hk-chatgpt-close-btn";
-  closeBtn.title = "關閉（取消此次橋接）";
+  closeBtn.title = t("bridge.closeTitle");
   closeBtn.textContent = "✕";
   closeBtn.addEventListener("click", async () => {
     banner.remove();
