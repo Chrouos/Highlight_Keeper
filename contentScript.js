@@ -69,12 +69,13 @@ const DEFAULT_PALETTE = [
 const PAGE_META_KEY = "__hk_page_meta__";
 const DEFAULT_AI_PROMPT = `你是一位筆記整理助手，根據提供的網頁全文與標註內容，整理出淺顯易懂的筆記。優先考慮使用者標注段落，將重點控制在五百字以內，輸出內容需要像說故事一樣有脈絡的說明。`;
 const DEFAULT_AUTO_HIGHLIGHT_PROMPT = `你是一位文章結構分析助手。請全面標註文章中各個關鍵面向的重要片段，確保覆蓋文章的完整論述架構，不要只挑少數幾句。`;
-const DEFAULT_AI_CATEGORIES = [
-  { name: "動機／背景", color: "#c792ea" },
-  { name: "方法／做法", color: "#64b5f6" },
-  { name: "優點／好處", color: "#81c784" },
-  { name: "缺點／限制", color: "#ffa726" },
-  { name: "結論／重點", color: "#ffeb3b" },
+// 分類預設名依 UI 語言產生（使用者自訂後會覆蓋這些預設）。
+const getDefaultCategories = () => [
+  { name: t("cat.motivation"), color: "#c792ea" },
+  { name: t("cat.method"), color: "#64b5f6" },
+  { name: t("cat.pros"), color: "#81c784" },
+  { name: t("cat.cons"), color: "#ffa726" },
+  { name: t("cat.conclusion"), color: "#ffeb3b" },
 ];
 const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
 const MODEL_OPTIONS = {
@@ -158,7 +159,7 @@ let aiSettings = {
   geminiModel: DEFAULT_GEMINI_MODEL,
   prompt: DEFAULT_AI_PROMPT,
   autoHighlightPrompt: DEFAULT_AUTO_HIGHLIGHT_PROMPT,
-  categories: [...DEFAULT_AI_CATEGORIES],
+  categories: getDefaultCategories(),
   usePreview: true,
   selectionOnly: false,
 };
@@ -689,7 +690,8 @@ const populateAiModelSelect = () => {
   options.forEach((option) => {
     const opt = document.createElement("option");
     opt.value = option.value;
-    opt.textContent = option.label;
+    opt.textContent =
+      option.value === "chatgpt-web" ? t("provider.chatgptWeb") : option.label;
     select.appendChild(opt);
   });
   const currentValue =
@@ -849,6 +851,8 @@ const DIRECT_EXEC_FOOTER = `――――――
 const wrapDirectExec = (body) => `${DIRECT_EXEC_HEADER}
 
 ${body}
+
+${t("prompt.outputLang")}
 
 ${DIRECT_EXEC_FOOTER}`;
 
@@ -4253,7 +4257,7 @@ const ensureHighlightPanel = () => {
   catResetBtn.className = "hk-panel-ai-cat-reset";
   catResetBtn.textContent = t("panel.resetCategories");
   catResetBtn.addEventListener("click", () => {
-    aiSettings.categories = [...DEFAULT_AI_CATEGORIES];
+    aiSettings.categories = getDefaultCategories();
     persistAISettings();
     renderCategoryList();
   });
