@@ -28,6 +28,29 @@ body {
   gap: 16px;
 }
 
+.hk-manager-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.hk-manager-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #78716c;
+}
+.hk-manager-lang select {
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid #e7e5e4;
+  border-radius: 8px;
+  background: #fff;
+  color: #1c1917;
+  cursor: pointer;
+}
+
 .hk-manager-header h1 {
   margin: 0;
   font-size: 26px;

@@ -32,6 +32,11 @@ const closeBtn = document.getElementById("closeManagerBtn");
 const searchInput = document.getElementById("managerSearch");
 const sortSelect = document.getElementById("managerSort");
 const tagFilterEl = document.getElementById("managerTagFilter");
+const langSelect = document.getElementById("managerLang");
+
+// i18n（共用 i18n.js；以一般 script 在本模組前載入，window.HkI18n 可用）
+const HkI18n = typeof window !== "undefined" ? window.HkI18n : null;
+const t = (key, params) => (HkI18n ? HkI18n.t(key, params) : key);
 const githubTokenInput = document.getElementById("githubToken");
 const githubRepoInput = document.getElementById("githubRepo");
 const githubBranchInput = document.getElementById("githubBranch");
@@ -359,7 +364,7 @@ const renderTagFilter = () => {
     });
     return chip;
   };
-  tagFilterEl.appendChild(makeChip("全部", ""));
+  tagFilterEl.appendChild(makeChip(t("manager.filterAll"), ""));
   Array.from(tagSet)
     .sort((a, b) => a.localeCompare(b))
     .forEach((tag) => tagFilterEl.appendChild(makeChip(tag, tag)));
@@ -379,13 +384,13 @@ const renderPageList = () => {
     );
   }
   filtered = sortPages(filtered);
-  pageCountEl.textContent = `共 ${filtered.length} 個頁面`;
+  pageCountEl.textContent = t("manager.statusPageCount", { count: filtered.length });
   if (!filtered.length) {
     const empty = document.createElement("p");
     empty.textContent =
       state.searchTerm || state.activeTag
-        ? "沒有符合條件的頁面。"
-        : "目前尚未建立任何筆記。";
+        ? t("manager.emptySearch")
+        : t("manager.emptyAll");
     empty.className = "hk-manager-meta";
     listEl.appendChild(empty);
     return;
@@ -398,25 +403,25 @@ const renderPageList = () => {
     const deletePageBtn = document.createElement("button");
     deletePageBtn.type = "button";
     deletePageBtn.className = "hk-manager-card-delete";
-    deletePageBtn.textContent = "刪除";
-    deletePageBtn.title = "刪除整頁筆記";
+    deletePageBtn.textContent = t("manager.deletePage");
+    deletePageBtn.title = t("manager.deletePageTitle");
     deletePageBtn.addEventListener("click", async (event) => {
       event.stopPropagation();
       const ok = await openConfirmDialog({
-        title: "刪除整頁",
-        message: `確定刪除「${page.title}」的所有標註、摘要與心智圖嗎？此動作無法復原。`,
-        confirmLabel: "刪除",
-        cancelLabel: "取消",
+        title: t("manager.confirmDeletePageTitle"),
+        message: t("manager.confirmDeletePage", { title: page.title }),
+        confirmLabel: t("manager.deletePage"),
+        cancelLabel: t("manager.btnCancel"),
       });
       if (!ok) return;
       try {
         await deletePage(page.url);
         if (detailCurrentPageUrl === page.url) closePageDetail();
         await refreshManager();
-        setStatus("已刪除整頁筆記");
+        setStatus(t("manager.statusPageDeleted"));
       } catch (error) {
         console.debug("刪除整頁失敗", error);
-        setStatus("刪除失敗", true);
+        setStatus(t("manager.statusDeleteFail"), true);
       }
     });
     card.appendChild(deletePageBtn);
@@ -439,8 +444,8 @@ const renderPageList = () => {
           dateStyle: "medium",
           timeStyle: "short",
         }).format(new Date(page.updatedAt))
-      : "未知時間";
-    meta.textContent = `筆記數：${page.total} · 最後更新：${updatedText}`;
+      : t("manager.unknownTime");
+    meta.textContent = t("manager.pageMetaList", { total: page.total, updated: updatedText });
     card.appendChild(meta);
     listEl.appendChild(card);
   });
@@ -533,7 +538,7 @@ const parseGithubBackupPayload = (rawText) => {
   try {
     parsed = JSON.parse(rawText);
   } catch (_error) {
-    throw new Error("GitHub 備份檔案不是有效的 JSON 格式");
+    throw new Error(t("manager.errGithubBackupInvalid"));
   }
   const pages = Array.isArray(parsed?.pages)
     ? parsed.pages
@@ -541,11 +546,11 @@ const parseGithubBackupPayload = (rawText) => {
     ? parsed
     : [];
   if (!pages.length) {
-    throw new Error("GitHub 備份中沒有頁面資料");
+    throw new Error(t("manager.errGithubBackupEmpty"));
   }
   const normalized = normalizeBulkPages(pages);
   if (!normalized.length) {
-    throw new Error("GitHub 備份裡沒有可匯入的筆記");
+    throw new Error(t("manager.errGithubBackupNoImport"));
   }
   return normalized;
 };
@@ -553,7 +558,7 @@ const parseGithubBackupPayload = (rawText) => {
 const downloadAllPages = async () => {
   await fetchAllPages();
   if (!state.pages.length) {
-    setStatus("沒有筆記可匯出", true);
+    setStatus(t("manager.errNoNotesExport"), true);
     return;
   }
   const payload = buildFullExportPayload();
@@ -568,7 +573,7 @@ const downloadAllPages = async () => {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
-  setStatus("已下載全部筆記");
+  setStatus(t("manager.statusAllDownloaded"));
 };
 
 const ensureConfirmOverlay = () => {
@@ -604,13 +609,13 @@ const ensureConfirmOverlay = () => {
   cancelBtn.type = "button";
   cancelBtn.id = "hk-manager-confirm-cancel";
   cancelBtn.className = "hk-manager-btn hk-manager-btn-ghost";
-  cancelBtn.textContent = "取消";
+  cancelBtn.textContent = t("manager.btnCancel");
 
   const confirmBtn = document.createElement("button");
   confirmBtn.type = "button";
   confirmBtn.id = "hk-manager-confirm-ok";
   confirmBtn.className = "hk-manager-btn";
-  confirmBtn.textContent = "確定";
+  confirmBtn.textContent = t("manager.btnConfirm");
 
   actions.appendChild(cancelBtn);
   actions.appendChild(confirmBtn);
@@ -639,10 +644,10 @@ const openConfirmDialog = ({ title, message, confirmLabel, cancelLabel }) =>
       return;
     }
 
-    titleEl.textContent = title || "確認動作";
+    titleEl.textContent = title || t("manager.dialogTitle");
     messageEl.textContent = message || "";
-    confirmBtn.textContent = confirmLabel || "確定";
-    cancelBtn.textContent = cancelLabel || "取消";
+    confirmBtn.textContent = confirmLabel || t("manager.btnConfirm");
+    cancelBtn.textContent = cancelLabel || t("manager.btnCancel");
 
     let resolved = false;
     const cleanup = (result) => {
@@ -719,22 +724,22 @@ const ensureDetailOverlay = () => {
   const entriesSection = document.createElement("section");
   entriesSection.className = "hk-manager-detail-section hk-manager-detail-section-notes";
   const entriesTitle = document.createElement("h4");
-  entriesTitle.textContent = "筆記";
+  entriesTitle.textContent = t("manager.notesSection");
   const tagsRow = document.createElement("div");
   tagsRow.className = "hk-manager-detail-tags";
   const tagsLabel = document.createElement("span");
-  tagsLabel.textContent = "頁面標籤";
+  tagsLabel.textContent = t("manager.tagsLabel");
   const tagsChips = document.createElement("div");
   tagsChips.id = "hk-manager-detail-tags-chips";
   tagsChips.className = "hk-manager-tags-chips";
   const tagsInput = document.createElement("input");
   tagsInput.id = "hk-manager-detail-tags-input";
   tagsInput.className = "hk-manager-input";
-  tagsInput.placeholder = "以逗號或空白分隔多個 Tags";
+  tagsInput.placeholder = t("manager.tagsPlaceholder");
   const tagsButton = document.createElement("button");
   tagsButton.type = "button";
   tagsButton.className = "hk-manager-btn hk-manager-btn-muted";
-  tagsButton.textContent = "套用標籤";
+  tagsButton.textContent = t("manager.applyTags");
   tagsButton.addEventListener("click", () => savePageTagsFromDetail());
   tagsInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -757,7 +762,7 @@ const ensureDetailOverlay = () => {
   aiSection.className = "hk-manager-detail-section hk-manager-detail-section-ai";
   aiSection.id = "hk-manager-detail-ai";
   const aiTitle = document.createElement("h4");
-  aiTitle.textContent = "AI 紀錄";
+  aiTitle.textContent = t("manager.aiRecord");
   const aiContent = document.createElement("p");
   aiContent.id = "hk-manager-detail-ai-content";
   aiContent.className = "hk-manager-detail-ai";
@@ -771,12 +776,12 @@ const ensureDetailOverlay = () => {
   const mindmapHead = document.createElement("div");
   mindmapHead.className = "hk-manager-detail-mindmap-head";
   const mindmapTitle = document.createElement("h4");
-  mindmapTitle.textContent = "心智圖";
+  mindmapTitle.textContent = t("manager.mindmapSection");
   const mindmapCopyBtn = document.createElement("button");
   mindmapCopyBtn.type = "button";
   mindmapCopyBtn.id = "hk-manager-detail-mindmap-copy";
   mindmapCopyBtn.className = "hk-manager-btn hk-manager-btn-muted";
-  mindmapCopyBtn.textContent = "複製大綱";
+  mindmapCopyBtn.textContent = t("manager.mindmapCopy");
   mindmapHead.appendChild(mindmapTitle);
   mindmapHead.appendChild(mindmapCopyBtn);
   const mindmapContent = document.createElement("pre");
@@ -831,19 +836,21 @@ const renderPageDetail = (page) => {
   titleEl.textContent = page.title;
   urlEl.textContent = page.url;
   urlEl.href = page.url;
-  metaEl.textContent = `筆記 ${page.total} 則 · 最後更新：${
-    page.updatedAt
-      ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
-          new Date(page.updatedAt)
-        )
-      : "未知時間"
-  }`;
+  metaEl.textContent = t("manager.pageMetaDetail", {
+    total: page.total,
+    updated: page.updatedAt
+      ? new Intl.DateTimeFormat(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(new Date(page.updatedAt))
+      : t("manager.unknownTime"),
+  });
 
   entriesList.innerHTML = "";
   if (!page.entries?.length) {
     const empty = document.createElement("p");
     empty.className = "hk-manager-detail-empty";
-    empty.textContent = "尚無筆記。";
+    empty.textContent = t("manager.emptyNotes");
     entriesList.appendChild(empty);
   } else {
     page.entries.forEach((entry, index) => {
@@ -854,19 +861,19 @@ const renderPageDetail = (page) => {
       itemHead.className = "hk-manager-detail-item-head";
       const text = document.createElement("p");
       text.className = "hk-manager-detail-text";
-      text.textContent = entry.text || "(無內容)";
+      text.textContent = entry.text || t("manager.emptyContent");
       itemHead.appendChild(text);
       const delEntryBtn = document.createElement("button");
       delEntryBtn.type = "button";
       delEntryBtn.className = "hk-manager-detail-item-delete";
-      delEntryBtn.textContent = "刪除";
-      delEntryBtn.title = "刪除這筆標註";
+      delEntryBtn.textContent = t("manager.deletePage");
+      delEntryBtn.title = t("manager.deleteEntryTitle");
       delEntryBtn.addEventListener("click", async () => {
         const ok = await openConfirmDialog({
-          title: "刪除標註",
-          message: "確定刪除這筆標註嗎？此動作無法復原。",
-          confirmLabel: "刪除",
-          cancelLabel: "取消",
+          title: t("manager.confirmDeleteEntryTitle"),
+          message: t("manager.confirmDeleteEntry"),
+          confirmLabel: t("manager.deletePage"),
+          cancelLabel: t("manager.btnCancel"),
         });
         if (!ok) return;
         try {
@@ -876,10 +883,10 @@ const renderPageDetail = (page) => {
           if (updated) renderPageDetail(updated);
           else closePageDetail();
           renderPageList();
-          setStatus("已刪除標註");
+          setStatus(t("ai.statusHighlightDeleted"));
         } catch (error) {
           console.debug("刪除標註失敗", error);
-          setStatus("刪除失敗", true);
+          setStatus(t("manager.statusDeleteFail"), true);
         }
       });
       itemHead.appendChild(delEntryBtn);
@@ -890,14 +897,14 @@ const renderPageDetail = (page) => {
         const note = document.createElement("p");
         note.className = "hk-manager-detail-note is-clickable";
         note.textContent = trimmedNote;
-        note.setAttribute("title", "點擊複製註解");
+        note.setAttribute("title", t("manager.clickToCopyNote"));
         note.addEventListener("click", async () => {
           try {
             await navigator.clipboard.writeText(trimmedNote);
-            setStatus("已複製註解");
+            setStatus(t("manager.statusNoteCopied"));
           } catch (error) {
             console.debug("複製註解失敗", error);
-            setStatus("無法複製註解", true);
+            setStatus(t("manager.errNoteCopy"), true);
           }
         });
         item.appendChild(note);
@@ -913,7 +920,7 @@ const renderPageDetail = (page) => {
   if (!sanitizedTags.length) {
     const emptyTag = document.createElement("span");
     emptyTag.className = "hk-manager-detail-empty";
-    emptyTag.textContent = "尚無標籤";
+    emptyTag.textContent = t("manager.emptyTags");
     tagsChips.appendChild(emptyTag);
   } else {
     sanitizedTags.forEach((tag) => {
@@ -930,7 +937,7 @@ const renderPageDetail = (page) => {
     aiContent.textContent = aiNote.note;
     aiSection.style.display = "";
   } else {
-    aiContent.textContent = "尚未產生 AI 紀錄。";
+    aiContent.textContent = t("manager.emptyAiNote");
     aiSection.style.display = "";
   }
 
@@ -951,10 +958,10 @@ const renderPageDetail = (page) => {
       mindmapCopyBtn.onclick = async () => {
         try {
           await navigator.clipboard.writeText(outline);
-          setStatus("已複製心智圖大綱");
+          setStatus(t("manager.statusMindmapCopied"));
         } catch (error) {
           console.debug("複製心智圖大綱失敗", error);
-          setStatus("複製失敗", true);
+          setStatus(t("mindmap.copyFail"), true);
         }
       };
     } else {
@@ -1028,10 +1035,10 @@ const savePageTagsFromDetail = async () => {
       }
     );
     renderPageList();
-    setStatus("已更新頁面標籤");
+    setStatus(t("manager.statusTagsUpdated"));
   } catch (error) {
     console.debug("更新頁面標籤失敗", error);
-    setStatus("無法更新頁面標籤", true);
+    setStatus(t("manager.errTagsUpdate"), true);
   }
 };
 
@@ -1099,17 +1106,17 @@ const getGithubSettingsSnapshot = () => {
 };
 
 const validateGithubSettings = (settings) => {
-  if (!settings.token) return "請輸入 GitHub Token";
+  if (!settings.token) return t("manager.errNoToken");
   if (!settings.repo || !settings.repo.includes("/")) {
-    return "請輸入 owner/repo 格式的儲存庫";
+    return t("manager.errNoRepo");
   }
-  if (!settings.path) return "請輸入檔案路徑";
+  if (!settings.path) return t("manager.errNoPath");
   return null;
 };
 
 const fetchGithubFileSha = async (settings) => {
   const repoBase = buildRepoApiBase(settings.repo);
-  if (!repoBase) throw new Error("儲存庫格式不正確");
+  if (!repoBase) throw new Error(t("manager.errRepoInvalid"));
   const encodedPath = buildContentPath(settings.path);
   const url = `${repoBase}/contents/${encodedPath}?ref=${encodeURIComponent(
     settings.branch
@@ -1125,7 +1132,7 @@ const fetchGithubFileSha = async (settings) => {
   }
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`GitHub 讀取檔案失敗：${errorText}`);
+    throw new Error(t("manager.githubReadFail", { error: errorText }));
   }
   const json = await response.json();
   return json?.sha ?? null;
@@ -1133,7 +1140,7 @@ const fetchGithubFileSha = async (settings) => {
 
 const fetchGithubBackupContent = async (settings) => {
   const repoBase = buildRepoApiBase(settings.repo);
-  if (!repoBase) throw new Error("儲存庫格式不正確");
+  if (!repoBase) throw new Error(t("manager.errRepoInvalid"));
   const encodedPath = buildContentPath(settings.path);
   const url = `${repoBase}/contents/${encodedPath}?ref=${encodeURIComponent(
     settings.branch
@@ -1145,15 +1152,15 @@ const fetchGithubBackupContent = async (settings) => {
     },
   });
   if (response.status === 404) {
-    throw new Error("GitHub 上找不到指定的備份檔案");
+    throw new Error(t("manager.errGithubNotFound"));
   }
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`GitHub 讀取檔案失敗：${errorText}`);
+    throw new Error(t("manager.githubReadFail", { error: errorText }));
   }
   const json = await response.json();
   if (Array.isArray(json)) {
-    throw new Error("GitHub 路徑指向資料夾，請指定備份檔案");
+    throw new Error(t("manager.errGithubPathIsDir"));
   }
   if (json?.content) {
     return decodeBase64ToText(json.content);
@@ -1167,7 +1174,7 @@ const fetchGithubBackupContent = async (settings) => {
     });
     if (!rawResponse.ok) {
       const errorText = await rawResponse.text();
-      throw new Error(`GitHub 讀取檔案失敗：${errorText}`);
+      throw new Error(t("manager.githubReadFail", { error: errorText }));
     }
     return await rawResponse.text();
   }
@@ -1180,15 +1187,15 @@ const fetchGithubBackupContent = async (settings) => {
     });
     if (!blobResponse.ok) {
       const errorText = await blobResponse.text();
-      throw new Error(`GitHub 讀取檔案失敗：${errorText}`);
+      throw new Error(t("manager.githubReadFail", { error: errorText }));
     }
     const blob = await blobResponse.json();
     if (!blob?.content) {
-      throw new Error("GitHub 回傳的檔案內容為空");
+      throw new Error(t("manager.errGithubEmpty"));
     }
     return decodeBase64ToText(blob.content);
   }
-  throw new Error("GitHub 回傳的檔案內容為空");
+  throw new Error(t("manager.errGithubEmpty"));
 };
 
 const uploadHighlightsToGithub = async () => {
@@ -1199,11 +1206,11 @@ const uploadHighlightsToGithub = async () => {
     return;
   }
   setGithubActionsDisabled(true);
-  setGithubStatus("上傳中…");
+  setGithubStatus(t("manager.statusUploading"));
   try {
     await fetchAllPages();
     if (!state.pages.length) {
-      throw new Error("目前沒有筆記可上傳");
+      throw new Error(t("manager.errNoNotesUpload"));
     }
     const payload = buildFullExportPayload();
     const content = encodeContentToBase64(JSON.stringify(payload, null, 2));
@@ -1215,7 +1222,7 @@ const uploadHighlightsToGithub = async () => {
     }
     const repoBase = buildRepoApiBase(settings.repo);
     if (!repoBase) {
-      throw new Error("儲存庫格式不正確");
+      throw new Error(t("manager.errRepoInvalid"));
     }
     const encodedPath = buildContentPath(settings.path);
     const url = `${repoBase}/contents/${encodedPath}`;
@@ -1238,13 +1245,13 @@ const uploadHighlightsToGithub = async () => {
     });
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`GitHub API 錯誤：${errorText}`);
+      throw new Error(t("manager.githubApiError", { error: errorText }));
     }
-    setGithubStatus("已成功上傳到 GitHub");
+    setGithubStatus(t("manager.statusUploaded"));
     githubSettings = { ...githubSettings, ...settings };
     persistGithubSettings(githubSettings);
   } catch (error) {
-    setGithubStatus(error?.message || "上傳失敗", true);
+    setGithubStatus(error?.message || t("manager.errUpload"), true);
   } finally {
     setGithubActionsDisabled(false);
   }
@@ -1305,7 +1312,7 @@ const applyImportedPageExtras = async (pages) => {
 
 const applyGithubBackupPages = async (pages) => {
   if (!Array.isArray(pages) || !pages.length) {
-    setGithubStatus("GitHub 備份中沒有可匯入的頁面", true);
+    setGithubStatus(t("manager.errGithubNoPages"), true);
     return;
   }
   await fetchAllPages();
@@ -1336,19 +1343,19 @@ const applyGithubBackupPages = async (pages) => {
   if (changed.length) {
     const samples = changedUrls.slice(0, 3).map((url) => `- ${getPageDisplayName(url)}`);
     const confirmMessage = [
-      `有 ${changed.length} 個頁面在本機已有筆記，且內容不同。`,
+      t("manager.importConflictIntro", { count: changed.length }),
       ...samples,
       changed.length > samples.length ? "..." : null,
-      "要覆蓋這些頁面並改用 GitHub 版本嗎？",
-      "按「取消」則只匯入新的頁面並保留本機資料。",
+      t("manager.importConflictAsk"),
+      t("manager.importConflictHint"),
     ]
       .filter(Boolean)
       .join("\n");
     const shouldOverride = await openConfirmDialog({
-      title: "確認匯入方式",
+      title: t("manager.confirmImportTitle"),
       message: confirmMessage,
-      confirmLabel: "覆蓋本機版本",
-      cancelLabel: "只匯入新頁面",
+      confirmLabel: t("manager.confirmImportOverwrite"),
+      cancelLabel: t("manager.confirmImportNewOnly"),
     });
     if (!shouldOverride) {
       pagesToImport = pagesToImport.filter((page) => !changedUrls.includes(page.url));
@@ -1357,9 +1364,9 @@ const applyGithubBackupPages = async (pages) => {
   }
   if (!pagesToImport.length) {
     if (identical.length) {
-      setGithubStatus("已是最新版本，沒有需要更新的筆記。");
+      setGithubStatus(t("manager.statusAlreadyLatest"));
     } else {
-      setGithubStatus("已取消匯入，本機筆記保持不變。");
+      setGithubStatus(t("manager.statusImportCancelled"));
     }
     return;
   }
@@ -1371,9 +1378,9 @@ const applyGithubBackupPages = async (pages) => {
   const importedCount = pagesToImport.length;
   const skippedOverlap = overlapping.length - overwrittenCount;
   const statusParts = [
-    `已從 GitHub 匯入 ${importedCount} 個頁面`,
-    overwrittenCount ? `覆蓋 ${overwrittenCount} 個已存在頁面` : null,
-    skippedOverlap > 0 ? `保留 ${skippedOverlap} 個本機版本` : null,
+    t("manager.statusGithubImported", { count: importedCount }),
+    overwrittenCount ? t("manager.statusOverwritten", { count: overwrittenCount }) : null,
+    skippedOverlap > 0 ? t("manager.statusKeptLocal", { count: skippedOverlap }) : null,
   ].filter(Boolean);
   setGithubStatus(statusParts.join("，"));
   await refreshManager();
@@ -1387,7 +1394,7 @@ const downloadHighlightsFromGithub = async () => {
     return;
   }
   setGithubActionsDisabled(true);
-  setGithubStatus("從 GitHub 下載中…");
+  setGithubStatus(t("manager.statusDownloading"));
   try {
     const content = await fetchGithubBackupContent(settings);
     const pages = parseGithubBackupPayload(content);
@@ -1395,7 +1402,7 @@ const downloadHighlightsFromGithub = async () => {
     githubSettings = { ...githubSettings, ...settings };
     persistGithubSettings(githubSettings);
   } catch (error) {
-    setGithubStatus(error?.message || "下載失敗", true);
+    setGithubStatus(error?.message || t("manager.errDownload"), true);
   } finally {
     setGithubActionsDisabled(false);
   }
@@ -1403,7 +1410,7 @@ const downloadHighlightsFromGithub = async () => {
 
 const importMultipleFiles = async (files) => {
   if (!files?.length) return;
-  setStatus("解析匯入檔案中…");
+  setStatus(t("manager.statusParsing"));
   const texts = await Promise.all(Array.from(files).map((file) => file.text()));
 
   // 兩種格式並存：bulk（{pages:[...]}，含摘要/心智圖/標籤）與舊的單筆標註陣列。
@@ -1454,7 +1461,7 @@ const importMultipleFiles = async (files) => {
 
   const candidatePages = [...bulkByUrl.values(), ...looseByUrl.values()];
   if (!candidatePages.length) {
-    setStatus("沒有可匯入的筆記", true);
+    setStatus(t("manager.errNoImport"), true);
     return;
   }
 
@@ -1470,7 +1477,7 @@ const importMultipleFiles = async (files) => {
     toImport.push(page);
   });
   if (!toImport.length) {
-    setStatus("所有頁面皆已有筆記，已忽略匯入。", true);
+    setStatus(t("manager.errAllExist"), true);
     return;
   }
 
@@ -1483,26 +1490,48 @@ const importMultipleFiles = async (files) => {
   await chrome.storage.local.set(updates);
   await applyImportedPageExtras(toImport);
   setStatus(
-    `成功匯入 ${toImport.length} 個頁面，跳過 ${skipped.length} 個已存在的頁面。`
+    t("manager.statusImportPartial", { imported: toImport.length, skipped: skipped.length })
   );
   await refreshManager();
 };
 
-const init = () => {
+const initI18n = async () => {
+  if (!HkI18n) return;
+  await HkI18n.initI18n();
+  HkI18n.applyDOMTranslations();
+  if (langSelect) {
+    langSelect.value = HkI18n.getLang();
+    langSelect.addEventListener("change", (event) => {
+      HkI18n.setLang(event.target.value);
+    });
+  }
+  HkI18n.onLangChange(() => {
+    HkI18n.applyDOMTranslations();
+    if (langSelect) langSelect.value = HkI18n.getLang();
+    renderPageList();
+    if (detailCurrentPageUrl) {
+      const page = state.pages.find((p) => p.url === detailCurrentPageUrl);
+      if (page) renderPageDetail(page);
+    }
+  });
+};
+
+const init = async () => {
+  await initI18n();
   refreshManager().catch((error) => {
     console.debug("載入筆記失敗", error);
-    setStatus("無法載入筆記", true);
+    setStatus(t("manager.errLoadNotes"), true);
   });
   downloadBtn?.addEventListener("click", () => {
     downloadAllPages().catch((error) => {
       console.debug("下載全部筆記失敗", error);
-      setStatus(error?.message || "下載失敗", true);
+      setStatus(error?.message || t("manager.errDownload"), true);
     });
   });
   importInput?.addEventListener("change", (event) => {
     importMultipleFiles(event.target.files).catch((error) => {
-      console.debug("匯入失敗", error);
-      setStatus(error?.message || "匯入失敗", true);
+      console.debug(t("manager.errImport"), error);
+      setStatus(error?.message || t("manager.errImport"), true);
     });
     event.target.value = "";
   });
