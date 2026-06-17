@@ -1055,8 +1055,8 @@ ${highlightLines || "（尚未有標註，請完全依原文脈絡組織）"}`);
 // Split an AI response into named sections by `===重點===`-style marker lines.
 // Tolerates ＝, 【】, [] and markdown headings around the keyword.
 const AI_SECTION_ALIASES = {
-  highlights: ["重點", "畫重點", "標註", "highlights"],
-  note: ["摘要", "筆記", "摘要筆記", "summary"],
+  highlights: ["重點", "畫重點", "標註", "highlights", "marks"],
+  note: ["摘要", "筆記", "摘要筆記", "summary", "notes"],
   mindmap: ["心智圖", "mindmap"],
 };
 
@@ -1068,7 +1068,7 @@ const splitAiSections = (rawText) => {
   });
   // Single "#" is reserved for category tags (#分類) and the mindmap root
   // (# 主題) — only ## and deeper count as markdown section heads here.
-  const headRe = /^\s*(?:[=＝—-]{2,}|[【\[]|#{2,4})\s*([^=＝【】\[\]#\s]{1,8})\s*(?:[=＝—-]{2,}|[】\]])?\s*$/;
+  const headRe = /^\s*(?:[=＝—-]{2,}|[【\[]|#{2,4})\s*([^=＝【】\[\]#\s]{1,14})\s*(?:[=＝—-]{2,}|[】\]])?\s*$/;
   const sections = {};
   let currentKey = null;
   let buffer = [];
@@ -1488,8 +1488,8 @@ const parseHighlightBlocks = (rawText) => {
 
   const stripPrefix = (line, labels) => {
     for (const label of labels) {
-      // tolerate full/half-width colon and optional spaces
-      const re = new RegExp(`^${label}\\s*[:：]\\s*`);
+      // tolerate full/half-width colon, optional spaces, and case (English labels)
+      const re = new RegExp(`^${label}\\s*[:：]\\s*`, "i");
       if (re.test(line)) return line.replace(re, "").trim();
     }
     return null;
@@ -1503,13 +1503,22 @@ const parseHighlightBlocks = (rawText) => {
     let tag = "";
     let reason = "";
     for (const line of lines) {
-      const asText = stripPrefix(line, ["原文", "原句", "片段"]);
+      // 中英雙語前綴都認，避免英文輸出時把 原文：寫成 Source: 而解析失敗
+      const asText = stripPrefix(line, [
+        "原文", "原句", "片段", "source", "quote", "excerpt", "text",
+      ]);
       if (asText !== null) { text = asText; continue; }
-      const asReason = stripPrefix(line, ["重點", "摘要", "說明", "理由"]);
+      const asReason = stripPrefix(line, [
+        "重點", "摘要", "說明", "理由", "point", "summary", "note", "reason", "insight",
+      ]);
       if (asReason !== null) { reason = asReason; continue; }
-      // tag line: bare "#定義" or prefixed "分類：#定義"
+      // tag line: bare "#定義" or prefixed "分類：#定義" / "Category: #..."
       const tagMatch = line.match(/#\s*([^\s#:：]+)/);
-      if (tagMatch && (line.startsWith("#") || /^(分類|顏色|標籤)\s*[:：]/.test(line))) {
+      if (
+        tagMatch &&
+        (line.startsWith("#") ||
+          /^(分類|顏色|標籤|category|color|colour|tag)\s*[:：]/i.test(line))
+      ) {
         tag = tagMatch[1].trim();
       }
     }
@@ -2157,7 +2166,7 @@ const applyMindmapResponseText = async (text) => {
 
 // Outline heuristics: mostly list lines, no 原文： blocks.
 const looksLikeMindmapOutline = (text) => {
-  if (/^原文\s*[:：]/m.test(text)) return false;
+  if (/^(原文|source)\s*[:：]/im.test(text)) return false;
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 3) return false;
   const listLines = lines.filter((l) => /^\s*(?:[-*•·]|\d+[.)])\s+/.test(l));
