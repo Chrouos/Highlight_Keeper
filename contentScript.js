@@ -20,7 +20,7 @@ const resolvePageKey = () => {
   return normalizePageKey(window.location.href);
 };
 
-const pageKey = resolvePageKey();
+let pageKey = resolvePageKey();
 
 // ── i18n（與 popup／manager 共用 i18n.js 的字典；manifest 已先注入 i18n.js） ──
 const HkI18n = typeof window !== "undefined" ? window.HkI18n : null;
@@ -4862,11 +4862,11 @@ const applyColorChange = async (color) => {
     } catch (storageError) {
       console.debug("更新預設 highlight 顏色失敗", storageError);
     }
-    setHighlightMenuStatus("顏色已更新");
+    setHighlightMenuStatus(t("menu.colorUpdated"));
     await refreshHighlightPanelIfVisible();
   } catch (error) {
     console.debug("更新 highlight 顏色失敗", error);
-    setHighlightMenuStatus("無法更新顏色", true);
+    setHighlightMenuStatus(t("menu.colorUpdateFailed"), true);
   }
 };
 
@@ -4886,11 +4886,11 @@ const handleSaveNote = async () => {
     if (highlightMenuEls.noteField) {
       highlightMenuEls.noteField.value = trimmedNote;
     }
-    setHighlightMenuStatus("註解已儲存");
+    setHighlightMenuStatus(t("menu.noteSaved"));
     await refreshHighlightPanelIfVisible();
   } catch (error) {
     console.debug("儲存 highlight 註解失敗", error);
-    setHighlightMenuStatus("無法儲存註解", true);
+    setHighlightMenuStatus(t("menu.noteSaveFailed"), true);
   }
 };
 
@@ -6121,8 +6121,8 @@ const setStoredHighlights = async (highlights, key = pageKey) => {
   } catch (error) {
     showHkToast(
       isQuotaError(error)
-        ? "儲存空間不足，這筆標註可能沒存成功。請到「管理所有筆記」清理舊資料。"
-        : "標註儲存失敗，請重試。",
+        ? t("storage.quotaToast")
+        : t("storage.saveFailed"),
       { isError: true }
     );
     throw error;
@@ -6272,17 +6272,19 @@ const restoreHighlights = async () => {
 // 同一篇文章的識別碼：當 pageKey 沒有查詢字串（canonical 乾淨網址）時，
 // 用「origin + 路徑」比對，才能把帶不同信件／追蹤參數的舊鍵也認出來；
 // 若 pageKey 仍帶查詢字串（查詢決定內容的站，如 youtube ?v=），則嚴格比對正規化網址。
-const pageKeyHasQuery = (() => {
+// SPA 導航時 pageKey 會被重算，所以這裡用函式即時讀「當前」pageKey，
+// 避免初始注入時固定下來的舊判斷套用到新頁。
+const pageKeyHasQuery = () => {
   try {
     return Boolean(new URL(pageKey).search);
   } catch (_e) {
     return false;
   }
-})();
+};
 const articleIdentity = (url) => {
   try {
     const u = new URL(url);
-    return pageKeyHasQuery
+    return pageKeyHasQuery()
       ? normalizePageKey(url)
       : `${u.origin}${u.pathname}`;
   } catch (_e) {
@@ -6663,6 +6665,92 @@ window.addEventListener("load", () => attemptRestoreHighlights(), {
   once: true,
 });
 
+// ── SPA 導航偵測 ─────────────────────────────────────────────
+// 內容腳本只在初次注入時跑一次，SPA（Substack、Medium、新聞站）用
+// history API 換頁不會重新注入，於是 pageKey 卡在舊頁、新標註存錯鍵、
+// 舊頁標註也殘留在新畫面上。這裡監看網址變化，換頁時清舊標、重算
+// pageKey 並重新還原。
+const LOCATION_CHANGE_EVENT = "hk:locationchange";
+let urlChangeTimer = null;
+
+const onUrlChanged = (next) => {
+  // 清掉舊頁殘留的 in-page 標註，避免疊到新畫面（沿用 clearPageHighlights 的做法）。
+  try {
+    document
+      .querySelectorAll(`.${HIGHLIGHT_CLASS}`)
+      .forEach(unwrapHighlightElement);
+  } catch (_e) {}
+
+  pageKey = next;
+  highlightPanelState.activeKey = pageKey;
+
+  // 重設失聯狀態：新頁要重新統計，不可沿用舊頁的數字／已通知旗標。
+  orphanHighlightCount = 0;
+  orphanNotified = false;
+  try {
+    updateOrphanNotice();
+  } catch (_e) {}
+
+  // 重新還原；restoreHighlights 對已存在的標記是冪等的，重試階梯會處理
+  // SPA 延遲渲染。attemptRestoreHighlights 內已會 ensurePageMetaTitle。
+  attemptRestoreHighlights(0);
+
+  // 面板若開著，讓它跟著切到新頁。
+  try {
+    refreshHighlightPanelIfVisible();
+  } catch (_e) {}
+};
+
+const handleLocationChange = () => {
+  let next;
+  try {
+    next = normalizePageKey(window.location.href);
+  } catch (_e) {
+    return;
+  }
+  if (next === pageKey) return;
+  // debounce：SPA 換頁常連續觸發多個事件／mutation，合併成一次。
+  if (urlChangeTimer) window.clearTimeout(urlChangeTimer);
+  urlChangeTimer = window.setTimeout(() => {
+    urlChangeTimer = null;
+    let settled;
+    try {
+      settled = normalizePageKey(window.location.href);
+    } catch (_e) {
+      return;
+    }
+    if (settled === pageKey) return;
+    onUrlChanged(settled);
+  }, 300);
+};
+
+// 攔截 pushState／replaceState：原生不會發事件，補一個合成事件好讓我們監聽。
+// 用旗標防止重複注入（如 popup 的 executeScript 後備路徑）時二度包裝／重複註冊。
+if (!window.__hkUrlWatcherInstalled) {
+  window.__hkUrlWatcherInstalled = true;
+  try {
+    const wrapHistoryMethod = (name) => {
+      const original = history[name];
+      if (typeof original !== "function" || original.__hkWrapped) return;
+      const wrapped = function (...args) {
+        const result = original.apply(this, args);
+        try {
+          window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
+        } catch (_e) {}
+        return result;
+      };
+      wrapped.__hkWrapped = true;
+      history[name] = wrapped;
+    };
+    wrapHistoryMethod("pushState");
+    wrapHistoryMethod("replaceState");
+  } catch (_e) {}
+
+  window.addEventListener("popstate", handleLocationChange);
+  window.addEventListener("hashchange", handleLocationChange);
+  window.addEventListener(LOCATION_CHANGE_EVENT, handleLocationChange);
+}
+
 const ensureNoteTooltip = () => {
   if (highlightNoteTooltip) return highlightNoteTooltip;
   const el = document.createElement("div");
@@ -6957,7 +7045,7 @@ const handleDownloadAllHighlights = async () => {
   try {
     const { pages } = await collectAllPageHighlights();
     if (!pages.length) {
-      setArchiveStatus("沒有筆記可下載", true);
+      setArchiveStatus(t("archive.nothingToDownload"), true);
       return;
     }
     const payload = {
@@ -6977,17 +7065,17 @@ const handleDownloadAllHighlights = async () => {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    setArchiveStatus("已下載全部筆記");
+    setArchiveStatus(t("archive.downloaded"));
   } catch (error) {
     console.debug("下載全部筆記失敗", error);
-    setArchiveStatus(error?.message || "下載全部筆記失敗", true);
+    setArchiveStatus(error?.message || t("archive.downloadFailed"), true);
   }
 };
 
 const mergeBulkImportPayload = async (files) => {
   if (!files?.length) return;
   try {
-    setArchiveStatus("匯入中…");
+    setArchiveStatus(t("archive.importing"));
     const fileTexts = await Promise.all(Array.from(files).map((file) => file.text()));
     const allEntries = fileTexts.flatMap((text) =>
       parseImportedHighlightsPayload(text)
@@ -7033,7 +7121,7 @@ const mergeBulkImportPayload = async (files) => {
     attemptRestoreHighlights();
   } catch (error) {
     console.debug("匯入全部筆記失敗", error);
-    setArchiveStatus(error?.message || "匯入全部筆記失敗", true);
+    setArchiveStatus(error?.message || t("archive.importFailed"), true);
   }
 };
 

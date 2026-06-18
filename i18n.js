@@ -376,6 +376,19 @@
       "panel.orphanNotice": "⚠ 有 {count} 筆標註找不到對應文字，可能是頁面內容已變動。",
       "panel.orphanToast": "有 {orphan} 筆標註找不到對應文字（頁面內容可能已變動），共 {total} 筆。",
 
+      // ── menu / archive / storage 狀態訊息 ──────────────────
+      "menu.colorUpdated": "顏色已更新",
+      "menu.colorUpdateFailed": "無法更新顏色",
+      "menu.noteSaved": "註解已儲存",
+      "menu.noteSaveFailed": "無法儲存註解",
+      "archive.nothingToDownload": "沒有筆記可下載",
+      "archive.downloaded": "已下載全部筆記",
+      "archive.downloadFailed": "下載全部筆記失敗",
+      "archive.importing": "匯入中…",
+      "archive.importFailed": "匯入全部筆記失敗",
+      "storage.quotaToast": "儲存空間不足，這筆標註可能沒存成功。請到「管理所有筆記」清理舊資料。",
+      "storage.saveFailed": "標註儲存失敗，請重試。",
+
       // ── AI prompts (sent to model) ───────────────────────
       "prompt.systemAssistant": "你是一位筆記整理助手，根據提供的網頁全文與標註內容，整理出淺顯易懂的筆記。優先考慮使用者標注段落，將重點控制在五百字以內，輸出內容需要像說故事一樣有脈絡的說明。",
       "prompt.systemAnalyzer": "你是一位文章結構分析助手。請全面標註文章中各個關鍵面向的重要片段，確保覆蓋文章的完整論述架構，不要只挑少數幾句。",
@@ -777,6 +790,19 @@
       "ai.bulkImported": "Imported {imported} page(s), skipped {skipped} page(s)",
       "panel.orphanNotice": "⚠ {count} highlight(s) couldn't be located — the page may have changed.",
       "panel.orphanToast": "{orphan} highlight(s) couldn't be located (page may have changed), of {total} total.",
+
+      // ── menu / archive / storage status messages ─────────
+      "menu.colorUpdated": "Color updated",
+      "menu.colorUpdateFailed": "Couldn't update color",
+      "menu.noteSaved": "Note saved",
+      "menu.noteSaveFailed": "Couldn't save note",
+      "archive.nothingToDownload": "No notes to download",
+      "archive.downloaded": "All notes downloaded",
+      "archive.downloadFailed": "Failed to download all notes",
+      "archive.importing": "Importing…",
+      "archive.importFailed": "Failed to import all notes",
+      "storage.quotaToast": "Storage is full; this highlight may not have been saved. Open \"Manage all notes\" to clear old data.",
+      "storage.saveFailed": "Failed to save highlight, please try again.",
 
       // ── AI prompts ───────────────────────────────────────
       "prompt.systemAssistant": "You are a note-taking assistant. Given the full webpage text and existing highlights, produce easy-to-read notes. Prioritize highlighted segments, keep within ~500 words, and write in a clear narrative.",
