@@ -480,6 +480,20 @@ const deletePage = async (url) => {
   });
 };
 
+// 跳到原文：寫入聚焦請求後開分頁，內容腳本載入時會捲動並閃爍該標註。
+const openHighlightInPage = async (url, entryId) => {
+  try {
+    if (entryId) {
+      await chrome.storage.local.set({
+        hkFocusHighlight: { url, id: entryId, at: Date.now() },
+      });
+    }
+  } catch (error) {
+    console.debug("寫入聚焦請求失敗", error);
+  }
+  chrome.tabs.create({ url });
+};
+
 // 刪除單筆標註：優先用 id 比對，沒有 id 才退回索引。
 const deleteHighlightEntry = async (url, entry, index) => {
   const stored = await chrome.storage.local.get(url);
@@ -488,7 +502,12 @@ const deleteHighlightEntry = async (url, entry, index) => {
     ? entries.filter((item) => item?.id !== entry.id)
     : entries.filter((_, i) => i !== index);
   if (next.length === entries.length) return false;
-  await chrome.storage.local.set({ [url]: next });
+  if (next.length === 0) {
+    // 刪到最後一筆 → 整頁清掉（含 meta/摘要/心智圖），不留 0 筆空頁
+    await deletePage(url);
+  } else {
+    await chrome.storage.local.set({ [url]: next });
+  }
   return true;
 };
 
@@ -866,6 +885,15 @@ const renderPageDetail = (page) => {
       text.className = "hk-manager-detail-text";
       text.textContent = entry.text || t("manager.emptyContent");
       itemHead.appendChild(text);
+      const jumpBtn = document.createElement("button");
+      jumpBtn.type = "button";
+      jumpBtn.className = "hk-manager-detail-item-jump";
+      jumpBtn.textContent = t("manager.jumpToSource");
+      jumpBtn.title = t("manager.jumpToSourceTitle");
+      jumpBtn.addEventListener("click", () =>
+        openHighlightInPage(page.url, entry.id)
+      );
+      itemHead.appendChild(jumpBtn);
       const delEntryBtn = document.createElement("button");
       delEntryBtn.type = "button";
       delEntryBtn.className = "hk-manager-detail-item-delete";

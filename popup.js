@@ -8,30 +8,9 @@ const statusEl = document.querySelector(".status");
 
 const t = (key, params) => HkI18n.t(key, params);
 
-// 與 contentScript.js 的 normalizePageKey 保持一致（去掉 #錨點與已知追蹤參數）。
-const TRACKING_PARAMS = new Set([
-  "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "yclid", "ttclid",
-  "twclid", "igshid", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "spm",
-  "scm", "vero_id", "oly_enc_id", "oly_anon_id", "_openstat",
-]);
-const normalizePageKey = (href) => {
-  try {
-    const url = new URL(href);
-    url.hash = "";
-    const params = url.searchParams;
-    const drop = [];
-    params.forEach((_value, key) => {
-      const lower = key.toLowerCase();
-      if (lower.startsWith("utm_") || TRACKING_PARAMS.has(lower)) drop.push(key);
-    });
-    drop.forEach((key) => params.delete(key));
-    const query = params.toString();
-    url.search = query ? `?${query}` : "";
-    return url.href;
-  } catch (_e) {
-    return href;
-  }
-};
+// 網址正規化共用自 shared.js（manifest/popup.html 已先載入）。
+const normalizePageKey = (href) =>
+  window.HkUrlKey ? window.HkUrlKey.normalizePageKey(href) : href;
 
 const DEFAULT_COLOR = "#ffeb3b";
 const DEFAULT_PALETTE = [
@@ -100,7 +79,7 @@ const injectContentAssets = async (tabId) => {
   try {
     await chrome.scripting?.executeScript({
       target: { tabId },
-      files: ["i18n.js", "contentScript.js"],
+      files: ["shared.js", "i18n.js", "contentScript.js"],
     });
   } catch (error) {
     console.debug("注入內容腳本失敗", error);

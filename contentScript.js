@@ -4,32 +4,10 @@ const MAX_SELECTOR_DEPTH = 6;
 const TEXT_CONTEXT_CHARS = 60;
 const TEXT_PARENT_SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT"]);
 
-// 把網址正規化成穩定的儲存鍵：去掉 #錨點與常見追蹤參數（utm_*、fbclid…），
-// 否則同一篇文章帶不同追蹤參數會被當成不同頁，已畫的重點就會「不見」。
-// 注意：只剝除已知的追蹤參數，保留 ?id=、?v= 等決定內容的真參數。
-const TRACKING_PARAMS = new Set([
-  "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "yclid", "ttclid",
-  "twclid", "igshid", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "spm",
-  "scm", "vero_id", "oly_enc_id", "oly_anon_id", "_openstat",
-]);
-const normalizePageKey = (href) => {
-  try {
-    const url = new URL(href);
-    url.hash = "";
-    const params = url.searchParams;
-    const drop = [];
-    params.forEach((_value, key) => {
-      const lower = key.toLowerCase();
-      if (lower.startsWith("utm_") || TRACKING_PARAMS.has(lower)) drop.push(key);
-    });
-    drop.forEach((key) => params.delete(key));
-    const query = params.toString();
-    url.search = query ? `?${query}` : "";
-    return url.href;
-  } catch (_e) {
-    return href;
-  }
-};
+// 網址正規化共用自 shared.js（manifest 內已於本檔前載入）：去掉 #錨點與已知
+// 追蹤參數，否則同一篇文章帶不同參數會被當成不同頁，標註就會「不見」。
+const normalizePageKey = (href) =>
+  window.HkUrlKey ? window.HkUrlKey.normalizePageKey(href) : href;
 
 // 優先用頁面宣告的 canonical 連結當鍵：它是去掉所有追蹤／信件參數後最穩定的
 // 文章網址（例如 Substack 的 /p/slug）。沒有 canonical 才退回剝參數的網址。
@@ -881,8 +859,12 @@ ${highlightLines || "（尚未加入標註）"}`);
 const normalizeWhitespace = (input) =>
   typeof input === "string" ? input.replace(/\s+/g, " ").trim() : "";
 
+// 色彩使用次數只用於排序色票提示，變動不頻繁；快取避免每次複製 Prompt 都全量讀。
+// 任何標註寫入（setStoredHighlights）會把它設為 null 以失效。
+let colorUsageCache = null;
 const collectColorUsageCounts = async () => {
   if (!storage) return {};
+  if (colorUsageCache) return colorUsageCache;
   try {
     const all = await storage.get(null);
     const counts = {};
@@ -894,6 +876,7 @@ const collectColorUsageCounts = async () => {
         counts[color] = (counts[color] || 0) + 1;
       });
     });
+    colorUsageCache = counts;
     return counts;
   } catch (error) {
     console.debug("讀取顏色使用次數失敗", error);
@@ -3721,6 +3704,27 @@ const focusHighlightElement = (id) => {
   }, 1600);
 };
 
+// 管理頁「跳到原文」：寫入 hkFocusHighlight 後開分頁，本頁載入時撈出並聚焦該標註。
+const FOCUS_HIGHLIGHT_KEY = "hkFocusHighlight";
+const checkPendingFocusHighlight = async () => {
+  if (!storage) return;
+  try {
+    const stored = await storage.get(FOCUS_HIGHLIGHT_KEY);
+    const req = stored?.[FOCUS_HIGHLIGHT_KEY];
+    if (!req || req.url !== pageKey || !req.id) return;
+    if (req.at && Date.now() - req.at > 60000) {
+      await storage.remove(FOCUS_HIGHLIGHT_KEY);
+      return;
+    }
+    const element = document.querySelector(`[${HIGHLIGHT_ATTR}="${req.id}"]`);
+    if (!element) return; // 還沒還原到，下次 restore 再試
+    await storage.remove(FOCUS_HIGHLIGHT_KEY);
+    focusHighlightElement(req.id);
+  } catch (error) {
+    console.debug("聚焦指定標註失敗", error);
+  }
+};
+
 const ensureHighlightPanel = () => {
   if (highlightPanel) {
     if (!document.body.contains(highlightPanel)) {
@@ -5244,6 +5248,14 @@ loadAISettings();
 
 chrome.storage?.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
+  // 任一頁面標註陣列在別處變動 → 失效色彩統計快取
+  if (Object.keys(changes).some((k) => /^https?:/i.test(k))) {
+    colorUsageCache = null;
+  }
+  // 管理頁要求聚焦本頁某標註（分頁已開著的情況）
+  if (changes[FOCUS_HIGHLIGHT_KEY]?.newValue) {
+    checkPendingFocusHighlight();
+  }
   if (changes.hkLastColor) {
     const nextColor = changes.hkLastColor.newValue;
     if (typeof nextColor === "string" && nextColor.trim()) {
@@ -6232,6 +6244,7 @@ const isQuotaError = (error) => {
 
 const setStoredHighlights = async (highlights, key = pageKey) => {
   if (!storage) return;
+  colorUsageCache = null; // 標註有變動 → 讓色彩統計快取失效
   try {
     await storage.set({ [key]: highlights });
   } catch (error) {
@@ -6502,6 +6515,7 @@ const attemptRestoreHighlights = async (attempt = 0) => {
   if (attempt === 0) await migrateLegacyPageData();
   await ensurePageMetaTitle(pageKey, document.title);
   const { total, visible } = await restoreHighlights();
+  checkPendingFocusHighlight();
   if (!total) {
     orphanHighlightCount = 0;
     updateOrphanNotice();
