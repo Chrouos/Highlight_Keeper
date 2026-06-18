@@ -25,6 +25,8 @@ const pageKey = resolvePageKey();
 // ── i18n（與 popup／manager 共用 i18n.js 的字典；manifest 已先注入 i18n.js） ──
 const HkI18n = typeof window !== "undefined" ? window.HkI18n : null;
 const t = (key, params) => (HkI18n ? HkI18n.t(key, params) : key);
+// 純解析函式（manifest 內已於本檔前載入 parsers.js）
+const HkParsers = window.HkParsers;
 HkI18n?.initI18n?.();
 // 語言切換時：面板是用 JS textContent 直接建立的，整個重建最單純可靠
 // （面板狀態 highlightPanelState 另外保存，分頁/側邊不受影響）。
@@ -1037,83 +1039,12 @@ ${highlightLines || "（尚未有標註，請完全依原文脈絡組織）"}`);
 
 // Split an AI response into named sections by `===重點===`-style marker lines.
 // Tolerates ＝, 【】, [] and markdown headings around the keyword.
-const AI_SECTION_ALIASES = {
-  highlights: ["重點", "畫重點", "標註", "highlights", "marks"],
-  note: ["摘要", "筆記", "摘要筆記", "summary", "notes"],
-  mindmap: ["心智圖", "mindmap"],
-};
-
-const splitAiSections = (rawText) => {
-  if (typeof rawText !== "string" || !rawText.trim()) return null;
-  const aliasToKey = new Map();
-  Object.entries(AI_SECTION_ALIASES).forEach(([key, names]) => {
-    names.forEach((name) => aliasToKey.set(name.toLowerCase(), key));
-  });
-  // Single "#" is reserved for category tags (#分類) and the mindmap root
-  // (# 主題) — only ## and deeper count as markdown section heads here.
-  const headRe = /^\s*(?:[=＝—-]{2,}|[【\[]|#{2,4})\s*([^=＝【】\[\]#\s]{1,14})\s*(?:[=＝—-]{2,}|[】\]])?\s*$/;
-  const sections = {};
-  let currentKey = null;
-  let buffer = [];
-  let foundAny = false;
-  const flush = () => {
-    if (!currentKey) return;
-    const body = buffer.join("\n").trim();
-    if (body) sections[currentKey] = body;
-  };
-  for (const line of rawText.split(/\r?\n/)) {
-    const match = line.match(headRe);
-    const key = match ? aliasToKey.get(match[1].trim().toLowerCase()) : undefined;
-    if (key) {
-      flush();
-      currentKey = key;
-      buffer = [];
-      foundAny = true;
-      continue;
-    }
-    buffer.push(line);
-  }
-  flush();
-  return foundAny ? sections : null;
-};
+// 純解析邏輯抽到 parsers.js（HkParsers），這裡保留同名薄包裝，呼叫端不變。
+const splitAiSections = (rawText) => HkParsers.splitAiSections(rawText);
 
 // Parse a `# root` + indented `- ` outline into a tree.
-const parseMindmapOutline = (rawText) => {
-  if (typeof rawText !== "string" || !rawText.trim()) return null;
-  const lines = rawText
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\s+$/, ""))
-    .filter((line) => line.trim());
-  let title = "";
-  const root = { label: "", children: [] };
-  const stack = [{ node: root, depth: -1 }];
-  const itemRe = /^(\s*)(?:[-*•·]|\d+[.)])\s+(.*)$/;
-
-  for (const line of lines) {
-    const headingMatch = line.match(/^#{1,3}\s+(.*)$/);
-    if (headingMatch && !title) {
-      title = headingMatch[1].trim();
-      continue;
-    }
-    const itemMatch = line.match(itemRe);
-    if (!itemMatch) {
-      // bare text before any list item → treat as the title
-      if (!title && stack.length === 1) title = line.trim();
-      continue;
-    }
-    const indent = itemMatch[1].replace(/\t/g, "  ").length;
-    const label = itemMatch[2].replace(/\*\*/g, "").trim();
-    if (!label) continue;
-    const node = { label, children: [] };
-    while (stack.length > 1 && indent <= stack[stack.length - 1].depth) {
-      stack.pop();
-    }
-    stack[stack.length - 1].node.children.push(node);
-    stack.push({ node, depth: indent });
-  }
-  if (!root.children.length) return null;
-  return { title: title || document.title || t("mindmap.title"), children: root.children };
-};
+const parseMindmapOutline = (rawText) =>
+  HkParsers.parseMindmapOutline(rawText, document.title || t("mindmap.title"));
 
 const getStoredMindmaps = async () => {
   if (!storage) return {};
@@ -1450,66 +1381,12 @@ const parseJsonFromModelResponse = (rawText) => {
 // via aiSettings.categories (by name, case-insensitive); a raw #rrggbb is used
 // directly. Returns [{ text, color, reason }] — the same shape the JSON path
 // produces, so it can flow straight into normalizeAutoHighlightItems.
-const parseHighlightBlocks = (rawText) => {
-  if (typeof rawText !== "string" || !rawText.trim()) return [];
-  const cats = Array.isArray(aiSettings.categories) ? aiSettings.categories : [];
-  const catByName = new Map();
-  cats.forEach((c) => {
-    if (c?.name) catByName.set(c.name.trim().toLowerCase(), toHexColor(c.color));
+const parseHighlightBlocks = (rawText) =>
+  HkParsers.parseHighlightBlocks(rawText, {
+    categories: aiSettings.categories,
+    toHexColor,
+    defaultColor: DEFAULT_COLOR,
   });
-  const fallbackColor = toHexColor(cats[0]?.color || DEFAULT_COLOR);
-  const hexRe = /^#?[0-9a-fA-F]{6}$/;
-
-  const resolveColor = (tag) => {
-    const cleaned = (tag || "").trim().replace(/^#/, "");
-    if (!cleaned) return fallbackColor;
-    const byName = catByName.get(cleaned.toLowerCase());
-    if (byName) return byName;
-    if (hexRe.test(cleaned)) return toHexColor(`#${cleaned}`);
-    return fallbackColor;
-  };
-
-  const stripPrefix = (line, labels) => {
-    for (const label of labels) {
-      // tolerate full/half-width colon, optional spaces, and case (English labels)
-      const re = new RegExp(`^${label}\\s*[:：]\\s*`, "i");
-      if (re.test(line)) return line.replace(re, "").trim();
-    }
-    return null;
-  };
-
-  const items = [];
-  const blocks = rawText.split(/\n\s*\n/);
-  for (const block of blocks) {
-    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
-    let text = "";
-    let tag = "";
-    let reason = "";
-    for (const line of lines) {
-      // 中英雙語前綴都認，避免英文輸出時把 原文：寫成 Source: 而解析失敗
-      const asText = stripPrefix(line, [
-        "原文", "原句", "片段", "source", "quote", "excerpt", "text",
-      ]);
-      if (asText !== null) { text = asText; continue; }
-      const asReason = stripPrefix(line, [
-        "重點", "摘要", "說明", "理由", "point", "summary", "note", "reason", "insight",
-      ]);
-      if (asReason !== null) { reason = asReason; continue; }
-      // tag line: bare "#定義" or prefixed "分類：#定義" / "Category: #..."
-      const tagMatch = line.match(/#\s*([^\s#:：]+)/);
-      if (
-        tagMatch &&
-        (line.startsWith("#") ||
-          /^(分類|顏色|標籤|category|color|colour|tag)\s*[:：]/i.test(line))
-      ) {
-        tag = tagMatch[1].trim();
-      }
-    }
-    if (!text) continue;
-    items.push({ text, color: resolveColor(tag), reason });
-  }
-  return items;
-};
 
 const normalizeAutoHighlightItems = (payload, palette) => {
   const source = Array.isArray(payload)
@@ -2148,13 +2025,7 @@ const applyMindmapResponseText = async (text) => {
 };
 
 // Outline heuristics: mostly list lines, no 原文： blocks.
-const looksLikeMindmapOutline = (text) => {
-  if (/^(原文|source)\s*[:：]/im.test(text)) return false;
-  const lines = text.split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 3) return false;
-  const listLines = lines.filter((l) => /^\s*(?:[-*•·]|\d+[.)])\s+/.test(l));
-  return listLines.length >= 3 && listLines.length >= lines.length * 0.6;
-};
+const looksLikeMindmapOutline = (text) => HkParsers.looksLikeMindmapOutline(text);
 
 const handleChatGPTResponse = async (responseData) => {
   if (!responseData?.text || !responseData?.requestId) return;

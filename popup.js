@@ -79,7 +79,7 @@ const injectContentAssets = async (tabId) => {
   try {
     await chrome.scripting?.executeScript({
       target: { tabId },
-      files: ["shared.js", "i18n.js", "contentScript.js"],
+      files: ["shared.js", "parsers.js", "i18n.js", "contentScript.js"],
     });
   } catch (error) {
     console.debug("注入內容腳本失敗", error);

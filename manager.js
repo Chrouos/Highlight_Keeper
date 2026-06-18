@@ -526,34 +526,9 @@ const buildFullExportPayload = () => ({
 });
 
 // 把 bulk 備份的 pages 陣列正規化成 {url,title,tags,entries,note,mindmap}。
-const normalizeBulkPages = (pages) => {
-  if (!Array.isArray(pages)) return [];
-  return pages
-    .map((page) => {
-      if (!page || typeof page !== "object") return null;
-      const url =
-        typeof page.url === "string"
-          ? page.url
-          : typeof page.pageUrl === "string"
-          ? page.pageUrl
-          : null;
-      if (!url || !isValidPageKey(url)) return null;
-      const entries = Array.isArray(page.entries) ? page.entries : [];
-      if (!entries.length) return null;
-      return {
-        url,
-        title: typeof page.title === "string" ? page.title : "",
-        tags: Array.isArray(page.tags)
-          ? page.tags.map((t) => String(t).trim()).filter(Boolean)
-          : [],
-        entries,
-        note: page.note && typeof page.note === "object" ? page.note : null,
-        mindmap:
-          page.mindmap && typeof page.mindmap === "object" ? page.mindmap : null,
-      };
-    })
-    .filter(Boolean);
-};
+// 純解析邏輯共用自 parsers.js（manager.html 已先載入）。
+const normalizeBulkPages = (pages) =>
+  window.HkParsers ? window.HkParsers.normalizeBulkPages(pages) : [];
 
 const parseGithubBackupPayload = (rawText) => {
   let parsed;
