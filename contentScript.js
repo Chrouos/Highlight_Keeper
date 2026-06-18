@@ -7054,11 +7054,19 @@ window.addEventListener(
   true
 );
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    closeHighlightMenu();
-    hideFloatingButton();
-    closeHighlightPanel();
+  if (event.key !== "Escape") return;
+  // 由內而外關閉：翻譯卡 → 設定抽屜 → 面板，別一次全收掉。
+  if (floatingTranslateCard && floatingTranslateCard.style.display !== "none") {
+    hideTranslateCard();
+    return;
   }
+  if (highlightPanelEls?.drawer?.classList.contains("is-open")) {
+    highlightPanelEls.toggleDrawer?.(false);
+    return;
+  }
+  closeHighlightMenu();
+  hideFloatingButton();
+  closeHighlightPanel();
 });
 const collectAllPageHighlights = async () => {
   if (!storage) throw new Error(t("ai.errStorageUnavailable"));
