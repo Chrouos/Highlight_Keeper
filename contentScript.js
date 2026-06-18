@@ -6408,6 +6408,7 @@ const articleIdentity = (url) => {
 
 // 把舊版用「完整網址（含追蹤／信件參數）」存的資料，搬到正規化後的 pageKey。
 // 掃描整個 storage，找出與本文同一識別碼的舊鍵並合併；搬完刪掉舊鍵。一次性、冪等。
+const LEGACY_MIGRATED_FLAG = "hkLegacyMigrated";
 let legacyMigrationPromise = null;
 const migrateLegacyPageData = () => {
   if (legacyMigrationPromise) return legacyMigrationPromise;
@@ -6416,6 +6417,13 @@ const migrateLegacyPageData = () => {
     try {
       const targetId = articleIdentity(pageKey);
       if (!targetId) return;
+      // 便宜判斷，避免每頁載入都 get(null) 全量掃描：
+      // ① 全域已標記「無殘留舊式網址鍵」→ 直接 skip
+      // ② 本頁已有標註 → 之前造訪時就已合併過任何舊鍵，無需再掃
+      const pre = await storage.get([pageKey, LEGACY_MIGRATED_FLAG]);
+      if (pre[LEGACY_MIGRATED_FLAG]) return;
+      if (Array.isArray(pre[pageKey]) && pre[pageKey].length) return;
+
       const all = await storage.get(null);
       const writes = {};
       const removes = [];
@@ -6461,6 +6469,14 @@ const migrateLegacyPageData = () => {
 
       if (Object.keys(writes).length) await storage.set(writes);
       if (removes.length) await storage.remove(removes);
+
+      // 若已無「帶追蹤參數／錨點」的舊式網址鍵，標記完成；之後不再全量掃描。
+      const remaining = { ...all };
+      removes.forEach((k) => delete remaining[k]);
+      const hasDirty = Object.keys(remaining).some(
+        (k) => /^https?:/i.test(k) && k !== normalizePageKey(k)
+      );
+      if (!hasDirty) await storage.set({ [LEGACY_MIGRATED_FLAG]: true });
     } catch (error) {
       console.debug("舊版標註資料搬移失敗", error);
     }

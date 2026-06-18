@@ -295,6 +295,16 @@ const fetchAllPages = async () => {
       };
     })
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  // 預先算好每頁的小寫搜尋字串，避免每次按鍵都重掃所有標註。
+  pages.forEach((page) => {
+    const parts = [page.title, page.url, ...(page.tags || [])];
+    (page.entries || []).forEach((entry) => {
+      if (entry?.text) parts.push(entry.text);
+      if (entry?.note) parts.push(entry.note);
+      if (Array.isArray(entry?.tags)) parts.push(...entry.tags);
+    });
+    page._search = parts.filter(Boolean).join("\n").toLowerCase();
+  });
   state.pages = pages;
   state.meta = meta;
   state.notes = notes;
@@ -305,19 +315,12 @@ const matchesSearch = (page, term) => {
   if (!term) return true;
   const normalized = term.trim().toLowerCase();
   if (!normalized) return true;
-  const haystacks = [
-    page.title,
-    page.url,
-    ...(Array.isArray(page.tags) ? page.tags : []),
-    ...(page.entries || []).flatMap((entry) => [
-      entry.text,
-      entry.note,
-      ...(Array.isArray(entry.tags) ? entry.tags : []),
-    ]),
-  ]
-    .filter(Boolean)
-    .map((value) => String(value).toLowerCase());
-  return haystacks.some((text) => text.includes(normalized));
+  // 用 fetchAllPages 預算好的 _search 字串；舊資料保險用 fallback。
+  const haystack =
+    typeof page._search === "string"
+      ? page._search
+      : [page.title, page.url].filter(Boolean).join("\n").toLowerCase();
+  return haystack.includes(normalized);
 };
 
 const sortPages = (pages) => {
@@ -1538,9 +1541,11 @@ const init = async () => {
   closeBtn?.addEventListener("click", () => {
     window.close();
   });
+  let searchDebounce = null;
   searchInput?.addEventListener("input", (event) => {
     state.searchTerm = event.target.value ?? "";
-    renderPageList();
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => renderPageList(), 150);
   });
   sortSelect?.addEventListener("change", (event) => {
     state.sortBy = event.target.value || "updated";
