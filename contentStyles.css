@@ -647,14 +647,16 @@
   font-family: var(--hk-sans);
   font-size: calc(13px * var(--hk-panel-font-scale, 1));
   font-weight: 600;
-  color: #fff;
-  background: var(--hk-accent);
+  /* !important：部分網站有 button{background:none!important} 之類的全域樣式，
+     會把主要按鈕的底色洗掉導致「複製 Prompt」看起來不見了，這裡強制固定。 */
+  color: #fff !important;
+  background: var(--hk-accent) !important;
   transition: background 0.15s, transform 0.05s;
 }
 
-.hk-ai-copy-btn:hover { background: var(--hk-accent-soft); }
+.hk-ai-copy-btn:hover { background: var(--hk-accent-soft) !important; }
 .hk-ai-copy-btn:active { transform: translateY(1px); }
-.hk-ai-copy-btn.is-done { background: #2f7d32; }
+.hk-ai-copy-btn.is-done { background: #2f7d32 !important; }
 
 .hk-ai-hint {
   margin: 0;
@@ -1310,8 +1312,10 @@
   appearance: none;
   border: 1px solid var(--hk-ink);
   border-radius: 2px;
-  background: var(--hk-ink);
-  color: var(--hk-paper-lit);
+  /* !important：防止有 button{background:none!important} 的網站把底色洗掉，
+     使白色文字落在透明底上而整顆按鈕「消失」。 */
+  background: var(--hk-ink) !important;
+  color: var(--hk-paper-lit) !important;
   font-family: var(--hk-sans);
   font-weight: 500;
   letter-spacing: 0.08em;
@@ -1326,8 +1330,8 @@
 .hk-panel-ai-generate:disabled,
 .hk-panel-ai-chatgpt-apply-btn:disabled {
   border-color: var(--hk-rule-strong);
-  background: var(--hk-paper);
-  color: var(--hk-ink-faint);
+  background: var(--hk-paper) !important;
+  color: var(--hk-ink-faint) !important;
   cursor: not-allowed;
 }
 
@@ -1335,9 +1339,9 @@
 .hk-panel-ai-generate:not(:disabled):focus-visible,
 .hk-panel-ai-chatgpt-apply-btn:not(:disabled):hover,
 .hk-panel-ai-chatgpt-apply-btn:not(:disabled):focus-visible {
-  background: var(--hk-accent);
+  background: var(--hk-accent) !important;
   border-color: var(--hk-accent);
-  color: var(--hk-paper-lit);
+  color: var(--hk-paper-lit) !important;
   outline: none;
 }
 
