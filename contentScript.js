@@ -6627,7 +6627,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "APPLY_HIGHLIGHT") {
-    const color = message.color || "#ffeb3b";
+    // 快捷鍵不帶顏色 → 用目前選的顏色
+    const color = message.color || currentColor || DEFAULT_COLOR;
     applyHighlight(color)
       .then(() => {
         currentColor = color;
