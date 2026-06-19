@@ -2338,10 +2338,9 @@ const setHighlightPanelSide = async (side, persist = true) => {
 };
 
 const applyHighlightPanelTabState = () => {
-  // Legacy "archive" and "ai-note" tabs collapsed into the page view —
-  // their controls moved to the settings drawer and the AI action strip.
-  const visibleTabs = ["page", "search"];
-  const legacyRedirect = { archive: "page", "ai-note": "page" };
+  // "archive" 仍併入本頁；"ai-note" 重新作為獨立可見的「摘要」分頁。
+  const visibleTabs = ["page", "search", "ai-note"];
+  const legacyRedirect = { archive: "page" };
   let resolved = highlightPanelState.activeTab;
   if (legacyRedirect[resolved]) resolved = legacyRedirect[resolved];
   if (!visibleTabs.includes(resolved)) resolved = "page";
@@ -2351,10 +2350,12 @@ const applyHighlightPanelTabState = () => {
   const buttonMap = {
     page: tabButtons?.page,
     search: tabButtons?.search,
+    "ai-note": tabButtons?.ai,
   };
   const panelMap = {
     page: tabPanels?.page,
     search: tabPanels?.search,
+    "ai-note": tabPanels?.ai,
   };
 
   visibleTabs.forEach((tab) => {
@@ -3724,8 +3725,7 @@ const ensureHighlightPanel = () => {
   aiTabBtn.id = "hk-panel-tab-ai-note";
   aiTabBtn.setAttribute("role", "tab");
   aiTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-ai-note");
-  aiTabBtn.dataset.tabLegacy = "1";
-  aiTabBtn.textContent = t("panel.tabAiNote");
+  aiTabBtn.textContent = t("panel.tabSummary");
   aiTabBtn.addEventListener("click", () => {
     if (highlightPanelState.activeTab === "ai-note") return;
     highlightPanelState.activeTab = "ai-note";
@@ -4554,17 +4554,18 @@ const ensureHighlightPanel = () => {
   panel.appendChild(header);
   panel.appendChild(aiCard);
   panel.appendChild(tabs);
-  pageTabPanel.appendChild(aiNoteSection);
+  aiTabPanel.appendChild(aiNoteSection);
   pageTabPanel.appendChild(pageOrphanNotice);
   pageTabPanel.appendChild(pageList);
   pageTabPanel.appendChild(pagePlaceholder);
   searchTabPanel.appendChild(searchControls);
   searchTabPanel.appendChild(searchList);
   searchTabPanel.appendChild(searchPlaceholder);
-  // archive + ai tabpanels kept in memory (unused) for backwards compat with
-  // legacy state values; they receive no children and are never displayed.
+  // archive tabpanel kept in memory (unused) for backwards compat with legacy
+  // state values; ai tabpanel now hosts the visible「摘要」tab.
   panel.appendChild(pageTabPanel);
   panel.appendChild(searchTabPanel);
+  panel.appendChild(aiTabPanel);
   panel.appendChild(drawer);
 
   highlightPanel = panel;
