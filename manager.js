@@ -608,6 +608,12 @@ const ensureConfirmOverlay = () => {
   cancelBtn.className = "hk-manager-btn hk-manager-btn-ghost";
   cancelBtn.textContent = t("manager.btnCancel");
 
+  const thirdBtn = document.createElement("button");
+  thirdBtn.type = "button";
+  thirdBtn.id = "hk-manager-confirm-third";
+  thirdBtn.className = "hk-manager-btn hk-manager-btn-muted";
+  thirdBtn.hidden = true;
+
   const confirmBtn = document.createElement("button");
   confirmBtn.type = "button";
   confirmBtn.id = "hk-manager-confirm-ok";
@@ -615,6 +621,7 @@ const ensureConfirmOverlay = () => {
   confirmBtn.textContent = t("manager.btnConfirm");
 
   actions.appendChild(cancelBtn);
+  actions.appendChild(thirdBtn);
   actions.appendChild(confirmBtn);
 
   dialog.appendChild(title);
@@ -627,24 +634,38 @@ const ensureConfirmOverlay = () => {
   return overlay;
 };
 
-const openConfirmDialog = ({ title, message, confirmLabel, cancelLabel }) =>
+// 預設兩鈕回傳 boolean（向後相容）。傳入 thirdLabel 時變三鈕，
+// 回傳 "confirm" / "third" / "cancel"。
+const openConfirmDialog = ({
+  title,
+  message,
+  confirmLabel,
+  cancelLabel,
+  thirdLabel,
+}) =>
   new Promise((resolve) => {
     const overlay = ensureConfirmOverlay();
     const titleEl = overlay.querySelector("#hk-manager-confirm-title");
     const messageEl = overlay.querySelector("#hk-manager-confirm-message");
     const confirmBtn = overlay.querySelector("#hk-manager-confirm-ok");
     const cancelBtn = overlay.querySelector("#hk-manager-confirm-cancel");
+    const thirdBtn = overlay.querySelector("#hk-manager-confirm-third");
     const backdrop = overlay.querySelector(".hk-manager-confirm-backdrop");
 
     if (!titleEl || !messageEl || !confirmBtn || !cancelBtn || !backdrop) {
-      resolve(false);
+      resolve(thirdLabel ? "cancel" : false);
       return;
     }
 
+    const triState = Boolean(thirdLabel);
     titleEl.textContent = title || t("manager.dialogTitle");
     messageEl.textContent = message || "";
     confirmBtn.textContent = confirmLabel || t("manager.btnConfirm");
     cancelBtn.textContent = cancelLabel || t("manager.btnCancel");
+    if (thirdBtn) {
+      thirdBtn.hidden = !triState;
+      if (triState) thirdBtn.textContent = thirdLabel;
+    }
 
     let resolved = false;
     const cleanup = (result) => {
@@ -654,19 +675,20 @@ const openConfirmDialog = ({ title, message, confirmLabel, cancelLabel }) =>
       overlay.removeEventListener("keydown", onKeydown);
       confirmBtn.onclick = null;
       cancelBtn.onclick = null;
+      if (thirdBtn) thirdBtn.onclick = null;
       backdrop.onclick = null;
       resolve(result);
     };
 
+    const cancelValue = triState ? "cancel" : false;
     const onKeydown = (event) => {
-      if (event.key === "Escape") {
-        cleanup(false);
-      }
+      if (event.key === "Escape") cleanup(cancelValue);
     };
 
-    confirmBtn.onclick = () => cleanup(true);
-    cancelBtn.onclick = () => cleanup(false);
-    backdrop.onclick = () => cleanup(false);
+    confirmBtn.onclick = () => cleanup(triState ? "confirm" : true);
+    cancelBtn.onclick = () => cleanup(cancelValue);
+    if (thirdBtn) thirdBtn.onclick = () => cleanup("third");
+    backdrop.onclick = () => cleanup(cancelValue);
     overlay.addEventListener("keydown", onKeydown);
 
     overlay.classList.remove("is-hidden");
@@ -1218,7 +1240,50 @@ const uploadHighlightsToGithub = async () => {
     if (!state.pages.length) {
       throw new Error(t("manager.errNoNotesUpload"));
     }
-    const payload = buildFullExportPayload();
+    let payload = buildFullExportPayload();
+
+    // 先看遠端現況：若遠端有本機沒有的頁面（多半是另一台裝置存的），
+    // 盲目上傳會把它們洗掉 → 讓使用者選「合併／覆蓋／取消」。
+    let remotePages = null;
+    try {
+      const remoteText = await fetchGithubBackupContent(settings);
+      remotePages = parseGithubBackupPayload(remoteText);
+    } catch (_e) {
+      remotePages = null; // 遠端不存在或空 → 首次上傳，無衝突
+    }
+    if (remotePages && remotePages.length) {
+      const localUrls = new Set(payload.pages.map((p) => p.url));
+      const remoteOnly = remotePages.filter((p) => !localUrls.has(p.url));
+      if (remoteOnly.length) {
+        const samples = remoteOnly
+          .slice(0, 3)
+          .map((p) => `- ${getPageDisplayName(p.url)}`);
+        const choice = await openConfirmDialog({
+          title: t("manager.uploadConflictTitle"),
+          message: [
+            t("manager.uploadConflictIntro", { count: remoteOnly.length }),
+            ...samples,
+            remoteOnly.length > samples.length ? "…" : null,
+            t("manager.uploadConflictAsk"),
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          confirmLabel: t("manager.uploadConflictMerge"),
+          thirdLabel: t("manager.uploadConflictOverwrite"),
+          cancelLabel: t("manager.btnCancel"),
+        });
+        if (choice === "cancel") {
+          setGithubStatus(t("manager.uploadCancelled"));
+          return;
+        }
+        if (choice === "confirm") {
+          // 合併：把遠端獨有頁面併進上傳內容，避免刪掉另一台裝置的資料
+          payload = { ...payload, pages: [...payload.pages, ...remoteOnly] };
+        }
+        // choice === "third" → 直接覆蓋，payload 維持本機版本
+      }
+    }
+
     const content = encodeContentToBase64(JSON.stringify(payload, null, 2));
     let existingSha = null;
     try {
