@@ -849,8 +849,15 @@
 }
 
 .hk-panel-tab-content .hk-panel-list { flex: 1; min-height: 0; }
-.hk-panel-tab-content-ai .hk-panel-ai-note { flex: 1; }
-.hk-panel-tab-content-ai .hk-panel-ai-note-content { flex: 1; }
+.hk-panel-tab-content-ai .hk-panel-ai-note { flex: 1; min-height: 0; }
+/* 摘要分頁：占滿可用高度，拿掉常駐卡時的 260px 上限，字也放大些好讀 */
+.hk-panel-tab-content-ai .hk-panel-ai-note-body { flex: 1; min-height: 0; }
+.hk-panel-tab-content-ai .hk-panel-ai-note-content {
+  flex: 1;
+  max-height: none;
+  font-size: calc(14px * var(--hk-panel-font-scale, 1));
+  line-height: 1.65;
+}
 
 /* ── Search & filter controls ─────────────────────────── */
 .hk-panel-controls {
@@ -1394,22 +1401,6 @@
   gap: 10px;
 }
 
-.hk-panel-ai-note-toggle {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--hk-ink-soft);
-  cursor: pointer;
-  padding: 0 2px;
-  font-size: calc(12px * var(--hk-panel-font-scale, 1));
-  line-height: 1;
-  align-self: center;
-}
-.hk-panel-ai-note-toggle:hover { color: var(--hk-accent); }
-
-/* 收合：隱藏內容，只留標題列 */
-.hk-panel-ai-note.is-collapsed { gap: 0; }
-.hk-panel-ai-note.is-collapsed .hk-panel-ai-note-body { display: none; }
 
 .hk-panel-ai-note-title {
   font-family: var(--hk-serif);

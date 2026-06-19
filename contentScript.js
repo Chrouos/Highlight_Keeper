@@ -2346,6 +2346,12 @@ const applyHighlightPanelTabState = () => {
   if (!visibleTabs.includes(resolved)) resolved = "page";
   highlightPanelState.activeTab = resolved;
 
+  // 摘要分頁是「閱讀」用途：把上方的 AI 複製貼上卡片收起，讓摘要拿到整個面板高度。
+  if (highlightPanelEls?.aiCard) {
+    highlightPanelEls.aiCard.style.display =
+      resolved === "ai-note" ? "none" : "";
+  }
+
   const { tabButtons, tabPanels } = highlightPanelEls ?? {};
   const buttonMap = {
     page: tabButtons?.page,
@@ -4247,15 +4253,9 @@ const ensureHighlightPanel = () => {
   aiNoteSection.className = "hk-panel-ai-note";
   const aiNoteHeader = document.createElement("div");
   aiNoteHeader.className = "hk-panel-ai-note-header";
-  const aiNoteToggle = document.createElement("button");
-  aiNoteToggle.type = "button";
-  aiNoteToggle.className = "hk-panel-ai-note-toggle";
-  aiNoteToggle.setAttribute("aria-label", t("panel.toggleSummary"));
-  aiNoteToggle.textContent = "▾";
   const aiNoteTitle = document.createElement("span");
   aiNoteTitle.className = "hk-panel-ai-note-title";
   aiNoteTitle.textContent = t("panel.aiNotesTitle");
-  aiNoteTitle.style.cursor = "pointer";
   const aiNoteMeta = document.createElement("span");
   aiNoteMeta.className = "hk-panel-ai-note-meta";
   const aiNoteCopyBtn = document.createElement("button");
@@ -4263,7 +4263,6 @@ const ensureHighlightPanel = () => {
   aiNoteCopyBtn.className = "hk-panel-ai-note-copy";
   aiNoteCopyBtn.textContent = t("panel.aiNotesCopy");
   aiNoteCopyBtn.disabled = true;
-  aiNoteHeader.appendChild(aiNoteToggle);
   aiNoteHeader.appendChild(aiNoteTitle);
   aiNoteHeader.appendChild(aiNoteMeta);
   aiNoteHeader.appendChild(aiNoteCopyBtn);
@@ -4279,12 +4278,6 @@ const ensureHighlightPanel = () => {
   aiNoteBody.appendChild(aiNoteEmpty);
   aiNoteSection.appendChild(aiNoteHeader);
   aiNoteSection.appendChild(aiNoteBody);
-  const toggleSummaryCard = () => {
-    const collapsed = aiNoteSection.classList.toggle("is-collapsed");
-    aiNoteToggle.textContent = collapsed ? "▸" : "▾";
-  };
-  aiNoteToggle.addEventListener("click", toggleSummaryCard);
-  aiNoteTitle.addEventListener("click", toggleSummaryCard);
 
   // 失聯（orphan）標註提示：重整後找不到對應文字時常駐顯示在本頁清單上方。
   const pageOrphanNotice = document.createElement("div");
