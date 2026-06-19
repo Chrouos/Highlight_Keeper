@@ -19,6 +19,7 @@ const state = {
   searchTerm: "",
   sortBy: "updated",
   activeTag: "",
+  selected: new Set(),
 };
 let detailCurrentPageUrl = "";
 let githubSettings = { ...GITHUB_DEFAULT_SETTINGS };
@@ -373,10 +374,130 @@ const renderTagFilter = () => {
     .forEach((tag) => tagFilterEl.appendChild(makeChip(tag, tag)));
 };
 
+const ensureSelectionBar = () => {
+  let bar = document.getElementById("managerSelectionBar");
+  if (bar) return bar;
+  bar = document.createElement("div");
+  bar.id = "managerSelectionBar";
+  bar.className = "hk-manager-selection-bar";
+  if (listEl?.parentNode) listEl.parentNode.insertBefore(bar, listEl);
+  return bar;
+};
+
+// 把目前選取的頁面打包下載（沿用全部下載的流程，只是過濾頁面）。
+const exportSelectedPages = () => {
+  const urls = new Set(state.selected);
+  const payload = buildFullExportPayload();
+  payload.pages = payload.pages.filter((p) => urls.has(p.url));
+  if (!payload.pages.length) return;
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "highlight-keeper-selected.json";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  setStatus(t("manager.statusExportedSelected", { count: payload.pages.length }));
+};
+
+const bulkDeleteSelected = async () => {
+  const urls = [...state.selected];
+  if (!urls.length) return;
+  const ok = await openConfirmDialog({
+    title: t("manager.bulkDeleteTitle"),
+    message: t("manager.bulkDeleteConfirm", { count: urls.length }),
+    confirmLabel: t("manager.deleteSelected"),
+    cancelLabel: t("manager.btnCancel"),
+  });
+  if (!ok) return;
+  for (const url of urls) {
+    try {
+      await deletePage(url);
+    } catch (error) {
+      console.debug("批次刪除失敗", error);
+    }
+  }
+  state.selected.clear();
+  if (detailCurrentPageUrl && urls.includes(detailCurrentPageUrl)) {
+    closePageDetail();
+  }
+  await refreshManager();
+  setStatus(t("manager.statusBulkDeleted", { count: urls.length }));
+};
+
+const renderSelectionBar = (filtered) => {
+  const bar = ensureSelectionBar();
+  bar.innerHTML = "";
+  if (!state.pages.length) {
+    bar.style.display = "none";
+    return;
+  }
+  bar.style.display = "";
+  const filteredUrls = filtered.map((p) => p.url);
+  const allChecked =
+    filteredUrls.length > 0 && filteredUrls.every((u) => state.selected.has(u));
+  const someChecked = filteredUrls.some((u) => state.selected.has(u));
+
+  const allLabel = document.createElement("label");
+  allLabel.className = "hk-manager-select-all";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = allChecked;
+  cb.indeterminate = !allChecked && someChecked;
+  cb.addEventListener("change", () => {
+    if (cb.checked) filteredUrls.forEach((u) => state.selected.add(u));
+    else filteredUrls.forEach((u) => state.selected.delete(u));
+    renderPageList();
+  });
+  const labelText = document.createElement("span");
+  labelText.textContent = state.selected.size
+    ? t("manager.selectedCount", { count: state.selected.size })
+    : t("manager.selectAll");
+  allLabel.appendChild(cb);
+  allLabel.appendChild(labelText);
+  bar.appendChild(allLabel);
+
+  if (state.selected.size > 0) {
+    const actions = document.createElement("div");
+    actions.className = "hk-manager-selection-actions";
+    const exportBtn = document.createElement("button");
+    exportBtn.type = "button";
+    exportBtn.className = "hk-manager-btn hk-manager-btn-ghost";
+    exportBtn.textContent = t("manager.exportSelected");
+    exportBtn.addEventListener("click", () => exportSelectedPages());
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "hk-manager-btn hk-manager-btn-danger";
+    delBtn.textContent = t("manager.deleteSelected");
+    delBtn.addEventListener("click", () => bulkDeleteSelected());
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "hk-manager-btn hk-manager-btn-ghost";
+    clearBtn.textContent = t("manager.clearSelection");
+    clearBtn.addEventListener("click", () => {
+      state.selected.clear();
+      renderPageList();
+    });
+    actions.appendChild(exportBtn);
+    actions.appendChild(delBtn);
+    actions.appendChild(clearBtn);
+    bar.appendChild(actions);
+  }
+};
+
 const renderPageList = () => {
   if (!listEl || !pageCountEl) return;
   listEl.innerHTML = "";
   renderTagFilter();
+  // 清掉已不存在頁面的選取
+  const existingUrls = new Set(state.pages.map((p) => p.url));
+  [...state.selected].forEach((u) => {
+    if (!existingUrls.has(u)) state.selected.delete(u);
+  });
   let filtered = state.pages.filter((page) =>
     matchesSearch(page, state.searchTerm)
   );
@@ -388,6 +509,7 @@ const renderPageList = () => {
   }
   filtered = sortPages(filtered);
   pageCountEl.textContent = t("manager.statusPageCount", { count: filtered.length });
+  renderSelectionBar(filtered);
   if (!filtered.length) {
     const empty = document.createElement("p");
     empty.textContent =
@@ -401,7 +523,22 @@ const renderPageList = () => {
   filtered.forEach((page) => {
     const card = document.createElement("article");
     card.className = "hk-manager-card";
+    if (state.selected.has(page.url)) card.classList.add("is-selected");
     card.addEventListener("click", () => openPageDetail(page));
+
+    const selectCb = document.createElement("input");
+    selectCb.type = "checkbox";
+    selectCb.className = "hk-manager-card-select";
+    selectCb.checked = state.selected.has(page.url);
+    selectCb.title = t("manager.selectPage");
+    selectCb.addEventListener("click", (event) => event.stopPropagation());
+    selectCb.addEventListener("change", () => {
+      if (selectCb.checked) state.selected.add(page.url);
+      else state.selected.delete(page.url);
+      card.classList.toggle("is-selected", selectCb.checked);
+      renderSelectionBar(filtered);
+    });
+    card.appendChild(selectCb);
 
     const deletePageBtn = document.createElement("button");
     deletePageBtn.type = "button";

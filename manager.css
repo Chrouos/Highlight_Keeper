@@ -396,6 +396,60 @@ body {
   color: #fff;
 }
 
+/* ── 批次選取 ─────────────────────────────────────────── */
+.hk-manager-card { padding-left: 42px; }
+.hk-manager-card-select {
+  position: absolute;
+  top: 16px;
+  left: 14px;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #d97706;
+}
+.hk-manager-card.is-selected {
+  border-color: #d97706;
+  background: #fffdf8;
+}
+
+.hk-manager-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 0 0 12px;
+}
+.hk-manager-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #57534e;
+  cursor: pointer;
+}
+.hk-manager-select-all input { accent-color: #d97706; cursor: pointer; }
+.hk-manager-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.hk-manager-selection-actions .hk-manager-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.hk-manager-btn-danger {
+  border: 1px solid #e7c9c6;
+  background: #fff;
+  color: #b3261e;
+}
+.hk-manager-btn-danger:hover,
+.hk-manager-btn-danger:focus-visible {
+  background: #b3261e;
+  border-color: #b3261e;
+  color: #fff;
+}
+
 .hk-manager-card:hover,
 .hk-manager-card:focus-visible {
   border-color: #d97706;
