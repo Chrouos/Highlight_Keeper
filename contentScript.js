@@ -1986,6 +1986,11 @@ const applyNotePayload = async (noteText) => {
   };
   await saveGeneratedNote(pageKey, notePayload);
   updateAiNoteSection(notePayload);
+  // 摘要產生／貼回後，若面板開著就自動切到「摘要」分頁，直接看得到。
+  if (highlightPanelVisible) {
+    highlightPanelState.activeTab = "ai-note";
+    applyHighlightPanelTabState();
+  }
   return notePayload;
 };
 
