@@ -4553,6 +4553,11 @@ const ensureHighlightPanel = () => {
   panel.appendChild(aiCard);
   panel.appendChild(tabs);
   aiTabPanel.appendChild(aiNoteSection);
+  // 摘要分頁下方：本頁重點清單，點一筆跳到原文並閃爍，方便對照快讀。
+  const summaryJumpList = document.createElement("div");
+  summaryJumpList.className = "hk-summary-jump";
+  summaryJumpList.style.display = "none";
+  aiTabPanel.appendChild(summaryJumpList);
   pageTabPanel.appendChild(pageOrphanNotice);
   pageTabPanel.appendChild(pageList);
   pageTabPanel.appendChild(pagePlaceholder);
@@ -4608,6 +4613,7 @@ const ensureHighlightPanel = () => {
     aiNoteMeta,
     aiNoteCopyBtn,
     aiNoteEmpty,
+    summaryJumpList,
     aiProviderSelect,
     aiModelSelect,
     aiPromptField: promptTextarea,
@@ -4738,6 +4744,43 @@ const renderPanelViews = () => {
 
   applyHighlightPanelTabState();
   updateAiNoteSection(highlightPanelState.notesByPage[pageKey]);
+  renderSummaryJumpList(pageEntries);
+};
+
+// 摘要分頁下方的「跳到重點」清單：列出本頁標註，點擊捲動並閃爍原文。
+const renderSummaryJumpList = (entries) => {
+  const el = highlightPanelEls?.summaryJumpList;
+  if (!el) return;
+  el.innerHTML = "";
+  const list = Array.isArray(entries) ? entries.filter((e) => e?.id) : [];
+  if (!list.length) {
+    el.style.display = "none";
+    return;
+  }
+  el.style.display = "flex";
+  const head = document.createElement("div");
+  head.className = "hk-summary-jump-head";
+  head.textContent = t("panel.summaryJumpHeading", { count: list.length });
+  el.appendChild(head);
+  list.forEach((entry) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "hk-summary-jump-item";
+    if (entry.color) item.style.borderLeftColor = entry.color;
+    const txt = document.createElement("span");
+    txt.className = "hk-summary-jump-text";
+    txt.textContent = (entry.text || "").trim();
+    item.appendChild(txt);
+    const reason = (entry.note || "").trim();
+    if (reason) {
+      const note = document.createElement("span");
+      note.className = "hk-summary-jump-note";
+      note.textContent = reason;
+      item.appendChild(note);
+    }
+    item.addEventListener("click", () => focusHighlightElement(entry.id));
+    el.appendChild(item);
+  });
 };
 
 const renderHighlightPanel = async () => {
