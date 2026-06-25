@@ -370,18 +370,14 @@ document.getElementById("aiPasteApplyBtn")?.addEventListener("click", async () =
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) { setStatus(t("popup.errNoTabSimple"), true); return; }
-    let text = aiPasteInput?.value?.trim() || "";
-    // 框內沒東西就直接讀剪貼簿（manifest 已要求 clipboardRead），
-    // 讓「貼上並套用」按一下就把剪貼簿內容帶進來，不必先手動貼。
+    // 直接讀文字框內容（使用者在框內 Cmd+V 貼上或打字皆可）。
+    // 不主動讀系統剪貼簿，避免多要 clipboardRead 權限。
+    const text = aiPasteInput?.value?.trim() || "";
     if (!text) {
-      try {
-        text = (await navigator.clipboard.readText())?.trim() || "";
-        if (aiPasteInput && text) aiPasteInput.value = text;
-      } catch (_e) {
-        /* 剪貼簿是空的或被拒 → 維持空字串，下方提示使用者貼上 */
-      }
+      aiPasteInput?.focus();
+      setStatus(t("popup.errPasteEmpty"), true);
+      return;
     }
-    if (!text) { setStatus(t("popup.errPasteEmpty"), true); return; }
     setStatus(t("popup.statusApplyingPaste"));
     const response = await sendMessageToTab(tab.id, {
       type: "APPLY_AI_RESPONSE",
