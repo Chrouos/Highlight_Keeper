@@ -1426,22 +1426,34 @@ const githubHeaders = (token) => ({
   "X-GitHub-Api-Version": GITHUB_API_VERSION,
 });
 
-// 把 GitHub 錯誤回應整理成精簡可行動的訊息：邊緣擋下的 HTML／通用
-// 「invalid request」頁不要整頁塞給使用者，換成檢查清單。
+// 把 GitHub 錯誤回應整理成精簡可行動的訊息。
+// 只有「真的回 HTML 整頁」（邊緣在驗證前就擋下）才換成檢查清單；
+// JSON 錯誤一律原樣顯示 message 與 errors 細節，方便看出是哪個欄位／權限出問題。
 const describeGithubError = (status, errorText) => {
   const raw = (errorText || "").trim();
-  if (/^<|<!doctype|<html/i.test(raw) || /invalid request|whoa there/i.test(raw)) {
+  if (/^<!?(?:doctype|html)\b/i.test(raw) || /^</.test(raw)) {
     return t("manager.errGithubBadRequest", { status: status || 400 });
   }
   try {
     const json = JSON.parse(raw);
-    if (json?.message) {
-      return status ? `${json.message}（${status}）` : json.message;
+    const parts = [];
+    if (json?.message) parts.push(json.message);
+    if (Array.isArray(json?.errors) && json.errors.length) {
+      const detail = json.errors
+        .map((e) =>
+          e?.message || [e?.resource, e?.field, e?.code].filter(Boolean).join(" ")
+        )
+        .filter(Boolean)
+        .join("; ");
+      if (detail) parts.push(detail);
+    }
+    if (parts.length) {
+      return `${parts.join(" — ")}${status ? `（${status}）` : ""}`;
     }
   } catch (_e) {
     /* 非 JSON，往下走 */
   }
-  return raw.slice(0, 200) || `HTTP ${status}`;
+  return raw.slice(0, 300) || `HTTP ${status}`;
 };
 
 // 統一的 GitHub REST 呼叫：自動帶版本標頭、JSON body，失敗時丟出整理過的訊息。
@@ -1461,6 +1473,7 @@ const githubApiRequest = async (
   });
   if (!response.ok) {
     const text = await response.text();
+    console.debug("GitHub 請求失敗", method, path, response.status, text.slice(0, 500));
     const error = new Error(describeGithubError(response.status, text));
     error.status = response.status;
     throw error;
