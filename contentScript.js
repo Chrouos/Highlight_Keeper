@@ -984,12 +984,19 @@ const buildCombinedPrompt = (pageData, palette, usageCounts) => {
 ### 額外任務：摘要筆記
 ${notePrompt}
 
-### 最終輸出格式（兩個區塊都要，使用以下分隔線，不要加其他標題）
+### 額外任務：頁面標籤
+- 另外給出 3～6 個能代表整篇主題的標籤（topic tag），方便日後分類與搜尋。
+- 用半形逗號分隔，例如：AI, 產業變革, 機器學習；不要加 # 號、不要編號、不要解釋。
+
+### 最終輸出格式（三個區塊都要，使用以下分隔線，不要加其他標題）
 ===重點===
 （依前述「輸出格式」列出所有重點區塊）
 
 ===摘要===
-（五百字以內、有脈絡的筆記內容）`);
+（五百字以內、有脈絡的筆記內容）
+
+===標籤===
+（3～6 個主題標籤，半形逗號分隔）`);
 };
 
 const buildMindmapPrompt = (pageData) => {
@@ -1972,6 +1979,22 @@ const launchChatGPTBridge = async (type) => {
   }
 };
 
+// AI 回傳的「標籤」區塊：解析後併入目前頁面既有標籤（聯集，不覆蓋手動加的），
+// 並同步面板狀態讓標籤即時顯示。回傳實際新增的標籤數。
+const applyAiPageTags = async (rawTagsSection) => {
+  const aiTags = HkParsers.parsePageTags(rawTagsSection);
+  if (!aiTags.length) return 0;
+  const existing = await getPageTags(pageKey);
+  const merged = Array.from(new Set([...existing, ...aiTags]));
+  await setPageTags(pageKey, merged);
+  const prevMeta = highlightPanelState.pageMeta?.[pageKey] || {};
+  highlightPanelState.pageMeta = {
+    ...highlightPanelState.pageMeta,
+    [pageKey]: { ...prevMeta, tags: merged },
+  };
+  return merged.length - existing.length;
+};
+
 const applyNotePayload = async (noteText) => {
   const notePayload = {
     note: noteText,
@@ -2066,22 +2089,34 @@ const handleChatGPTResponse = async (responseData) => {
     if (noteText) {
       await applyNotePayload(noteText);
     }
+    let tagsAdded = 0;
+    if (sections?.tags) {
+      try {
+        tagsAdded = await applyAiPageTags(sections.tags);
+      } catch (tagError) {
+        console.debug("匯入 AI 標籤失敗", tagError);
+      }
+    }
     if (!highlightText && !noteText) {
       throw new Error(t("ai.errUnrecognized"));
     }
 
     await refreshHighlightPanelIfVisible();
+    const tagSuffix = tagsAdded ? t("ai.tagsImportedSuffix", { count: tagsAdded }) : "";
     if (result?.previewing) {
       setAiPanelStatus(
-        t("ai.statusPreviewN", { count: previewData.length }) + (noteText ? t("ai.summaryImportedSuffix") : "")
+        t("ai.statusPreviewN", { count: previewData.length }) +
+          (noteText ? t("ai.summaryImportedSuffix") : "") +
+          tagSuffix
       );
     } else if (result) {
       const parts = [t("ai.appliedCount", { applied: result.appliedCount })];
       if (result.skippedCount) parts.push(t("ai.skippedCount", { skipped: result.skippedCount }));
       if (noteText) parts.push(t("ai.summaryImported"));
+      if (tagsAdded) parts.push(t("ai.tagsImported", { count: tagsAdded }));
       setAiPanelStatus(parts.join("，"));
     } else {
-      setAiPanelStatus(t("ai.noteImported"));
+      setAiPanelStatus(t("ai.noteImported") + tagSuffix);
     }
   } catch (error) {
     setAiPanelStatus(error?.message || t("ai.errImport"), true);

@@ -78,6 +78,30 @@ eq(
   "splitAiSections markdown heading + mindmap alias"
 );
 eq(P.splitAiSections("just text no markers"), null, "splitAiSections no markers → null");
+eq(
+  P.splitAiSections("===重點===\nA\n\n===摘要===\nB\n\n===標籤===\nAI, 產業"),
+  { highlights: "A", note: "B", tags: "AI, 產業" },
+  "splitAiSections captures tags section"
+);
+
+// ── parsePageTags ───────────────────────────────────────
+eq(
+  P.parsePageTags("AI, 產業變革, 機器學習"),
+  ["AI", "產業變革", "機器學習"],
+  "parsePageTags comma separated"
+);
+eq(
+  P.parsePageTags("#AI #產業變革 #機器學習"),
+  ["AI", "產業變革", "機器學習"],
+  "parsePageTags hash separated"
+);
+eq(
+  P.parsePageTags("- AI\n- 產業\n- AI"),
+  ["AI", "產業"],
+  "parsePageTags bullet list, dedup"
+);
+eq(P.parsePageTags(""), [], "parsePageTags empty → []");
+eq(P.parsePageTags("a,b,c,d,e", 3), ["a", "b", "c"], "parsePageTags respects max");
 
 // ── parseHighlightBlocks（中英雙語 + 顏色）──────────────────
 const deps = {

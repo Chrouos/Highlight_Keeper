@@ -17,6 +17,32 @@
     highlights: ["重點", "畫重點", "標註", "highlights", "marks"],
     note: ["摘要", "筆記", "摘要筆記", "summary", "notes"],
     mindmap: ["心智圖", "mindmap"],
+    tags: ["標籤", "tags", "tag", "關鍵字", "keywords"],
+  };
+
+  // 把 AI「標籤」區塊解析成乾淨的字串陣列：
+  // 逗號／頓號／分號／換行／井字號都當分隔符，去掉項目符號與首尾標點，
+  // 去重、限制每個標籤長度，最多取 max 個（避免一次塞爆）。
+  const parsePageTags = (rawText, max = 8) => {
+    if (typeof rawText !== "string" || !rawText.trim()) return [];
+    const seen = new Set();
+    const result = [];
+    rawText
+      .replace(/[,，、;；#＃]+/g, "\n")
+      .split(/\n+/)
+      .forEach((chunk) => {
+        const tag = chunk
+          .replace(/^[\s•\-*–—]+/, "")
+          .replace(/^["'「『（(\[]+/, "")
+          .replace(/["'」』）)\]\s.。]+$/, "")
+          .trim();
+        if (!tag || tag.length > 24) return;
+        const key = tag.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push(tag);
+      });
+    return result.slice(0, max);
   };
 
   const splitAiSections = (rawText) => {
@@ -194,6 +220,7 @@
     isHttpUrl,
     AI_SECTION_ALIASES,
     splitAiSections,
+    parsePageTags,
     parseMindmapOutline,
     looksLikeMindmapOutline,
     parseHighlightBlocks,

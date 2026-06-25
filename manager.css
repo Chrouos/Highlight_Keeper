@@ -144,6 +144,12 @@ body {
     box-shadow 0.15s ease;
 }
 
+/* hidden 屬性要蓋過上面的 display:inline-flex，否則隱藏的按鈕（如三鈕對話框
+   未使用的第三顆）會變成一塊空白方塊露出來。 */
+.hk-manager-btn[hidden] {
+  display: none;
+}
+
 .hk-manager-btn:hover,
 .hk-manager-btn:focus-visible {
   background: #b45309;
