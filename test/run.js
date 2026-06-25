@@ -36,7 +36,28 @@ eq(
 eq(
   npk("https://x.com/p/a?utm_source=a&r=1"),
   npk("https://x.com/p/a?utm_campaign=b&r=1"),
-  "same article, different tracking → same key (r kept both)"
+  "same article, different tracking → same key"
+);
+// 白名單：只有 ?v=/?id= 等內容參數會留下，其餘（ref/source…）一律剝掉。
+eq(
+  npk("https://x.com/p/a?ref=home&source=feed"),
+  "https://x.com/p/a",
+  "non-content params (ref/source) stripped → bare path"
+);
+eq(
+  npk("https://www.youtube.com/watch?v=AAA&feature=share"),
+  "https://www.youtube.com/watch?v=AAA",
+  "youtube keeps ?v=, drops feature"
+);
+ok(
+  npk("https://www.youtube.com/watch?v=AAA") !==
+    npk("https://www.youtube.com/watch?v=BBB"),
+  "different ?v= stay distinct (not merged)"
+);
+eq(
+  npk("https://x.com/a?id=7&v=2"),
+  npk("https://x.com/a?v=2&id=7"),
+  "content param order normalized → same key"
 );
 eq(npk("not a url"), "not a url", "invalid url returned as-is");
 

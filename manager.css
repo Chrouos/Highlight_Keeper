@@ -280,9 +280,14 @@ body {
 
 .hk-manager-summary header {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 16px;
+}
+
+.hk-manager-merge-btn {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .hk-manager-summary h2 {

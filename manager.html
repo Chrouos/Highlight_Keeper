@@ -113,6 +113,16 @@
         <header>
           <h2 data-i18n="manager.pageListHeading">頁面清單</h2>
           <span id="pageCount" class="hk-manager-count"></span>
+          <button
+            type="button"
+            id="mergeDuplicatesBtn"
+            class="hk-manager-btn hk-manager-btn-ghost hk-manager-merge-btn"
+            data-i18n="manager.mergeDuplicates"
+            data-i18n-title="manager.mergeDuplicatesTitle"
+            title="把只差網址參數的同一頁合併成一筆"
+          >
+            整理重複頁面
+          </button>
         </header>
         <div class="hk-manager-controls">
           <label class="hk-manager-sort-label">
@@ -130,6 +140,7 @@
       <section id="managerStatus" class="hk-manager-status" role="status" aria-live="polite"></section>
     </main>
     <script src="parsers.js"></script>
+    <script src="shared.js"></script>
     <script src="i18n.js"></script>
     <script src="manager.js" type="module"></script>
   </body>

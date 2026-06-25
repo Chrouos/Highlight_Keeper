@@ -28,6 +28,7 @@ const statusEl = document.getElementById("managerStatus");
 const listEl = document.getElementById("pageList");
 const pageCountEl = document.getElementById("pageCount");
 const downloadBtn = document.getElementById("downloadAllBtn");
+const mergeBtn = document.getElementById("mergeDuplicatesBtn");
 const importInput = document.getElementById("bulkImportInput");
 const closeBtn = document.getElementById("closeManagerBtn");
 const searchInput = document.getElementById("managerSearch");
@@ -615,6 +616,145 @@ const deletePage = async (url) => {
     [GENERATED_NOTES_KEY]: notes,
     [MINDMAP_KEY]: maps,
   });
+};
+
+// ── 整理重複頁面 ────────────────────────────────────────────────
+// 同一條路徑只差網址參數（?ref=、追蹤碼、參數順序…）會被存成好幾筆，
+// 這裡用 shared.js 的 normalizePageKey 收斂成「主頁面」再合併。
+const canonicalPageKey = (url) =>
+  window.HkUrlKey ? window.HkUrlKey.normalizePageKey(url) : url;
+
+// 把多個頁面的標註陣列合成一份，依 id（沒有 id 才退回整筆 JSON）去重，
+// 再依建立時間排序，避免合併後出現重複或亂序。
+const mergeEntryArrays = (arrays) => {
+  const seen = new Set();
+  const merged = [];
+  arrays.forEach((entries) => {
+    (Array.isArray(entries) ? entries : []).forEach((entry) => {
+      const sig = entry?.id ? `id:${entry.id}` : `raw:${JSON.stringify(entry)}`;
+      if (seen.has(sig)) return;
+      seen.add(sig);
+      merged.push(entry);
+    });
+  });
+  merged.sort(
+    (a, b) => (Number(a?.createdAt) || 0) - (Number(b?.createdAt) || 0)
+  );
+  return merged;
+};
+
+// 找出正規化後 key 相同、卻分裂成多筆的頁面群組。
+const findDuplicateGroups = () => {
+  const groups = new Map();
+  state.pages.forEach((page) => {
+    const canonical = canonicalPageKey(page.url);
+    if (!groups.has(canonical)) groups.set(canonical, []);
+    groups.get(canonical).push(page);
+  });
+  return [...groups.entries()]
+    .filter(([, pages]) => pages.length > 1)
+    .map(([canonical, pages]) => ({
+      canonical,
+      // 最後更新的排前面，標題／摘要／心智圖優先採用較新的那份。
+      pages: [...pages].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+    }));
+};
+
+// 實際把群組合併寫回 storage：標註合一、meta/摘要/心智圖收斂到主頁面，
+// 再移除其餘舊 key。一次寫入，避免每筆都觸發面板重繪。
+const mergeDuplicateGroups = async (groups) => {
+  const stored = await chrome.storage.local.get([
+    PAGE_META_KEY,
+    GENERATED_NOTES_KEY,
+    MINDMAP_KEY,
+  ]);
+  const meta = { ...(stored[PAGE_META_KEY] || {}) };
+  const notes = { ...(stored[GENERATED_NOTES_KEY] || {}) };
+  const maps = { ...(stored[MINDMAP_KEY] || {}) };
+  const entryUpdates = {};
+  const keysToRemove = [];
+  let mergedExtra = 0;
+
+  groups.forEach(({ canonical, pages }) => {
+    const urls = pages.map((p) => p.url);
+    entryUpdates[canonical] = mergeEntryArrays(pages.map((p) => p.entries));
+    mergedExtra += pages.length - 1;
+
+    // meta：title 取第一個非空（已依更新時間排序），tags 取聯集。
+    const tagSet = new Set();
+    let title;
+    let note;
+    let mindmap;
+    pages.forEach((p) => {
+      const m = meta[p.url];
+      if (m?.title && !title) title = m.title;
+      (Array.isArray(m?.tags) ? m.tags : []).forEach((tag) => tagSet.add(tag));
+      if (note === undefined && notes[p.url] != null) note = notes[p.url];
+      if (mindmap === undefined && maps[p.url] != null) mindmap = maps[p.url];
+    });
+
+    // 先清掉群組內所有舊 key 的附屬資料，再把合併結果寫到主頁面。
+    urls.forEach((u) => {
+      delete meta[u];
+      delete notes[u];
+      delete maps[u];
+      if (u !== canonical) keysToRemove.push(u);
+    });
+    const newMeta = {};
+    if (title) newMeta.title = title;
+    if (tagSet.size) newMeta.tags = [...tagSet];
+    if (Object.keys(newMeta).length) meta[canonical] = newMeta;
+    if (note !== undefined) notes[canonical] = note;
+    if (mindmap !== undefined) maps[canonical] = mindmap;
+  });
+
+  await chrome.storage.local.set({
+    ...entryUpdates,
+    [PAGE_META_KEY]: meta,
+    [GENERATED_NOTES_KEY]: notes,
+    [MINDMAP_KEY]: maps,
+  });
+  if (keysToRemove.length) await chrome.storage.local.remove(keysToRemove);
+  return mergedExtra;
+};
+
+// 點「整理重複頁面」：先預覽要合併哪些群組，確認後才動手。
+const runMergeDuplicates = async () => {
+  const groups = findDuplicateGroups();
+  if (!groups.length) {
+    setStatus(t("manager.mergeNoneFound"));
+    return;
+  }
+  const extra = groups.reduce((sum, g) => sum + g.pages.length - 1, 0);
+  const samples = groups.slice(0, 8).map(({ canonical, pages }) => {
+    const name = getPageDisplayName(canonical);
+    return `• ${name}  (${pages.length} → 1)`;
+  });
+  const message = [
+    t("manager.mergeConfirmIntro", { groups: groups.length, extra }),
+    ...samples,
+    groups.length > samples.length
+      ? t("manager.mergeConfirmMore", { count: groups.length - samples.length })
+      : null,
+    "",
+    t("manager.mergeConfirmHint"),
+  ]
+    .filter((line) => line !== null)
+    .join("\n");
+  const ok = await openConfirmDialog({
+    title: t("manager.mergeConfirmTitle"),
+    message,
+    confirmLabel: t("manager.mergeConfirmBtn"),
+    cancelLabel: t("manager.btnCancel"),
+  });
+  if (!ok) return;
+  const mergedExtra = await mergeDuplicateGroups(groups);
+  if (detailCurrentPageUrl) closePageDetail();
+  state.selected.clear();
+  await refreshManager();
+  setStatus(
+    t("manager.statusMerged", { groups: groups.length, extra: mergedExtra })
+  );
 };
 
 // 跳到原文：寫入聚焦請求後開分頁，內容腳本載入時會捲動並閃爍該標註。
@@ -1742,6 +1882,12 @@ const init = async () => {
       setStatus(error?.message || t("manager.errImport"), true);
     });
     event.target.value = "";
+  });
+  mergeBtn?.addEventListener("click", () => {
+    runMergeDuplicates().catch((error) => {
+      console.debug("整理重複頁面失敗", error);
+      setStatus(error?.message || t("manager.statusDeleteFail"), true);
+    });
   });
   closeBtn?.addEventListener("click", () => {
     window.close();
