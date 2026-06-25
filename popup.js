@@ -365,6 +365,38 @@ document.getElementById("aiHighlightBtn")?.addEventListener("click", async () =>
   }
 });
 
+const aiPasteInput = document.getElementById("aiPasteInput");
+document.getElementById("aiPasteApplyBtn")?.addEventListener("click", async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) { setStatus(t("popup.errNoTabSimple"), true); return; }
+    let text = aiPasteInput?.value?.trim() || "";
+    // 框內沒東西就試著直接讀剪貼簿，省一步貼上動作。
+    if (!text) {
+      try {
+        text = (await navigator.clipboard.readText())?.trim() || "";
+        if (aiPasteInput && text) aiPasteInput.value = text;
+      } catch (_e) {
+        /* 沒有剪貼簿權限 → 維持空字串，下方提示使用者貼上 */
+      }
+    }
+    if (!text) { setStatus(t("popup.errPasteEmpty"), true); return; }
+    setStatus(t("popup.statusApplyingPaste"));
+    const response = await sendMessageToTab(tab.id, {
+      type: "APPLY_AI_RESPONSE",
+      text,
+    });
+    if (!response?.success) {
+      throw new Error(response?.error ?? t("popup.errCannotTrigger"));
+    }
+    setStatus(response.summary || t("popup.statusPasteApplied"));
+    if (aiPasteInput) aiPasteInput.value = "";
+    loadPageInfo();
+  } catch (error) {
+    setStatus(error?.message || t("popup.errAiTrigger"), true);
+  }
+});
+
 document.getElementById("clearPageBtn")?.addEventListener("click", async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

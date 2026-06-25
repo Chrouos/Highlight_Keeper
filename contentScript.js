@@ -2055,6 +2055,69 @@ const applyMindmapResponseText = async (text) => {
 // Outline heuristics: mostly list lines, no 原文： blocks.
 const looksLikeMindmapOutline = (text) => HkParsers.looksLikeMindmapOutline(text);
 
+// 套用一段 AI 回應：智慧判斷重點／摘要／心智圖／標籤區塊並寫入。
+// 回傳結果摘要 {mindmap | highlight, noteImported, tagsAdded}；失敗會 throw。
+// ChatGPT 貼回（bridge）與 popup 直接貼上都共用這條。
+const applyAiResponseSections = async (text, { type } = {}) => {
+  const sections = splitAiSections(text);
+  const isMindmap =
+    type === "mindmap" ||
+    (sections?.mindmap && !sections.highlights && !sections.note) ||
+    (!sections && looksLikeMindmapOutline(text));
+  if (isMindmap) {
+    await applyMindmapResponseText(sections?.mindmap ?? text);
+    return { mindmap: true };
+  }
+
+  const highlightText = sections?.highlights ?? (type === "note" ? null : text);
+  const noteText = sections?.note ?? (type === "note" ? text : null);
+
+  let highlight = null;
+  if (highlightText) {
+    setAiPanelStatus(t("ai.statusApplyingHighlights"));
+    highlight = await applyHighlightResponseText(highlightText);
+  }
+  if (noteText) {
+    await applyNotePayload(noteText);
+  }
+  let tagsAdded = 0;
+  if (sections?.tags) {
+    try {
+      tagsAdded = await applyAiPageTags(sections.tags);
+    } catch (tagError) {
+      console.debug("匯入 AI 標籤失敗", tagError);
+    }
+  }
+  if (!highlightText && !noteText) {
+    throw new Error(t("ai.errUnrecognized"));
+  }
+  return { highlight, noteImported: Boolean(noteText), tagsAdded };
+};
+
+// 把套用結果組成一行可顯示的狀態文字（面板與 popup 共用）。
+const summarizeAiApplyResult = (res) => {
+  if (res?.mindmap) return t("mindmap.done");
+  const tagSuffix = res.tagsAdded
+    ? t("ai.tagsImportedSuffix", { count: res.tagsAdded })
+    : "";
+  if (res.highlight?.previewing) {
+    return (
+      t("ai.statusPreviewN", { count: previewData.length }) +
+      (res.noteImported ? t("ai.summaryImportedSuffix") : "") +
+      tagSuffix
+    );
+  }
+  if (res.highlight) {
+    const parts = [t("ai.appliedCount", { applied: res.highlight.appliedCount })];
+    if (res.highlight.skippedCount)
+      parts.push(t("ai.skippedCount", { skipped: res.highlight.skippedCount }));
+    if (res.noteImported) parts.push(t("ai.summaryImported"));
+    if (res.tagsAdded) parts.push(t("ai.tagsImported", { count: res.tagsAdded }));
+    return parts.join("，");
+  }
+  return t("ai.noteImported") + tagSuffix;
+};
+
 const handleChatGPTResponse = async (responseData) => {
   if (!responseData?.text || !responseData?.requestId) return;
   isChatGPTBridgeWaiting = false;
@@ -2064,60 +2127,9 @@ const handleChatGPTResponse = async (responseData) => {
   } catch (_e) {}
   const { type, text } = responseData;
   try {
-    // Smart routing: trust section markers in the response over the selected
-    // mode, so a paste "just works" even if the user forgot to switch chips.
-    const sections = splitAiSections(text);
-    const isMindmap =
-      type === "mindmap" ||
-      (sections?.mindmap && !sections.highlights && !sections.note) ||
-      (!sections && looksLikeMindmapOutline(text));
-    if (isMindmap) {
-      await applyMindmapResponseText(sections?.mindmap ?? text);
-      setAiPanelStatus(t("mindmap.done"));
-      return;
-    }
-
-    const highlightText =
-      sections?.highlights ?? (type === "note" ? null : text);
-    const noteText = sections?.note ?? (type === "note" ? text : null);
-
-    let result = null;
-    if (highlightText) {
-      setAiPanelStatus(t("ai.statusApplyingHighlights"));
-      result = await applyHighlightResponseText(highlightText);
-    }
-    if (noteText) {
-      await applyNotePayload(noteText);
-    }
-    let tagsAdded = 0;
-    if (sections?.tags) {
-      try {
-        tagsAdded = await applyAiPageTags(sections.tags);
-      } catch (tagError) {
-        console.debug("匯入 AI 標籤失敗", tagError);
-      }
-    }
-    if (!highlightText && !noteText) {
-      throw new Error(t("ai.errUnrecognized"));
-    }
-
-    await refreshHighlightPanelIfVisible();
-    const tagSuffix = tagsAdded ? t("ai.tagsImportedSuffix", { count: tagsAdded }) : "";
-    if (result?.previewing) {
-      setAiPanelStatus(
-        t("ai.statusPreviewN", { count: previewData.length }) +
-          (noteText ? t("ai.summaryImportedSuffix") : "") +
-          tagSuffix
-      );
-    } else if (result) {
-      const parts = [t("ai.appliedCount", { applied: result.appliedCount })];
-      if (result.skippedCount) parts.push(t("ai.skippedCount", { skipped: result.skippedCount }));
-      if (noteText) parts.push(t("ai.summaryImported"));
-      if (tagsAdded) parts.push(t("ai.tagsImported", { count: tagsAdded }));
-      setAiPanelStatus(parts.join("，"));
-    } else {
-      setAiPanelStatus(t("ai.noteImported") + tagSuffix);
-    }
+    const res = await applyAiResponseSections(text, { type });
+    if (!res.mindmap) await refreshHighlightPanelIfVisible();
+    setAiPanelStatus(summarizeAiApplyResult(res));
   } catch (error) {
     setAiPanelStatus(error?.message || t("ai.errImport"), true);
   }
@@ -6640,6 +6652,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       } catch (error) {
         console.debug("建立畫重點 Prompt 失敗", error);
         sendResponse({ success: false, error: error?.message || "無法建立 Prompt" });
+      }
+    })();
+    return true;
+  }
+  if (message?.type === "APPLY_AI_RESPONSE") {
+    // popup 直接貼上 AI 回覆 → 不用開面板就套用（重點／摘要／心智圖／標籤）。
+    (async () => {
+      try {
+        const text = typeof message.text === "string" ? message.text.trim() : "";
+        if (!text) throw new Error(t("ai.errUnrecognized"));
+        const res = await applyAiResponseSections(text, {});
+        if (!res.mindmap) await refreshHighlightPanelIfVisible();
+        const summary = summarizeAiApplyResult(res);
+        setAiPanelStatus(summary);
+        sendResponse({ success: true, summary });
+      } catch (error) {
+        console.debug("套用貼上的 AI 回覆失敗", error);
+        sendResponse({ success: false, error: error?.message || t("ai.errImport") });
       }
     })();
     return true;

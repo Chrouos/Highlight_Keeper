@@ -286,6 +286,31 @@ h1 {
   border-color: #047857;
 }
 
+.ai-paste-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 64px;
+  padding: 8px 10px;
+  border: 1px solid #d4d2ce;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #1c1917;
+  background: #fafaf9;
+}
+
+.ai-paste-input::placeholder {
+  color: #a8a29e;
+}
+
+.ai-paste-input:focus-visible {
+  outline: none;
+  border-color: #059669;
+  background: #fff;
+}
+
 .panel-clear-btn {
   border-color: #e7e5e4;
   color: #78716c;
