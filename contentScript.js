@@ -4351,7 +4351,7 @@ const ensureHighlightPanel = () => {
   searchPlaceholder.textContent = t("panel.emptySearch");
 
   // ── AI 工作流卡片（最外層）：① 複製 Prompt → ② 貼回即套用 ──
-  // 單一流程：一個 Prompt 同時取得整頁重點與摘要筆記。
+  // 單一流程：一個 Prompt 同時取得整頁重點、摘要與標籤。
   // 心智圖改走獨立的副次動作（見下方 aiMindmapCopyBtn），主流程不再有模式切換。
   const aiMode = "combined";
   const aiCard = document.createElement("div");
@@ -6643,7 +6643,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const latestPalette = await refreshPaletteFromStorage();
         const usageCounts = await collectColorUsageCounts();
         const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-        const prompt = buildAutoHighlightPrompt(
+        // 與頁面面板共用同一個 Prompt：一次取得重點＋摘要＋標籤。
+        const prompt = buildCombinedPrompt(
           pageData,
           preferredPalette,
           usageCounts

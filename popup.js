@@ -371,13 +371,14 @@ document.getElementById("aiPasteApplyBtn")?.addEventListener("click", async () =
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) { setStatus(t("popup.errNoTabSimple"), true); return; }
     let text = aiPasteInput?.value?.trim() || "";
-    // 框內沒東西就試著直接讀剪貼簿，省一步貼上動作。
+    // 框內沒東西就直接讀剪貼簿（manifest 已要求 clipboardRead），
+    // 讓「貼上並套用」按一下就把剪貼簿內容帶進來，不必先手動貼。
     if (!text) {
       try {
         text = (await navigator.clipboard.readText())?.trim() || "";
         if (aiPasteInput && text) aiPasteInput.value = text;
       } catch (_e) {
-        /* 沒有剪貼簿權限 → 維持空字串，下方提示使用者貼上 */
+        /* 剪貼簿是空的或被拒 → 維持空字串，下方提示使用者貼上 */
       }
     }
     if (!text) { setStatus(t("popup.errPasteEmpty"), true); return; }
