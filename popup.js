@@ -372,9 +372,16 @@ const applyPastedAiResponse = async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) { setStatus(t("popup.errNoTabSimple"), true); return; }
-    // 只讀文字框內容（框內 Cmd+V 貼上或打字皆可），不主動讀系統剪貼簿，
-    // 避免多要 clipboardRead 權限。
-    const text = aiPasteInput?.value?.trim() || "";
+    let text = aiPasteInput?.value?.trim() || "";
+    // 框內沒東西就直接讀剪貼簿（已要求 clipboardRead），按一下即可帶入。
+    if (!text) {
+      try {
+        text = (await navigator.clipboard.readText())?.trim() || "";
+        if (aiPasteInput && text) aiPasteInput.value = text;
+      } catch (_e) {
+        /* 剪貼簿空或被拒 → 維持空字串 */
+      }
+    }
     if (!text) {
       aiPasteInput?.focus();
       setStatus(t("popup.errPasteEmpty"), true);
@@ -399,10 +406,55 @@ const applyPastedAiResponse = async () => {
 document.getElementById("aiPasteApplyBtn")?.addEventListener("click", applyPastedAiResponse);
 
 // 貼上即自動套用（setTimeout 讓 textarea 先吃到剪貼簿內容），與頁面面板一致。
+// 註：右鍵選單貼上會走這條；鍵盤 Cmd/Ctrl+V 走下方 keydown（popup 收不到原生快捷鍵）。
 aiPasteInput?.addEventListener("paste", () => {
   window.setTimeout(() => {
     if (aiPasteInput.value.trim()) applyPastedAiResponse();
   }, 30);
+});
+
+// macOS 的擴充 popup 沒有「編輯」選單，收不到 Cmd+A/C/X/V/Z，這裡用 JS 補回來。
+aiPasteInput?.addEventListener("keydown", (event) => {
+  if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+  const el = aiPasteInput;
+  switch (event.key.toLowerCase()) {
+    case "a":
+      event.preventDefault();
+      el.select();
+      break;
+    case "c":
+      event.preventDefault();
+      document.execCommand("copy");
+      break;
+    case "x":
+      event.preventDefault();
+      document.execCommand("cut");
+      break;
+    case "z":
+      event.preventDefault();
+      document.execCommand(event.shiftKey ? "redo" : "undo");
+      break;
+    case "v":
+      event.preventDefault();
+      navigator.clipboard
+        .readText()
+        .then((clip) => {
+          const text = clip || "";
+          if (!text) return;
+          const start = el.selectionStart ?? el.value.length;
+          const end = el.selectionEnd ?? el.value.length;
+          el.value = el.value.slice(0, start) + text + el.value.slice(end);
+          const caret = start + text.length;
+          el.selectionStart = el.selectionEnd = caret;
+          if (el.value.trim()) applyPastedAiResponse();
+        })
+        .catch(() => {
+          /* 剪貼簿空或被拒 */
+        });
+      break;
+    default:
+      break;
+  }
 });
 
 document.getElementById("clearPageBtn")?.addEventListener("click", async () => {
