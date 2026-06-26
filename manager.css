@@ -341,10 +341,15 @@ body {
   color: #1c1917;
   cursor: pointer;
 }
+.hk-manager-export-category {
+  font-size: 12px;
+  padding: 5px 12px;
+}
 .hk-manager-tag-filter {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  flex-basis: 100%;
 }
 .hk-manager-filter-chip {
   appearance: none;

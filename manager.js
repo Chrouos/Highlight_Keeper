@@ -19,6 +19,7 @@ const state = {
   searchTerm: "",
   sortBy: "updated",
   activeTag: "",
+  activeDomain: "",
   selected: new Set(),
 };
 let detailCurrentPageUrl = "";
@@ -34,6 +35,8 @@ const closeBtn = document.getElementById("closeManagerBtn");
 const searchInput = document.getElementById("managerSearch");
 const sortSelect = document.getElementById("managerSort");
 const tagFilterEl = document.getElementById("managerTagFilter");
+const domainFilterEl = document.getElementById("managerDomainFilter");
+const categoryExportBtn = document.getElementById("exportCategoryBtn");
 const langSelect = document.getElementById("managerLang");
 
 // i18n（共用 i18n.js；以一般 script 在本模組前載入，window.HkI18n 可用）
@@ -341,27 +344,34 @@ const sortPages = (pages) => {
   return sorted;
 };
 
-// 收集所有頁面的標籤聯集，畫成可點選的篩選晶片。
+// 標籤分類晶片（含每類筆數、未分類），畫成可點選的篩選器。
 const renderTagFilter = () => {
   if (!tagFilterEl) return;
-  const tagSet = new Set();
+  // 統計每個標籤的頁數，以及無標籤頁數。
+  const tagCounts = new Map();
+  let untaggedCount = 0;
   state.pages.forEach((page) => {
-    (Array.isArray(page.tags) ? page.tags : []).forEach((tag) => {
-      const trimmed = String(tag).trim();
-      if (trimmed) tagSet.add(trimmed);
-    });
+    const tags = (Array.isArray(page.tags) ? page.tags : [])
+      .map((tag) => String(tag).trim())
+      .filter(Boolean);
+    if (!tags.length) {
+      untaggedCount += 1;
+      return;
+    }
+    tags.forEach((tag) => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1));
   });
   tagFilterEl.innerHTML = "";
-  if (!tagSet.size) {
+  if (!tagCounts.size && !untaggedCount) {
     tagFilterEl.style.display = "none";
     return;
   }
   tagFilterEl.style.display = "flex";
-  const makeChip = (label, value) => {
+  const makeChip = (label, value, count) => {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "hk-manager-filter-chip";
-    chip.textContent = label;
+    chip.textContent =
+      typeof count === "number" ? `${label}（${count}）` : label;
     chip.classList.toggle("is-active", state.activeTag === value);
     chip.addEventListener("click", () => {
       state.activeTag = state.activeTag === value ? "" : value;
@@ -370,9 +380,59 @@ const renderTagFilter = () => {
     return chip;
   };
   tagFilterEl.appendChild(makeChip(t("manager.filterAll"), ""));
-  Array.from(tagSet)
+  Array.from(tagCounts.keys())
     .sort((a, b) => a.localeCompare(b))
-    .forEach((tag) => tagFilterEl.appendChild(makeChip(tag, tag)));
+    .forEach((tag) =>
+      tagFilterEl.appendChild(makeChip(tag, tag, tagCounts.get(tag)))
+    );
+  if (untaggedCount) {
+    tagFilterEl.appendChild(
+      makeChip(t("manager.filterUntagged"), UNTAGGED_KEY, untaggedCount)
+    );
+  }
+};
+
+// 網域下拉：把所有頁面依 hostname 統計，選一個就只看該網站（即時、不另存檔）。
+const renderDomainFilter = () => {
+  if (!domainFilterEl) return;
+  const counts = new Map();
+  state.pages.forEach((page) => {
+    const host = pageDomain(page.url);
+    if (host) counts.set(host, (counts.get(host) || 0) + 1);
+  });
+  // 目前選的網域若已不存在就清掉。
+  if (state.activeDomain && !counts.has(state.activeDomain)) {
+    state.activeDomain = "";
+  }
+  domainFilterEl.innerHTML = "";
+  const allOpt = document.createElement("option");
+  allOpt.value = "";
+  allOpt.textContent = t("manager.domainAll");
+  domainFilterEl.appendChild(allOpt);
+  Array.from(counts.keys())
+    .sort((a, b) => a.localeCompare(b))
+    .forEach((host) => {
+      const opt = document.createElement("option");
+      opt.value = host;
+      opt.textContent = `${host}（${counts.get(host)}）`;
+      domainFilterEl.appendChild(opt);
+    });
+  domainFilterEl.value = state.activeDomain;
+  domainFilterEl.style.display = counts.size > 1 ? "" : "none";
+};
+
+// 篩選有縮小範圍時顯示「匯出此分類」，匯出目前看到的這批頁面成小檔。
+const renderCategoryExport = () => {
+  if (!categoryExportBtn) return;
+  const active = Boolean(
+    state.activeTag || state.activeDomain || state.searchTerm
+  );
+  categoryExportBtn.hidden = !active;
+  if (active) {
+    categoryExportBtn.textContent = t("manager.exportCategory", {
+      count: getFilteredPages().length,
+    });
+  }
 };
 
 const ensureSelectionBar = () => {
@@ -494,27 +554,20 @@ const renderPageList = () => {
   if (!listEl || !pageCountEl) return;
   listEl.innerHTML = "";
   renderTagFilter();
+  renderDomainFilter();
+  renderCategoryExport();
   // 清掉已不存在頁面的選取
   const existingUrls = new Set(state.pages.map((p) => p.url));
   [...state.selected].forEach((u) => {
     if (!existingUrls.has(u)) state.selected.delete(u);
   });
-  let filtered = state.pages.filter((page) =>
-    matchesSearch(page, state.searchTerm)
-  );
-  if (state.activeTag) {
-    filtered = filtered.filter(
-      (page) =>
-        Array.isArray(page.tags) && page.tags.includes(state.activeTag)
-    );
-  }
-  filtered = sortPages(filtered);
+  let filtered = sortPages(getFilteredPages());
   pageCountEl.textContent = t("manager.statusPageCount", { count: filtered.length });
   renderSelectionBar(filtered);
   if (!filtered.length) {
     const empty = document.createElement("p");
     empty.textContent =
-      state.searchTerm || state.activeTag
+      state.searchTerm || state.activeTag || state.activeDomain
         ? t("manager.emptySearch")
         : t("manager.emptyAll");
     empty.className = "hk-manager-meta";
@@ -788,19 +841,77 @@ const deleteHighlightEntry = async (url, entry, index) => {
   return true;
 };
 
-const buildFullExportPayload = () => ({
+const pageToExportEntry = (page) => ({
+  url: page.url,
+  title: state.meta[page.url]?.title || "",
+  tags: Array.isArray(page.tags) ? page.tags : [],
+  entries: page.entries,
+  note: state.notes[page.url] || null,
+  mindmap: state.mindmaps[page.url] || null,
+});
+
+const buildExportPayloadForPages = (pages, extra = {}) => ({
   type: "highlight-keeper-bulk",
   version: 2,
   exportedAt: Date.now(),
-  pages: state.pages.map((page) => ({
-    url: page.url,
-    title: state.meta[page.url]?.title || "",
-    tags: Array.isArray(page.tags) ? page.tags : [],
-    entries: page.entries,
-    note: state.notes[page.url] || null,
-    mindmap: state.mindmaps[page.url] || null,
-  })),
+  ...extra,
+  pages: pages.map(pageToExportEntry),
 });
+
+const buildFullExportPayload = () => buildExportPayloadForPages(state.pages);
+
+// 觸發瀏覽器下載一個 JSON 檔。
+const downloadJson = (payload, filename) => {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
+// ── 分類（依標籤；無標籤→未分類）＋網域 ─────────────────────────
+const UNTAGGED_KEY = "__hk_untagged__";
+
+const pageDomain = (url) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch (_e) {
+    return "";
+  }
+};
+
+// 把檔名裡不安全的字（路徑分隔字元、控制字元）換掉，保留中文等可讀字。
+const safeFileSlug = (name) =>
+  String(name)
+    .replace(/[\/\\:*?"<>| -]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "category";
+
+// 目前清單套用搜尋／標籤／網域三個篩選後的頁面集合。
+const getFilteredPages = () => {
+  let pages = state.pages.filter((page) =>
+    matchesSearch(page, state.searchTerm)
+  );
+  if (state.activeTag === UNTAGGED_KEY) {
+    pages = pages.filter(
+      (page) => !Array.isArray(page.tags) || !page.tags.length
+    );
+  } else if (state.activeTag) {
+    pages = pages.filter(
+      (page) => Array.isArray(page.tags) && page.tags.includes(state.activeTag)
+    );
+  }
+  if (state.activeDomain) {
+    pages = pages.filter((page) => pageDomain(page.url) === state.activeDomain);
+  }
+  return pages;
+};
 
 // 把 bulk 備份的 pages 陣列正規化成 {url,title,tags,entries,note,mindmap}。
 // 純解析邏輯共用自 parsers.js（manager.html 已先載入）。
@@ -835,19 +946,27 @@ const downloadAllPages = async () => {
     setStatus(t("manager.errNoNotesExport"), true);
     return;
   }
-  const payload = buildFullExportPayload();
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "highlight-keeper-all.json";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadJson(buildFullExportPayload(), "highlight-keeper-all.json");
   setStatus(t("manager.statusAllDownloaded"));
+};
+
+// 匯出目前篩選（標籤／網域／關鍵字）後的頁面成單一小檔，方便分享某一類。
+const exportFilteredPages = () => {
+  const pages = getFilteredPages();
+  if (!pages.length) {
+    setStatus(t("manager.errNoNotesExport"), true);
+    return;
+  }
+  const label =
+    state.activeTag === UNTAGGED_KEY
+      ? t("manager.filterUntagged")
+      : state.activeTag || state.activeDomain || "filtered";
+  const payload = buildExportPayloadForPages(pages, {
+    category: state.activeTag === UNTAGGED_KEY ? null : state.activeTag || null,
+    domain: state.activeDomain || null,
+  });
+  downloadJson(payload, `highlight-keeper-${safeFileSlug(label)}.json`);
+  setStatus(t("manager.statusCategoryExported", { count: pages.length }));
 };
 
 const ensureConfirmOverlay = () => {
@@ -1963,6 +2082,11 @@ const init = async () => {
     state.sortBy = event.target.value || "updated";
     renderPageList();
   });
+  domainFilterEl?.addEventListener("change", (event) => {
+    state.activeDomain = event.target.value || "";
+    renderPageList();
+  });
+  categoryExportBtn?.addEventListener("click", () => exportFilteredPages());
   bindGithubInput(githubTokenInput, "token");
   bindGithubInput(githubRepoInput, "repo");
   bindGithubInput(githubBranchInput, "branch");

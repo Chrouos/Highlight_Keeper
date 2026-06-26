@@ -133,6 +133,18 @@
               <option value="title" data-i18n="manager.sortTitle">標題</option>
             </select>
           </label>
+          <label class="hk-manager-sort-label">
+            <span data-i18n="manager.domainLabel">網域</span>
+            <select id="managerDomainFilter" class="hk-manager-sort"></select>
+          </label>
+          <button
+            type="button"
+            id="exportCategoryBtn"
+            class="hk-manager-btn hk-manager-btn-ghost hk-manager-export-category"
+            hidden
+          >
+            匯出此分類
+          </button>
           <div id="managerTagFilter" class="hk-manager-tag-filter"></div>
         </div>
         <div id="pageList" class="hk-manager-list"></div>
