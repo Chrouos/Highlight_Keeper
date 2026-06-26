@@ -345,6 +345,13 @@ body {
   font-size: 12px;
   padding: 5px 12px;
 }
+.hk-manager-github-categories {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
 .hk-manager-tag-filter {
   display: flex;
   flex-wrap: wrap;

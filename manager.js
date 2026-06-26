@@ -48,6 +48,8 @@ const githubBranchInput = document.getElementById("githubBranch");
 const githubPathInput = document.getElementById("githubPath");
 const githubDownloadBtn = document.getElementById("githubDownloadBtn");
 const githubUploadBtn = document.getElementById("githubUploadBtn");
+const githubBrowseBtn = document.getElementById("githubBrowseBtn");
+const githubCategoryListEl = document.getElementById("githubCategoryList");
 const githubStatusEl = document.getElementById("githubSyncStatus");
 const detailOverlayId = "hk-manager-detail";
 const confirmOverlayId = "hk-manager-confirm";
@@ -70,6 +72,9 @@ const setGithubActionsDisabled = (disabled) => {
   }
   if (githubDownloadBtn) {
     githubDownloadBtn.disabled = disabled;
+  }
+  if (githubBrowseBtn) {
+    githubBrowseBtn.disabled = disabled;
   }
 };
 
@@ -1600,14 +1605,15 @@ const githubApiRequest = async (
   return response.json();
 };
 
-// 經由 Git Data API 上傳：blob → tree → commit → 更新 ref。
+// 經由 Git Data API 一次 commit 多個檔案：blobs → tree → commit → 更新 ref。
 // 關鍵差異：檔案路徑放在 JSON body（tree[].path），不進 URL，
 // 避開 contents 端點對 URL 路徑編碼的邊緣限制（會回「invalid request」整頁 HTML），
-// 也能處理較大的備份檔。
-const uploadViaGitDataApi = async (settings, payloadText) => {
+// 也能一次寫入完整備份＋各分類檔＋索引，省一次次上傳。
+// files: [{ path, content }]（path 為 repo 內完整路徑、content 為字串）
+const commitFilesToGithub = async (settings, files, commitMessage) => {
   const repoBase = buildRepoApiBase(settings.repo);
   if (!repoBase) throw new Error(t("manager.errRepoInvalid"));
-  const { token, branch, path } = settings;
+  const { token, branch } = settings;
   const refPath = `/git/ref/heads/${encodeURIComponent(branch)}`;
 
   // 1. 分支最新 commit（不存在 → 之後建立新分支）
@@ -1628,18 +1634,30 @@ const uploadViaGitDataApi = async (settings, payloadText) => {
     baseTree = commitData?.tree?.sha || null;
   }
 
-  // 2. blob（base64 內容）
-  const blob = await githubApiRequest(repoBase, "/git/blobs", token, {
-    method: "POST",
-    body: { content: encodeContentToBase64(payloadText), encoding: "base64" },
-  });
+  // 2. 每個檔案各建一個 blob
+  const treeEntries = [];
+  for (const file of files) {
+    const blob = await githubApiRequest(repoBase, "/git/blobs", token, {
+      method: "POST",
+      body: {
+        content: encodeContentToBase64(file.content),
+        encoding: "base64",
+      },
+    });
+    treeEntries.push({
+      path: file.path,
+      mode: "100644",
+      type: "blob",
+      sha: blob.sha,
+    });
+  }
 
   // 3. tree（檔案路徑只在這裡出現）
   const tree = await githubApiRequest(repoBase, "/git/trees", token, {
     method: "POST",
     body: {
       ...(baseTree ? { base_tree: baseTree } : {}),
-      tree: [{ path, mode: "100644", type: "blob", sha: blob.sha }],
+      tree: treeEntries,
     },
   });
 
@@ -1647,7 +1665,7 @@ const uploadViaGitDataApi = async (settings, payloadText) => {
   const commit = await githubApiRequest(repoBase, "/git/commits", token, {
     method: "POST",
     body: {
-      message: `backup: highlight-keeper (${new Date().toISOString()})`,
+      message: commitMessage || `backup: highlight-keeper (${new Date().toISOString()})`,
       tree: tree.sha,
       parents: latestSha ? [latestSha] : [],
     },
@@ -1667,10 +1685,80 @@ const uploadViaGitDataApi = async (settings, payloadText) => {
   }
 };
 
-const fetchGithubBackupContent = async (settings) => {
+const uploadViaGitDataApi = (settings, payloadText) =>
+  commitFilesToGithub(settings, [{ path: settings.path, content: payloadText }]);
+
+// 取設定路徑的資料夾（dirname）與檔名，分類檔／索引就放這個資料夾底下。
+const githubDir = (path) => {
+  const parts = String(path || "").split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
+};
+const joinPath = (dir, rel) => (dir ? `${dir}/${rel}` : rel);
+
+// 依標籤把「匯出格式的頁面陣列」分組（一頁多標籤→多組；無標籤→未分類）。
+const groupExportPagesByTag = (pages) => {
+  const groups = new Map();
+  const add = (key, page) => {
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(page);
+  };
+  pages.forEach((page) => {
+    const tags = (Array.isArray(page.tags) ? page.tags : [])
+      .map((tag) => String(tag).trim())
+      .filter(Boolean);
+    if (!tags.length) add(UNTAGGED_KEY, page);
+    else tags.forEach((tag) => add(tag, page));
+  });
+  return groups;
+};
+
+// 從完整備份 payload 組出要上傳的檔案清單：完整備份＋各分類檔＋index.json。
+const buildCategorizedFiles = (settings, payload) => {
+  const dir = githubDir(settings.path);
+  const fullName = String(settings.path).split("/").pop() || "highlight-keeper.json";
+  const groups = groupExportPagesByTag(payload.pages || []);
+  const usedSlugs = new Set();
+  const categories = [];
+  const files = [
+    // 完整備份（相容舊版「從 GitHub 下載」）
+    { path: settings.path, content: JSON.stringify(payload, null, 2) },
+  ];
+  for (const [tag, pages] of groups) {
+    const isUntagged = tag === UNTAGGED_KEY;
+    let slug = isUntagged ? "_untagged" : safeFileSlug(tag);
+    while (usedSlugs.has(slug)) slug += "-1"; // 避免不同標籤 slug 撞名
+    usedSlugs.add(slug);
+    const rel = `categories/${slug}.json`;
+    const catPayload = buildExportPayloadForPages([], {
+      category: isUntagged ? null : tag,
+    });
+    catPayload.pages = pages; // 直接用已是匯出格式的頁面
+    files.push({ path: joinPath(dir, rel), content: JSON.stringify(catPayload, null, 2) });
+    categories.push({
+      tag: isUntagged ? null : tag,
+      untagged: isUntagged || undefined,
+      file: rel,
+      pageCount: pages.length,
+    });
+  }
+  categories.sort((a, b) => (b.pageCount || 0) - (a.pageCount || 0));
+  const index = {
+    type: "highlight-keeper-index",
+    version: 1,
+    exportedAt: Date.now(),
+    totalPages: (payload.pages || []).length,
+    fullBackup: fullName,
+    categories,
+  };
+  files.push({ path: joinPath(dir, "index.json"), content: JSON.stringify(index, null, 2) });
+  return { files, index };
+};
+
+const fetchGithubBackupContent = async (settings, overridePath) => {
   const repoBase = buildRepoApiBase(settings.repo);
   if (!repoBase) throw new Error(t("manager.errRepoInvalid"));
-  const encodedPath = buildContentPath(settings.path);
+  const encodedPath = buildContentPath(overridePath || settings.path);
   const url = `${repoBase}/contents/${encodedPath}?ref=${encodeURIComponent(
     settings.branch
   )}`;
@@ -1774,8 +1862,19 @@ const uploadHighlightsToGithub = async () => {
       }
     }
 
-    await uploadViaGitDataApi(settings, JSON.stringify(payload, null, 2));
-    setGithubStatus(t("manager.statusUploaded"));
+    // 一次 commit：完整備份 + 各分類檔 + index.json（依標籤分類）。
+    const { files, index } = buildCategorizedFiles(settings, payload);
+    await commitFilesToGithub(
+      settings,
+      files,
+      `backup: highlight-keeper（${index.categories.length} 類 / ${index.totalPages} 頁）`
+    );
+    setGithubStatus(
+      t("manager.statusUploadedCategorized", {
+        categories: index.categories.length,
+        pages: index.totalPages,
+      })
+    );
     githubSettings = { ...githubSettings, ...settings };
     persistGithubSettings(githubSettings);
   } catch (error) {
@@ -1927,6 +2026,96 @@ const downloadHighlightsFromGithub = async () => {
     const content = await fetchGithubBackupContent(settings);
     const pages = parseGithubBackupPayload(content);
     await applyGithubBackupPages(pages);
+    githubSettings = { ...githubSettings, ...settings };
+    persistGithubSettings(githubSettings);
+  } catch (error) {
+    setGithubStatus(error?.message || t("manager.errDownload"), true);
+  } finally {
+    setGithubActionsDisabled(false);
+  }
+};
+
+// 讀 GitHub 上的 index.json（分類索引）。沒有就回 null（代表還沒上傳過分類版）。
+const fetchGithubIndex = async (settings) => {
+  const dir = githubDir(settings.path);
+  try {
+    const text = await fetchGithubBackupContent(settings, joinPath(dir, "index.json"));
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed?.categories)) return parsed;
+  } catch (_e) {
+    /* 沒有 index 或讀取失敗 → 當作沒有分類版 */
+  }
+  return null;
+};
+
+// 下載並匯入單一分類檔。
+const importGithubCategory = async (settings, category) => {
+  const dir = githubDir(settings.path);
+  setGithubStatus(t("manager.statusDownloading"));
+  try {
+    const content = await fetchGithubBackupContent(
+      settings,
+      joinPath(dir, category.file)
+    );
+    const pages = parseGithubBackupPayload(content);
+    await applyGithubBackupPages(pages);
+  } catch (error) {
+    setGithubStatus(error?.message || t("manager.errDownload"), true);
+  }
+};
+
+// 把分類索引畫成清單，點一類就下載＋匯入該類（快速導引開啟）。
+const renderGithubCategoryList = (settings, index) => {
+  if (!githubCategoryListEl) return;
+  githubCategoryListEl.innerHTML = "";
+  if (!index || !index.categories.length) {
+    githubCategoryListEl.style.display = "none";
+    return;
+  }
+  githubCategoryListEl.style.display = "flex";
+  const heading = document.createElement("div");
+  heading.className = "hk-manager-meta";
+  heading.textContent = t("manager.githubPickCategory");
+  githubCategoryListEl.appendChild(heading);
+  index.categories.forEach((cat) => {
+    const label = cat.untagged || !cat.tag ? t("manager.filterUntagged") : cat.tag;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hk-manager-filter-chip";
+    btn.textContent = `${label}（${cat.pageCount || 0}）`;
+    btn.addEventListener("click", async () => {
+      setGithubActionsDisabled(true);
+      try {
+        await importGithubCategory(settings, cat);
+      } finally {
+        setGithubActionsDisabled(false);
+      }
+    });
+    githubCategoryListEl.appendChild(btn);
+  });
+};
+
+// 「分類下載」：讀 index → 列出分類清單讓你挑一類載入。
+const browseGithubCategories = async () => {
+  const settings = getGithubSettingsSnapshot();
+  const validationError = validateGithubSettings(settings);
+  if (validationError) {
+    setGithubStatus(validationError, true);
+    return;
+  }
+  setGithubActionsDisabled(true);
+  setGithubStatus(t("manager.statusDownloading"));
+  try {
+    const index = await fetchGithubIndex(settings);
+    if (!index) {
+      setGithubStatus(t("manager.errGithubNoIndex"), true);
+      renderGithubCategoryList(settings, null);
+      return;
+    }
+    renderGithubCategoryList(settings, index);
+    setGithubStatus(
+      t("manager.statusGithubCategories", { count: index.categories.length })
+    );
     githubSettings = { ...githubSettings, ...settings };
     persistGithubSettings(githubSettings);
   } catch (error) {
@@ -2093,6 +2282,9 @@ const init = async () => {
   bindGithubInput(githubPathInput, "path");
   githubDownloadBtn?.addEventListener("click", () => {
     downloadHighlightsFromGithub();
+  });
+  githubBrowseBtn?.addEventListener("click", () => {
+    browseGithubCategories();
   });
   githubUploadBtn?.addEventListener("click", () => {
     uploadHighlightsToGithub();
