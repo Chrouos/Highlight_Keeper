@@ -366,12 +366,14 @@ document.getElementById("aiHighlightBtn")?.addEventListener("click", async () =>
 });
 
 const aiPasteInput = document.getElementById("aiPasteInput");
-document.getElementById("aiPasteApplyBtn")?.addEventListener("click", async () => {
+
+// 套用框內的 AI 回覆（重點／摘要／標籤／心智圖）。按鈕與「貼上即套用」共用。
+const applyPastedAiResponse = async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) { setStatus(t("popup.errNoTabSimple"), true); return; }
-    // 直接讀文字框內容（使用者在框內 Cmd+V 貼上或打字皆可）。
-    // 不主動讀系統剪貼簿，避免多要 clipboardRead 權限。
+    // 只讀文字框內容（框內 Cmd+V 貼上或打字皆可），不主動讀系統剪貼簿，
+    // 避免多要 clipboardRead 權限。
     const text = aiPasteInput?.value?.trim() || "";
     if (!text) {
       aiPasteInput?.focus();
@@ -392,6 +394,15 @@ document.getElementById("aiPasteApplyBtn")?.addEventListener("click", async () =
   } catch (error) {
     setStatus(error?.message || t("popup.errAiTrigger"), true);
   }
+};
+
+document.getElementById("aiPasteApplyBtn")?.addEventListener("click", applyPastedAiResponse);
+
+// 貼上即自動套用（setTimeout 讓 textarea 先吃到剪貼簿內容），與頁面面板一致。
+aiPasteInput?.addEventListener("paste", () => {
+  window.setTimeout(() => {
+    if (aiPasteInput.value.trim()) applyPastedAiResponse();
+  }, 30);
 });
 
 document.getElementById("clearPageBtn")?.addEventListener("click", async () => {
