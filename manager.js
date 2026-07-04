@@ -701,21 +701,62 @@ const mergeEntryArrays = (arrays) => {
   return merged;
 };
 
-// 找出正規化後 key 相同、卻分裂成多筆的頁面群組。
+// 路徑段數＝網址具體程度：文章頁（/zh-Hant/index/xxx/）比根路徑（/zh-Hant/）具體，
+// 同標題合併時拿最具體的當主頁面。
+const pathSpecificity = (url) => {
+  try {
+    return new URL(url).pathname.split("/").filter(Boolean).length;
+  } catch (_e) {
+    return 0;
+  }
+};
+
+// 找出分裂成多筆的頁面群組，兩層判定：
+// 1. 網址正規化後相同（只差參數／追蹤碼）。
+// 2. 同網域＋同 meta 標題（SPA 換頁曾把文章存到錯的網址時，網址收斂不到
+//    一起，但標題會一樣）。只認「真的存過 meta」的標題，網址 fallback 不算，
+//    避免把湊巧同名的頁面誤併。
 const findDuplicateGroups = () => {
-  const groups = new Map();
+  const byKey = new Map();
   state.pages.forEach((page) => {
     const canonical = canonicalPageKey(page.url);
-    if (!groups.has(canonical)) groups.set(canonical, []);
-    groups.get(canonical).push(page);
+    if (!byKey.has(canonical)) byKey.set(canonical, []);
+    byKey.get(canonical).push(page);
   });
-  return [...groups.entries()]
-    .filter(([, pages]) => pages.length > 1)
-    .map(([canonical, pages]) => ({
+
+  // 第二層：把「網址收斂後仍分開、但同網域同標題」的叢集再併成一組。
+  const byTitle = new Map();
+  byKey.forEach((pages, canonical) => {
+    const metaTitle = pages
+      .map((p) => state.meta[p.url]?.title?.trim())
+      .find(Boolean);
+    const domain = pageDomain(canonical);
+    const key =
+      metaTitle && domain ? `${domain}\n${metaTitle}` : `__solo__\n${canonical}`;
+    if (!byTitle.has(key)) byTitle.set(key, []);
+    byTitle.get(key).push({ canonical, pages });
+  });
+
+  const groups = [];
+  byTitle.forEach((clusters) => {
+    const pages = clusters.flatMap((c) => c.pages);
+    if (pages.length < 2) return;
+    const latestUpdated = (c) =>
+      Math.max(...c.pages.map((p) => p.updatedAt || 0));
+    // 主頁面：路徑最具體的 canonical；一樣具體就取最後更新的那叢。
+    const canonical = [...clusters].sort(
+      (a, b) =>
+        pathSpecificity(b.canonical) - pathSpecificity(a.canonical) ||
+        latestUpdated(b) - latestUpdated(a)
+    )[0].canonical;
+    groups.push({
       canonical,
+      byTitle: clusters.length > 1,
       // 最後更新的排前面，標題／摘要／心智圖優先採用較新的那份。
       pages: [...pages].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
-    }));
+    });
+  });
+  return groups;
 };
 
 // 實際把群組合併寫回 storage：標註合一、meta/摘要/心智圖收斂到主頁面，
@@ -784,9 +825,10 @@ const runMergeDuplicates = async () => {
     return;
   }
   const extra = groups.reduce((sum, g) => sum + g.pages.length - 1, 0);
-  const samples = groups.slice(0, 8).map(({ canonical, pages }) => {
+  const samples = groups.slice(0, 8).map(({ canonical, pages, byTitle }) => {
     const name = getPageDisplayName(canonical);
-    return `• ${name}  (${pages.length} → 1)`;
+    const mark = byTitle ? t("manager.mergeByTitleMark") : "";
+    return `• ${name}  (${pages.length} → 1)${mark}`;
   });
   const message = [
     t("manager.mergeConfirmIntro", { groups: groups.length, extra }),
