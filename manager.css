@@ -379,6 +379,44 @@ body {
   color: #fff;
 }
 
+/* 篩選列「更多／收合」切換 */
+.hk-manager-filter-more {
+  border-style: dashed;
+  color: #a8a29e;
+}
+
+/* 詳情視窗：既有標籤建議列（點一下直接加到本頁） */
+.hk-manager-detail-tags-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.hk-manager-detail-suggest-label {
+  font-size: 12px;
+  color: #a8a29e;
+}
+
+.hk-manager-suggest-chip {
+  appearance: none;
+  border: 1px dashed #d4d2ce;
+  border-radius: 999px;
+  background: transparent;
+  color: #78716c;
+  font-size: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.hk-manager-suggest-chip:hover {
+  border-color: #d97706;
+  color: #b45309;
+  background: #fffbeb;
+}
+
 .hk-manager-card {
   position: relative;
   border: 1.5px solid #f0ece4;

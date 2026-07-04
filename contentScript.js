@@ -973,12 +973,38 @@ ${highlightLines || "（尚未加入標註）"}
 const buildAutoHighlightPrompt = (pageData, palette, usageCounts) =>
   wrapDirectExec(buildAutoHighlightBody(pageData, palette, usageCounts));
 
+// 統計所有頁面的既有標籤（依使用頁數排序），給 AI 標籤任務優先重用，
+// 避免每次都發明只用一次的新標籤、標籤越長越多。
+const collectExistingTagsByUsage = async (limit = 30) => {
+  try {
+    const stored = await chrome.storage?.local.get(PAGE_META_KEY);
+    const meta = stored?.[PAGE_META_KEY] || {};
+    const counts = new Map();
+    Object.values(meta).forEach((entry) => {
+      (Array.isArray(entry?.tags) ? entry.tags : []).forEach((tag) => {
+        const name = String(tag).trim();
+        if (name) counts.set(name, (counts.get(name) || 0) + 1);
+      });
+    });
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, limit)
+      .map(([name]) => name);
+  } catch (_e) {
+    return [];
+  }
+};
+
 // ── Combined（重點＋摘要）與心智圖 Prompt ────────────────────
 // One prompt → one response containing both highlight blocks and a summary,
 // separated by `===重點===` / `===摘要===` section markers.
-const buildCombinedPrompt = (pageData, palette, usageCounts) => {
+const buildCombinedPrompt = (pageData, palette, usageCounts, existingTags = []) => {
   const highlightBody = buildAutoHighlightBody(pageData, palette, usageCounts);
   const notePrompt = aiSettings.prompt?.trim() || DEFAULT_AI_PROMPT;
+  const existingTagLines = existingTags.length
+    ? `- 既有標籤（依使用頻率排序）：${existingTags.join("、")}
+- 優先從既有標籤中挑選語意相符的；真的沒有合適的才建立新標籤，讓同主題的頁面收斂到同一個標籤下。`
+    : "";
   return wrapDirectExec(`${highlightBody}
 
 ### 額外任務：摘要筆記
@@ -986,6 +1012,7 @@ ${notePrompt}
 
 ### 額外任務：頁面標籤
 - 另外給出 3～6 個能代表整篇主題的標籤（topic tag），方便日後分類與搜尋。
+${existingTagLines}
 - 用半形逗號分隔，例如：AI, 產業變革, 機器學習；不要加 # 號、不要編號、不要解釋。
 
 ### 最終輸出格式（三個區塊都要，使用以下分隔線，不要加其他標題）
@@ -1961,8 +1988,9 @@ const launchChatGPTBridge = async (type) => {
       const latestPalette = await refreshPaletteFromStorage();
       const usageCounts = await collectColorUsageCounts();
       const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+      const existingTags = await collectExistingTagsByUsage();
       // 與 popup／面板「複製 Prompt」統一：一次取得重點＋摘要＋標籤三區塊。
-      prompt = buildCombinedPrompt(pageData, preferredPalette, usageCounts);
+      prompt = buildCombinedPrompt(pageData, preferredPalette, usageCounts, existingTags);
     }
     const requestId = `hk-${Date.now()}`;
     await chrome.storage.local.set({
@@ -4549,7 +4577,8 @@ const ensureHighlightPanel = () => {
     const latestPalette = await refreshPaletteFromStorage();
     const usageCounts = await collectColorUsageCounts();
     const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-    return buildCombinedPrompt(pageData, preferredPalette, usageCounts);
+    const existingTags = await collectExistingTagsByUsage();
+    return buildCombinedPrompt(pageData, preferredPalette, usageCounts, existingTags);
   };
 
   const flashCopyBtn = (msg) => {
@@ -6742,11 +6771,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const latestPalette = await refreshPaletteFromStorage();
         const usageCounts = await collectColorUsageCounts();
         const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+        const existingTags = await collectExistingTagsByUsage();
         // 與頁面面板共用同一個 Prompt：一次取得重點＋摘要＋標籤。
         const prompt = buildCombinedPrompt(
           pageData,
           preferredPalette,
-          usageCounts
+          usageCounts,
+          existingTags
         );
         sendResponse({ success: true, prompt, count: pageData.highlights.length });
       } catch (error) {

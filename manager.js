@@ -385,15 +385,40 @@ const renderTagFilter = () => {
     return chip;
   };
   tagFilterEl.appendChild(makeChip(t("manager.filterAll"), ""));
-  Array.from(tagCounts.keys())
-    .sort((a, b) => a.localeCompare(b))
-    .forEach((tag) =>
-      tagFilterEl.appendChild(makeChip(tag, tag, tagCounts.get(tag)))
-    );
+  // 標籤太多時預設收合：只顯示前段（使用頁數多的排前面），其餘收進「更多」。
+  const TAG_FILTER_VISIBLE = 14;
+  const sortedTags = Array.from(tagCounts.keys()).sort(
+    (a, b) => tagCounts.get(b) - tagCounts.get(a) || a.localeCompare(b)
+  );
+  let visibleTags = sortedTags;
+  const overflow = sortedTags.length - TAG_FILTER_VISIBLE;
+  if (!state.tagFilterExpanded && overflow > 1) {
+    visibleTags = sortedTags.slice(0, TAG_FILTER_VISIBLE);
+    // 目前選中的標籤被收進「更多」時，仍要看得到。
+    if (state.activeTag && sortedTags.includes(state.activeTag) && !visibleTags.includes(state.activeTag)) {
+      visibleTags = [...visibleTags, state.activeTag];
+    }
+  }
+  visibleTags.forEach((tag) =>
+    tagFilterEl.appendChild(makeChip(tag, tag, tagCounts.get(tag)))
+  );
   if (untaggedCount) {
     tagFilterEl.appendChild(
       makeChip(t("manager.filterUntagged"), UNTAGGED_KEY, untaggedCount)
     );
+  }
+  if (overflow > 1) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "hk-manager-filter-chip hk-manager-filter-more";
+    toggle.textContent = state.tagFilterExpanded
+      ? t("manager.tagFilterCollapse")
+      : t("manager.tagFilterMore", { count: sortedTags.length - visibleTags.length });
+    toggle.addEventListener("click", () => {
+      state.tagFilterExpanded = !state.tagFilterExpanded;
+      renderTagFilter();
+    });
+    tagFilterEl.appendChild(toggle);
   }
 };
 
@@ -1302,11 +1327,16 @@ const ensureDetailOverlay = () => {
   tagsRow.appendChild(tagsChips);
   tagsRow.appendChild(tagsInput);
   tagsRow.appendChild(tagsButton);
+  // 既有標籤建議列：點一下直接加到本頁，提高標籤重用率。
+  const tagsSuggest = document.createElement("div");
+  tagsSuggest.id = "hk-manager-detail-tags-suggest";
+  tagsSuggest.className = "hk-manager-detail-tags-suggest";
   const entriesList = document.createElement("div");
   entriesList.id = "hk-manager-detail-entries";
   entriesList.className = "hk-manager-detail-list";
   entriesSection.appendChild(entriesTitle);
   entriesSection.appendChild(tagsRow);
+  entriesSection.appendChild(tagsSuggest);
   entriesSection.appendChild(entriesList);
 
   const aiSection = document.createElement("section");
@@ -1491,6 +1521,45 @@ const renderPageDetail = (page) => {
     });
   }
   tagsInput.value = sanitizedTags.join(", ");
+
+  // 既有標籤建議（依使用頁數排序、排除本頁已有的）：點一下直接加上並儲存。
+  const tagsSuggest = overlay.querySelector("#hk-manager-detail-tags-suggest");
+  if (tagsSuggest) {
+    tagsSuggest.innerHTML = "";
+    const counts = new Map();
+    state.pages.forEach((p) => {
+      (Array.isArray(p.tags) ? p.tags : []).forEach((tg) => {
+        const name = String(tg).trim();
+        if (name) counts.set(name, (counts.get(name) || 0) + 1);
+      });
+    });
+    const current = new Set(sanitizedTags);
+    const suggestions = [...counts.entries()]
+      .filter(([name]) => !current.has(name))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 15);
+    if (suggestions.length) {
+      tagsSuggest.style.display = "flex";
+      const label = document.createElement("span");
+      label.className = "hk-manager-detail-suggest-label";
+      label.textContent = t("manager.tagSuggestLabel");
+      tagsSuggest.appendChild(label);
+      suggestions.forEach(([name, count]) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "hk-manager-suggest-chip";
+        chip.textContent = `+ ${name}`;
+        chip.title = t("manager.tagSuggestTitle", { count });
+        chip.addEventListener("click", async () => {
+          tagsInput.value = [...sanitizedTags, name].join(", ");
+          await savePageTagsFromDetail();
+        });
+        tagsSuggest.appendChild(chip);
+      });
+    } else {
+      tagsSuggest.style.display = "none";
+    }
+  }
 
   const aiNote = state.notes?.[page.url];
   if (aiNote?.note) {
