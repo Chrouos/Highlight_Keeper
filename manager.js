@@ -1033,6 +1033,31 @@ const copyPageNotesAsMarkdown = async (page) => {
   }
 };
 
+// 複製分享連結：預設 fragment（原文網址#hk=…）；太長改 GitHub raw（免 Pages）。
+const sharePageLink = async (page) => {
+  try {
+    const pageEntry = pageToExportEntry(page);
+    const fragmentLink = await window.HkShareLink.buildFragmentShareUrl(pageEntry);
+    if (fragmentLink) {
+      await navigator.clipboard.writeText(fragmentLink);
+      setStatus(t("manager.statusLinkCopied"));
+      return;
+    }
+    const settings = getGithubSettingsSnapshot();
+    if (window.HkShareLink.validateGithubSettings(settings)) {
+      setStatus(t("manager.errLinkTooLong"), true);
+      return;
+    }
+    setStatus(t("manager.statusLinkUploading"));
+    const rawLink = await window.HkShareLink.commitPageToGithub(settings, pageEntry);
+    await navigator.clipboard.writeText(rawLink);
+    setStatus(t("manager.statusLinkCopiedGithub"));
+  } catch (error) {
+    console.debug("複製分享連結失敗", error);
+    setStatus(error?.message || t("manager.errLinkShare"), true);
+  }
+};
+
 // 下載單頁筆記 JSON（給也用 Highlight Keeper 的人「匯入多個 JSON」）。
 const downloadSinglePage = (page) => {
   const name = safeFileSlug(
@@ -1202,6 +1227,16 @@ const ensureDetailOverlay = () => {
     if (page) fn(page);
   };
 
+  const shareLinkDetailBtn = document.createElement("button");
+  shareLinkDetailBtn.type = "button";
+  shareLinkDetailBtn.className =
+    "hk-manager-btn hk-manager-btn-ghost hk-manager-detail-action";
+  shareLinkDetailBtn.textContent = t("manager.shareLink");
+  shareLinkDetailBtn.title = t("manager.shareLinkTitle");
+  shareLinkDetailBtn.addEventListener("click", () =>
+    withCurrentDetailPage((page) => sharePageLink(page))
+  );
+
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className =
@@ -1229,6 +1264,7 @@ const ensureDetailOverlay = () => {
   closeBtn.addEventListener("click", () => closePageDetail());
 
   header.appendChild(headingWrap);
+  header.appendChild(shareLinkDetailBtn);
   header.appendChild(copyBtn);
   header.appendChild(downloadBtn);
   header.appendChild(closeBtn);

@@ -2053,6 +2053,68 @@ const applyMindmapResponseText = async (text) => {
   openMindmapOverlay(tree, { outline: text, generatedAt: Date.now() });
 };
 
+// 套用「分享的筆記」到當前頁面：標註走 AI 套用管線（文字重新定位、
+// 保留顏色與註解），摘要／心智圖／標籤／標題各自寫入。
+// payload: { title, tags, hl:[{text,note,color}], note, mindmap }
+const applySharedPayload = async (payload, { overwrite = false } = {}) => {
+  if (overwrite) {
+    await clearPageHighlights();
+  }
+  let highlight = null;
+  const items = Array.isArray(payload.hl) ? payload.hl : [];
+  if (items.length) {
+    const latestPalette = await refreshPaletteFromStorage();
+    const usageCounts = await collectColorUsageCounts();
+    const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+    const tasks = normalizeAutoHighlightItems(
+      items.map((item) => ({
+        text: item.text,
+        color: item.color,
+        reason: item.note,
+      })),
+      preferredPalette
+    );
+    if (tasks.length) {
+      setAiPanelStatus(t("ai.statusApplyingHighlights"));
+      const { appliedCount, skippedCount } = await applyAutoHighlightTasksBatch(
+        tasks,
+        false // 分享匯入不走預覽，直接套用
+      );
+      highlight = { appliedCount, skippedCount, previewing: false };
+    }
+  }
+  const noteText = (payload.note || "").trim();
+  if (noteText) {
+    await applyNotePayload(noteText);
+  }
+  const outline = (payload.mindmap || "").trim();
+  if (outline) {
+    try {
+      const tree = parseMindmapOutline(outline);
+      if (tree) {
+        await saveMindmap(outline, tree.title);
+        updateMindmapAvailability(true);
+      }
+    } catch (mapError) {
+      console.debug("寫入分享心智圖失敗", mapError);
+    }
+  }
+  let tagsAdded = 0;
+  const tags = Array.isArray(payload.tags) ? payload.tags.filter(Boolean) : [];
+  if (tags.length) {
+    try {
+      tagsAdded = await applyAiPageTags(tags.join(", "));
+    } catch (tagError) {
+      console.debug("匯入分享標籤失敗", tagError);
+    }
+  }
+  await ensurePageMetaTitle(pageKey, payload.title || document.title);
+  if (!highlight && !noteText) {
+    throw new Error(t("ai.errUnrecognized"));
+  }
+  return { highlight, noteImported: Boolean(noteText), tagsAdded };
+};
+
 // Outline heuristics: mostly list lines, no 原文： blocks.
 const looksLikeMindmapOutline = (text) => HkParsers.looksLikeMindmapOutline(text);
 
@@ -2060,6 +2122,28 @@ const looksLikeMindmapOutline = (text) => HkParsers.looksLikeMindmapOutline(text
 // 回傳結果摘要 {mindmap | highlight, noteImported, tagsAdded}；失敗會 throw。
 // ChatGPT 貼回（bridge）與 popup 直接貼上都共用這條。
 const applyAiResponseSections = async (text, { type } = {}) => {
+  // 先認「複製本頁筆記」的分享 Markdown（別人貼過來的筆記），
+  // 命中就轉成分享 payload 走同一條匯入管線。
+  const sharedMd = HkParsers.parseSharedMarkdown(text);
+  if (sharedMd) {
+    const applied = await applySharedPayload({
+      title: sharedMd.title,
+      tags: sharedMd.tags,
+      hl: sharedMd.items.map((item) => ({ text: item.text, note: item.note })),
+      note: sharedMd.summary,
+      mindmap: sharedMd.outline,
+    });
+    // 貼的是別頁的筆記 → 照套但提醒（文字定位可能找不到原文）。
+    const otherPage =
+      sharedMd.url && normalizePageKey(sharedMd.url) !== pageKey;
+    return {
+      highlight: applied.highlight,
+      noteImported: applied.noteImported,
+      tagsAdded: applied.tagsAdded,
+      sharedOtherPage: otherPage,
+    };
+  }
+
   const sections = splitAiSections(text);
   const isMindmap =
     type === "mindmap" ||
@@ -2089,6 +2173,18 @@ const applyAiResponseSections = async (text, { type } = {}) => {
       console.debug("匯入 AI 標籤失敗", tagError);
     }
   }
+  // 三區塊之外若還帶了心智圖大綱，一併靜默寫入（先前會被忽略）。
+  if (sections?.mindmap && (highlightText || noteText)) {
+    try {
+      const tree = parseMindmapOutline(sections.mindmap);
+      if (tree) {
+        await saveMindmap(sections.mindmap, tree.title);
+        updateMindmapAvailability(true);
+      }
+    } catch (mapError) {
+      console.debug("寫入心智圖大綱失敗", mapError);
+    }
+  }
   if (!highlightText && !noteText) {
     throw new Error(t("ai.errUnrecognized"));
   }
@@ -2098,6 +2194,8 @@ const applyAiResponseSections = async (text, { type } = {}) => {
 // 把套用結果組成一行可顯示的狀態文字（面板與 popup 共用）。
 const summarizeAiApplyResult = (res) => {
   if (res?.mindmap) return t("mindmap.done");
+  // 貼上的是別頁的分享筆記 → 前置提醒（原文文字在本頁可能找不到）。
+  const otherPagePrefix = res.sharedOtherPage ? t("share.mdOtherPage") : "";
   const tagSuffix = res.tagsAdded
     ? t("ai.tagsImportedSuffix", { count: res.tagsAdded })
     : "";
@@ -2114,9 +2212,9 @@ const summarizeAiApplyResult = (res) => {
       parts.push(t("ai.skippedCount", { skipped: res.highlight.skippedCount }));
     if (res.noteImported) parts.push(t("ai.summaryImported"));
     if (res.tagsAdded) parts.push(t("ai.tagsImported", { count: res.tagsAdded }));
-    return parts.join("，");
+    return otherPagePrefix + parts.join("，");
   }
-  return t("ai.noteImported") + tagSuffix;
+  return otherPagePrefix + t("ai.noteImported") + tagSuffix;
 };
 
 const handleChatGPTResponse = async (responseData) => {
@@ -6860,6 +6958,300 @@ if (!window.__hkUrlWatcherInstalled) {
   window.addEventListener("hashchange", handleLocationChange);
   window.addEventListener(LOCATION_CHANGE_EVENT, handleLocationChange);
 }
+
+// ── 分享連結收件端 ─────────────────────────────────────────────
+// 兩種來源，偵測到就跳頂部橫幅、一鍵匯入到自己的擴充：
+// 1. 原文網址帶 #hk=<壓縮筆記>（fragment 分享，零設定）
+// 2. raw.githubusercontent.com 上的 highlight-keeper-bulk JSON（GitHub 分享）
+const SHARE_FRAGMENT_PREFIX = "#hk=";
+
+const decompressShareToken = async (token) => {
+  const b64 = token.replace(/-/g, "+").replace(/_/g, "/");
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const stream = new Blob([bytes])
+    .stream()
+    .pipeThrough(new DecompressionStream("deflate-raw"));
+  return JSON.parse(await new Response(stream).text());
+};
+
+// 橫幅 UI（inline style，避開頁面 CSS 干擾）。回傳 {bar,msg,setActions,mkBtn}。
+const createShareBanner = () => {
+  const bar = document.createElement("div");
+  bar.setAttribute(
+    "style",
+    [
+      "position:fixed",
+      "top:0",
+      "left:0",
+      "right:0",
+      "z-index:2147483647",
+      "display:flex",
+      "align-items:center",
+      "gap:12px",
+      "flex-wrap:wrap",
+      "padding:10px 16px",
+      "background:#1c1917",
+      "color:#f5f5f4",
+      "font:14px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+      "box-shadow:0 2px 10px rgba(0,0,0,.25)",
+    ].join(";")
+  );
+  const msg = document.createElement("span");
+  msg.style.flex = "1";
+  msg.style.minWidth = "180px";
+  const actions = document.createElement("span");
+  actions.style.display = "flex";
+  actions.style.gap = "8px";
+  actions.style.flexWrap = "wrap";
+
+  const mkBtn = (label, primary) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    btn.setAttribute(
+      "style",
+      [
+        "font:inherit",
+        "font-weight:600",
+        "cursor:pointer",
+        "border-radius:8px",
+        "padding:7px 14px",
+        "border:1px solid " + (primary ? "#f59e0b" : "#57534e"),
+        "background:" + (primary ? "#f59e0b" : "transparent"),
+        "color:" + (primary ? "#1c1917" : "#f5f5f4"),
+      ].join(";")
+    );
+    return btn;
+  };
+
+  const closeBtn = mkBtn("✕", false);
+  closeBtn.title = t("share.close");
+  closeBtn.style.padding = "7px 10px";
+  closeBtn.addEventListener("click", () => bar.remove());
+
+  bar.appendChild(msg);
+  bar.appendChild(actions);
+  bar.appendChild(closeBtn);
+
+  const setActions = (buttons) => {
+    actions.innerHTML = "";
+    buttons.forEach((btn) => actions.appendChild(btn));
+  };
+  return { bar, msg, setActions, mkBtn };
+};
+
+// fragment 分享：匯入到「當前頁面」（走 AI 套用管線，標註即套即見）。
+const startFragmentShareImport = (payload) => {
+  const { bar, msg, setActions, mkBtn } = createShareBanner();
+
+  const stripHashFromUrl = () => {
+    try {
+      history.replaceState(null, "", location.pathname + location.search);
+    } catch (_e) {}
+  };
+
+  const finish = async (overwrite) => {
+    msg.textContent = t("share.importing");
+    setActions([]);
+    try {
+      const res = await applySharedPayload(payload, { overwrite });
+      await refreshHighlightPanelIfVisible();
+      msg.textContent = t("share.done", {
+        count: res.highlight?.appliedCount || 0,
+      });
+      stripHashFromUrl();
+      window.setTimeout(() => bar.remove(), 6000);
+    } catch (error) {
+      console.debug("匯入分享筆記失敗", error);
+      msg.textContent = error?.message || t("share.fail");
+    }
+  };
+
+  const promptImport = async () => {
+    let existing = [];
+    try {
+      const stored = await chrome.storage.local.get(pageKey);
+      existing = Array.isArray(stored?.[pageKey]) ? stored[pageKey] : [];
+    } catch (_e) {}
+    if (!existing.length) return finish(false);
+    // 本頁已有標註 → 併入／覆蓋／取消
+    msg.textContent = t("share.conflict", { count: existing.length });
+    const mergeBtn = mkBtn(t("share.merge"), true);
+    const overwriteBtn = mkBtn(t("share.overwrite"), false);
+    const cancelBtn = mkBtn(t("share.cancel"), false);
+    mergeBtn.addEventListener("click", () => finish(false));
+    overwriteBtn.addEventListener("click", () => finish(true));
+    cancelBtn.addEventListener("click", () => {
+      msg.textContent = t("share.cancelled");
+      setActions([]);
+      window.setTimeout(() => bar.remove(), 2500);
+    });
+    setActions([mergeBtn, overwriteBtn, cancelBtn]);
+  };
+
+  const count = Array.isArray(payload.hl) ? payload.hl.length : 0;
+  msg.textContent = `🔖 ${t("share.detected", {
+    title: payload.title || "",
+    count,
+  })}`;
+  const importBtn = mkBtn(t("share.importBtn"), true);
+  importBtn.addEventListener("click", () => promptImport());
+  setActions([importBtn]);
+  document.body.appendChild(bar);
+};
+
+// GitHub raw 分享：整頁 JSON（含原始 entries）直接寫進 storage，
+// 開啟原文時就會還原。與 manager 匯入相同的資料形狀。
+const startRawShareImport = (page) => {
+  const { bar, msg, setActions, mkBtn } = createShareBanner();
+
+  const entryKey = (entry) =>
+    entry?.id
+      ? `id:${entry.id}`
+      : `t:${entry?.text || ""}|${entry?.note || ""}`;
+
+  const importPage = async (mode) => {
+    const url = page.url;
+    const cur = await chrome.storage.local.get([
+      url,
+      PAGE_META_KEY,
+      "hkGeneratedNotes",
+      MINDMAP_STORAGE_KEY,
+    ]);
+    const existingEntries = Array.isArray(cur[url]) ? cur[url] : [];
+    let entries;
+    if (mode === "merge") {
+      const seen = new Set(existingEntries.map(entryKey));
+      entries = existingEntries.slice();
+      page.entries.forEach((entry) => {
+        const key = entryKey(entry);
+        if (!seen.has(key)) {
+          seen.add(key);
+          entries.push(entry);
+        }
+      });
+    } else {
+      entries = page.entries.slice();
+    }
+
+    const metaAll = { ...(cur[PAGE_META_KEY] || {}) };
+    const metaEntry = { ...(metaAll[url] || {}) };
+    if (page.title && (mode !== "merge" || !metaEntry.title)) {
+      metaEntry.title = page.title;
+    }
+    const tagSet = new Set([
+      ...(mode === "merge" && Array.isArray(metaEntry.tags) ? metaEntry.tags : []),
+      ...(Array.isArray(page.tags) ? page.tags : []),
+    ]);
+    if (tagSet.size) metaEntry.tags = [...tagSet];
+    metaAll[url] = metaEntry;
+
+    const notesAll = { ...(cur.hkGeneratedNotes || {}) };
+    if (page.note && (mode !== "merge" || !notesAll[url])) {
+      notesAll[url] = page.note;
+    }
+    const mapsAll = { ...(cur[MINDMAP_STORAGE_KEY] || {}) };
+    if (page.mindmap && (mode !== "merge" || !mapsAll[url])) {
+      mapsAll[url] = page.mindmap;
+    }
+
+    await chrome.storage.local.set({
+      [url]: entries,
+      [PAGE_META_KEY]: metaAll,
+      hkGeneratedNotes: notesAll,
+      [MINDMAP_STORAGE_KEY]: mapsAll,
+    });
+    return entries.length;
+  };
+
+  const finish = async (mode) => {
+    msg.textContent = t("share.importing");
+    setActions([]);
+    try {
+      const total = await importPage(mode);
+      msg.textContent = "";
+      msg.appendChild(
+        document.createTextNode(t("share.rawDone", { count: total }) + " ")
+      );
+      const openLink = document.createElement("a");
+      openLink.href = page.url;
+      openLink.textContent = t("share.openSource");
+      openLink.setAttribute("style", "color:#fbbf24;font-weight:600");
+      msg.appendChild(openLink);
+    } catch (error) {
+      console.debug("匯入分享筆記失敗", error);
+      msg.textContent = error?.message || t("share.fail");
+    }
+  };
+
+  const promptImport = async () => {
+    let existing = [];
+    try {
+      const stored = await chrome.storage.local.get(page.url);
+      existing = Array.isArray(stored?.[page.url]) ? stored[page.url] : [];
+    } catch (_e) {}
+    if (!existing.length) return finish("overwrite");
+    msg.textContent = t("share.conflict", { count: existing.length });
+    const mergeBtn = mkBtn(t("share.merge"), true);
+    const overwriteBtn = mkBtn(t("share.overwrite"), false);
+    const cancelBtn = mkBtn(t("share.cancel"), false);
+    mergeBtn.addEventListener("click", () => finish("merge"));
+    overwriteBtn.addEventListener("click", () => finish("overwrite"));
+    cancelBtn.addEventListener("click", () => {
+      msg.textContent = t("share.cancelled");
+      setActions([]);
+    });
+    setActions([mergeBtn, overwriteBtn, cancelBtn]);
+  };
+
+  const count = Array.isArray(page.entries) ? page.entries.length : 0;
+  msg.textContent = `🔖 ${t("share.detected", {
+    title: page.title || "",
+    count,
+  })}`;
+  const importBtn = mkBtn(t("share.importBtn"), true);
+  importBtn.addEventListener("click", () => promptImport());
+  setActions([importBtn]);
+  document.body.appendChild(bar);
+};
+
+// 進入點：判斷當前頁是不是分享連結（fragment 或 raw JSON）。
+const detectSharedNotes = async () => {
+  try {
+    // 1) fragment：原文網址#hk=…
+    const hash = location.hash || "";
+    if (hash.startsWith(SHARE_FRAGMENT_PREFIX)) {
+      const payload = await decompressShareToken(
+        hash.slice(SHARE_FRAGMENT_PREFIX.length)
+      );
+      if (
+        payload?.v === 1 &&
+        (payload.hl?.length || payload.note || payload.mindmap)
+      ) {
+        startFragmentShareImport(payload);
+      }
+      return;
+    }
+    // 2) raw.githubusercontent 上的備份／分享 JSON
+    if (location.hostname === "raw.githubusercontent.com") {
+      const text = document.body?.innerText || "";
+      if (text.length > 5 * 1024 * 1024) return;
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (_e) {
+        return;
+      }
+      if (parsed?.type !== "highlight-keeper-bulk") return;
+      const pages = HkParsers.normalizeBulkPages(parsed.pages);
+      if (pages.length === 1) startRawShareImport(pages[0]);
+    }
+  } catch (error) {
+    console.debug("分享筆記偵測失敗", error);
+  }
+};
+
+detectSharedNotes();
 
 const ensureNoteTooltip = () => {
   if (highlightNoteTooltip) return highlightNoteTooltip;

@@ -266,6 +266,96 @@
     return lines.join("\n").trim();
   };
 
+  // 解析 pageToMarkdown 產出的分享 Markdown（「複製本頁筆記」的逆向）。
+  // 中英區塊標題都認；不是這個格式回 null，讓呼叫端走其他解析路徑。
+  const MD_SECTION_ALIASES = {
+    highlights: ["重點", "highlights"],
+    summary: ["摘要筆記", "summary"],
+    mindmap: ["心智圖大綱", "mind map outline", "mindmap"],
+  };
+  const MD_TAGS_PREFIX = /^(標籤|tags)\s*[:：]\s*/i;
+
+  const parseSharedMarkdown = (rawText) => {
+    if (typeof rawText !== "string" || !rawText.trim()) return null;
+    const lines = rawText.split(/\r?\n/);
+    const aliasToKey = new Map();
+    Object.entries(MD_SECTION_ALIASES).forEach(([key, names]) => {
+      names.forEach((name) => aliasToKey.set(name.toLowerCase(), key));
+    });
+
+    const result = {
+      url: "",
+      title: "",
+      tags: [],
+      items: [],
+      summary: "",
+      outline: "",
+    };
+    let section = null; // null | highlights | summary | mindmap
+    const summaryLines = [];
+    const outlineLines = [];
+
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\s+$/, "");
+      const heading = line.match(/^##\s+(.+)$/);
+      if (heading) {
+        const key = aliasToKey.get(heading[1].trim().toLowerCase());
+        if (!key) return null; // 出現不認得的 ## 區塊 → 不是我們的格式
+        section = key;
+        continue;
+      }
+      if (!section) {
+        // 檔頭區：# 標題、網址行、標籤行
+        const titleMatch = line.match(/^#\s+(.+)$/);
+        if (titleMatch && !result.title) {
+          result.title = titleMatch[1].trim();
+          continue;
+        }
+        if (!result.url && isHttpUrl(line.trim())) {
+          result.url = line.trim();
+          continue;
+        }
+        if (MD_TAGS_PREFIX.test(line)) {
+          result.tags = line
+            .replace(MD_TAGS_PREFIX, "")
+            .split(/\s+/)
+            .map((t) => t.replace(/^#/, "").trim())
+            .filter(Boolean);
+          continue;
+        }
+        continue;
+      }
+      if (section === "highlights") {
+        const item = line.match(/^-\s+(.*)$/);
+        if (item) {
+          result.items.push({ text: item[1].trim(), note: "" });
+          continue;
+        }
+        const note = line.match(/^\s+>\s*(.*)$/);
+        if (note && result.items.length) {
+          const last = result.items[result.items.length - 1];
+          last.note = last.note ? `${last.note}\n${note[1]}` : note[1];
+        }
+        continue;
+      }
+      if (section === "summary") {
+        summaryLines.push(line);
+        continue;
+      }
+      if (section === "mindmap") {
+        outlineLines.push(line);
+      }
+    }
+
+    result.summary = summaryLines.join("\n").trim();
+    result.outline = outlineLines.join("\n").trim();
+    result.items = result.items.filter((item) => item.text);
+    // 至少要有「重點」條列或摘要其中之一，且有標題或網址，才視為分享格式。
+    if (!result.items.length && !result.summary) return null;
+    if (!result.title && !result.url) return null;
+    return result;
+  };
+
   root.HkParsers = {
     isHttpUrl,
     AI_SECTION_ALIASES,
@@ -276,5 +366,6 @@
     parseHighlightBlocks,
     normalizeBulkPages,
     pageToMarkdown,
+    parseSharedMarkdown,
   };
 })(typeof window !== "undefined" ? window : globalThis);

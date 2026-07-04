@@ -281,22 +281,27 @@ h1 {
   white-space: nowrap;
 }
 
-.panel-copy-btn {
+/* 主要分享動作：實心藍，一眼可見 */
+.panel-link-btn {
   border-color: #2563eb;
-  color: #1d4ed8;
+  background: #2563eb;
+  color: #fff;
 }
 
-.panel-copy-btn:hover,
-.panel-copy-btn:focus-visible {
-  background: #eff6ff;
+.panel-link-btn:hover,
+.panel-link-btn:focus-visible {
+  background: #1d4ed8;
   border-color: #1d4ed8;
 }
 
+.panel-copy-btn,
 .panel-download-btn {
   border-color: #d4d2ce;
   color: #57534e;
 }
 
+.panel-copy-btn:hover,
+.panel-copy-btn:focus-visible,
 .panel-download-btn:hover,
 .panel-download-btn:focus-visible {
   background: #fafaf9;

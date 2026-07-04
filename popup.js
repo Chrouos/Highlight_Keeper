@@ -3,6 +3,7 @@ const addColorBtn = document.getElementById("addColorBtn");
 const paletteListEl = document.getElementById("paletteList");
 const openPanelBtn = document.getElementById("openPanelBtn");
 const openManagerBtn = document.getElementById("openManagerBtn");
+const shareLinkBtn = document.getElementById("shareLinkBtn");
 const copyNotesBtn = document.getElementById("copyNotesBtn");
 const downloadNotesBtn = document.getElementById("downloadNotesBtn");
 const langSelect = document.getElementById("langSelect");
@@ -18,6 +19,7 @@ const normalizePageKey = (href) =>
 const PAGE_META_KEY = "__hk_page_meta__";
 const GENERATED_NOTES_KEY = "hkGeneratedNotes";
 const MINDMAP_KEY = "hkMindmaps";
+const GITHUB_SETTINGS_KEY = "hkGithubSyncSettings";
 
 const DEFAULT_COLOR = "#ffeb3b";
 const DEFAULT_PALETTE = [
@@ -324,6 +326,41 @@ const collectCurrentPageEntry = async () => {
   };
 };
 
+// 複製分享連結：預設把筆記壓進「原文網址#hk=…」（零設定）；
+// 筆記太多放不下時，改 commit 到 GitHub 備份 repo 分享 raw 連結（免 Pages）。
+const shareCurrentPageLink = async () => {
+  if (shareLinkBtn) shareLinkBtn.disabled = true;
+  try {
+    const { pageEntry, error } = await collectCurrentPageEntry();
+    if (error) {
+      setStatusVisible(error, true);
+      return;
+    }
+    const fragmentLink = await window.HkShareLink.buildFragmentShareUrl(pageEntry);
+    if (fragmentLink) {
+      await navigator.clipboard.writeText(fragmentLink);
+      setStatusVisible(t("popup.statusLinkCopied"));
+      return;
+    }
+    // fragment 放不下 → 走 GitHub raw（沿用備份設定，不需開 Pages）
+    const stored = await chrome.storage?.local.get(GITHUB_SETTINGS_KEY);
+    const settings = stored?.[GITHUB_SETTINGS_KEY] || {};
+    if (window.HkShareLink.validateGithubSettings(settings)) {
+      setStatusVisible(t("popup.errLinkTooLong"), true);
+      return;
+    }
+    setStatusVisible(t("popup.statusLinkUploading"));
+    const rawLink = await window.HkShareLink.commitPageToGithub(settings, pageEntry);
+    await navigator.clipboard.writeText(rawLink);
+    setStatusVisible(t("popup.statusLinkCopiedGithub"));
+  } catch (error) {
+    console.debug("複製分享連結失敗", error);
+    setStatusVisible(error?.message || t("popup.errLinkShare"), true);
+  } finally {
+    if (shareLinkBtn) shareLinkBtn.disabled = false;
+  }
+};
+
 // 複製本頁筆記成 Markdown（貼到聊天／筆記軟體都可讀）。
 const copyCurrentPageNotes = async () => {
   try {
@@ -459,6 +496,7 @@ openManagerBtn?.addEventListener("click", () => {
   chrome.tabs.create({ url });
 });
 
+shareLinkBtn?.addEventListener("click", shareCurrentPageLink);
 copyNotesBtn?.addEventListener("click", copyCurrentPageNotes);
 downloadNotesBtn?.addEventListener("click", downloadCurrentPageNotes);
 
