@@ -244,6 +244,9 @@ h1 {
   padding: 16px 24px;
   background: #fff;
   border-bottom: 1px solid #f0ece4;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .panel-open-btn {
@@ -263,6 +266,17 @@ h1 {
 .panel-open-btn:focus-visible {
   background: #fffbeb;
   border-color: #b45309;
+}
+
+.panel-share-btn {
+  border-color: #2563eb;
+  color: #1d4ed8;
+}
+
+.panel-share-btn:hover,
+.panel-share-btn:focus-visible {
+  background: #eff6ff;
+  border-color: #1d4ed8;
 }
 
 /* ── AI tools ─────────────────────────────────────────── */

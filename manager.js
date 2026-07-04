@@ -1129,6 +1129,18 @@ const ensureDetailOverlay = () => {
   headingWrap.appendChild(urlEl);
   headingWrap.appendChild(metaEl);
 
+  const shareBtn = document.createElement("button");
+  shareBtn.type = "button";
+  shareBtn.id = "hk-manager-detail-share";
+  shareBtn.className =
+    "hk-manager-btn hk-manager-btn-ghost hk-manager-detail-share";
+  shareBtn.textContent = t("manager.sharePage");
+  shareBtn.title = t("manager.shareTitle");
+  shareBtn.addEventListener("click", () => {
+    const page = state.pages.find((p) => p.url === detailCurrentPageUrl);
+    if (page) sharePageToGithub(page);
+  });
+
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "hk-manager-detail-close";
@@ -1136,6 +1148,7 @@ const ensureDetailOverlay = () => {
   closeBtn.addEventListener("click", () => closePageDetail());
 
   header.appendChild(headingWrap);
+  header.appendChild(shareBtn);
   header.appendChild(closeBtn);
 
   const body = document.createElement("div");
@@ -1753,6 +1766,40 @@ const buildCategorizedFiles = (settings, payload) => {
   };
   files.push({ path: joinPath(dir, "index.json"), content: JSON.stringify(index, null, 2) });
   return { files, index };
+};
+
+// 分享某一頁：委派共用的 HkShare（github-share.js，manager.html 已先載入），
+// 只 commit 該頁小檔（+ viewer.html），並把公開瀏覽連結複製到剪貼簿。
+const sharePageToGithub = async (page) => {
+  const settings = getGithubSettingsSnapshot();
+  const validationError = validateGithubSettings(settings);
+  if (validationError) {
+    setGithubStatus(validationError, true);
+    return;
+  }
+  const shareBtn = document.getElementById("hk-manager-detail-share");
+  if (shareBtn) shareBtn.disabled = true;
+  setGithubActionsDisabled(true);
+  setGithubStatus(t("manager.statusSharing"));
+  try {
+    const { link } = await window.HkShare.sharePage({
+      settings,
+      pageEntry: pageToExportEntry(page),
+      commitMessage: `share: ${getPageDisplayName(page.url)}`,
+    });
+    try {
+      await navigator.clipboard.writeText(link);
+      setGithubStatus(t("manager.statusShareCopied"));
+    } catch (_e) {
+      setGithubStatus(t("manager.statusShareReady", { link }));
+    }
+  } catch (error) {
+    console.debug("分享此頁失敗", error);
+    setGithubStatus(error?.message || t("manager.statusShareFail"), true);
+  } finally {
+    if (shareBtn) shareBtn.disabled = false;
+    setGithubActionsDisabled(false);
+  }
 };
 
 const fetchGithubBackupContent = async (settings, overridePath) => {

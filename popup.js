@@ -3,6 +3,7 @@ const addColorBtn = document.getElementById("addColorBtn");
 const paletteListEl = document.getElementById("paletteList");
 const openPanelBtn = document.getElementById("openPanelBtn");
 const openManagerBtn = document.getElementById("openManagerBtn");
+const sharePageBtn = document.getElementById("sharePageBtn");
 const langSelect = document.getElementById("langSelect");
 const statusEl = document.querySelector(".status");
 
@@ -11,6 +12,12 @@ const t = (key, params) => HkI18n.t(key, params);
 // 網址正規化共用自 shared.js（manifest/popup.html 已先載入）。
 const normalizePageKey = (href) =>
   window.HkUrlKey ? window.HkUrlKey.normalizePageKey(href) : href;
+
+// 與 manager.js / contentScript 一致的 storage 主鍵，用來組出「當頁」的匯出資料。
+const PAGE_META_KEY = "__hk_page_meta__";
+const GENERATED_NOTES_KEY = "hkGeneratedNotes";
+const MINDMAP_KEY = "hkMindmaps";
+const GITHUB_SETTINGS_KEY = "hkGithubSyncSettings";
 
 const DEFAULT_COLOR = "#ffeb3b";
 const DEFAULT_PALETTE = [
@@ -65,6 +72,14 @@ const normalizePalette = (input) => {
 const setStatus = (message, isError = false) => {
   statusEl.textContent = message;
   statusEl.style.color = isError ? "#d93025" : "#1a73e8";
+};
+
+// popup 很長、狀態列在最底部——回饋常被推到看不見。分享等操作用這個把它捲進視野。
+const setStatusVisible = (message, isError = false) => {
+  setStatus(message, isError);
+  try {
+    statusEl.scrollIntoView({ block: "center", behavior: "smooth" });
+  } catch (_e) {}
 };
 
 const injectContentAssets = async (tabId) => {
@@ -234,6 +249,24 @@ const aiModeLabel = (provider) => {
   }
 };
 
+// 找出「當頁」的 storage 主鍵：contentScript 以 canonical 連結為主鍵，popup 不在
+// 頁面內，先輕量讀取該頁 canonical（不觸發全文擷取），讓鍵與標註鍵一致。
+const resolveCurrentPageKey = async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url) return { tab: tab || null, key: "" };
+  let canonical = "";
+  try {
+    const [{ result } = {}] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => document.querySelector('link[rel="canonical"]')?.href || "",
+    });
+    if (typeof result === "string") canonical = result;
+  } catch (_e) {
+    // 受限頁面（chrome://、商店等）無法注入；退回網址。
+  }
+  return { tab, key: normalizePageKey(canonical || tab.url) };
+};
+
 const loadPageInfo = async () => {
   const markEl = document.getElementById("markCount");
   const modeEl = document.getElementById("aiMode");
@@ -247,24 +280,11 @@ const loadPageInfo = async () => {
   try {
     // Read the count straight from storage — waking the content script for
     // this forced a full-page text extraction and made the popup feel slow.
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.url) {
+    const { key } = await resolveCurrentPageKey();
+    if (!key) {
       if (markEl) markEl.textContent = "—";
       return;
     }
-    // contentScript 以 canonical 連結為主鍵；popup 不在頁面內，先嘗試讀取該頁
-    // canonical（輕量、不觸發全文擷取），讓計數鍵與標註鍵一致，否則會顯示成 0。
-    let canonical = "";
-    try {
-      const [{ result } = {}] = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => document.querySelector('link[rel="canonical"]')?.href || "",
-      });
-      if (typeof result === "string") canonical = result;
-    } catch (_e) {
-      // 受限頁面（chrome://、商店等）無法注入；退回網址。
-    }
-    const key = normalizePageKey(canonical || tab.url);
     const stored = await chrome.storage?.local.get(key);
     const entries = stored?.[key];
     if (markEl) {
@@ -272,6 +292,67 @@ const loadPageInfo = async () => {
     }
   } catch (_e) {
     if (markEl) markEl.textContent = "—";
+  }
+};
+
+// 分享「當頁」：組出該頁匯出資料 + 讀 GitHub 設定，委派 HkShare 上傳並複製連結。
+const shareCurrentPage = async () => {
+  if (!window.HkShare) {
+    setStatusVisible(t("popup.errShareUnavailable"), true);
+    return;
+  }
+  if (sharePageBtn) sharePageBtn.disabled = true;
+  setStatusVisible(t("popup.statusSharing"));
+  try {
+    const { key } = await resolveCurrentPageKey();
+    if (!key) {
+      setStatusVisible(t("popup.errNoTabSimple"), true);
+      return;
+    }
+    const stored = await chrome.storage?.local.get([
+      key,
+      PAGE_META_KEY,
+      GENERATED_NOTES_KEY,
+      MINDMAP_KEY,
+      GITHUB_SETTINGS_KEY,
+    ]);
+    const settings = stored?.[GITHUB_SETTINGS_KEY] || {};
+    if (window.HkShare.validateSettings(settings)) {
+      setStatusVisible(t("popup.errShareNoGithub"), true);
+      return;
+    }
+    const entries = Array.isArray(stored?.[key]) ? stored[key] : [];
+    const meta = stored?.[PAGE_META_KEY]?.[key] || {};
+    const note = stored?.[GENERATED_NOTES_KEY]?.[key] || null;
+    const mindmap = stored?.[MINDMAP_KEY]?.[key] || null;
+    if (!entries.length && !note && !mindmap) {
+      setStatusVisible(t("popup.errShareNoNotes"), true);
+      return;
+    }
+    const pageEntry = {
+      url: key,
+      title: meta.title || "",
+      tags: Array.isArray(meta.tags) ? meta.tags : [],
+      entries,
+      note,
+      mindmap,
+    };
+    const { link } = await window.HkShare.sharePage({
+      settings,
+      pageEntry,
+      commitMessage: `share: ${pageEntry.title || key}`,
+    });
+    try {
+      await navigator.clipboard.writeText(link);
+      setStatusVisible(t("popup.statusShareCopied"));
+    } catch (_e) {
+      setStatusVisible(t("popup.statusShareReady", { link }));
+    }
+  } catch (error) {
+    console.debug("分享此頁失敗", error);
+    setStatusVisible(error?.message || t("popup.errShareFail"), true);
+  } finally {
+    if (sharePageBtn) sharePageBtn.disabled = false;
   }
 };
 
@@ -349,6 +430,8 @@ openManagerBtn?.addEventListener("click", () => {
   const url = chrome.runtime.getURL("manager.html");
   chrome.tabs.create({ url });
 });
+
+sharePageBtn?.addEventListener("click", shareCurrentPage);
 
 document.getElementById("aiHighlightBtn")?.addEventListener("click", async () => {
   try {

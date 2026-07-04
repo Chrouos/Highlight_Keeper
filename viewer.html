@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="hk-share" content="1" />
+    <title>Highlight Keeper — 分享筆記</title>
+    <style>
+      :root {
+        --bg: #fafaf9;
+        --card: #ffffff;
+        --text: #1c1917;
+        --muted: #78716c;
+        --border: #e7e5e4;
+        --accent: #d97706;
+        --note-bg: #fffbeb;
+        --note-border: #fde68a;
+        --radius: 12px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1c1917;
+          --card: #292524;
+          --text: #f5f5f4;
+          --muted: #a8a29e;
+          --border: #44403c;
+          --accent: #fbbf24;
+          --note-bg: #292014;
+          --note-border: #78591c;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC",
+          "Microsoft JhengHei", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 32px 20px 80px;
+      }
+      .page-head {
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 20px;
+        margin-bottom: 8px;
+      }
+      .page-title {
+        font-size: 26px;
+        font-weight: 800;
+        margin: 0 0 8px;
+        word-break: break-word;
+      }
+      .page-url {
+        display: inline-block;
+        font-size: 13px;
+        color: var(--accent);
+        text-decoration: none;
+        word-break: break-all;
+      }
+      .page-url:hover {
+        text-decoration: underline;
+      }
+      .page-meta {
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 12px;
+      }
+      .tag {
+        font-size: 12px;
+        padding: 2px 10px;
+        border-radius: 999px;
+        background: var(--note-bg);
+        border: 1px solid var(--note-border);
+        color: var(--text);
+      }
+      .section {
+        margin-top: 28px;
+      }
+      .section-title {
+        font-size: 13px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 0 0 12px;
+      }
+      .entry {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 14px 16px;
+        margin-bottom: 12px;
+      }
+      .entry-text {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .entry-note {
+        margin: 10px 0 0;
+        padding: 8px 12px;
+        background: var(--note-bg);
+        border-left: 3px solid var(--accent);
+        border-radius: 6px;
+        font-size: 14px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .ai-note,
+      .mindmap {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 14px 16px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0;
+        font-family: inherit;
+        font-size: 14px;
+      }
+      .mindmap {
+        overflow-x: auto;
+      }
+      .state {
+        text-align: center;
+        color: var(--muted);
+        padding: 80px 20px;
+      }
+      .state h1 {
+        font-size: 18px;
+        color: var(--text);
+        margin: 0 0 8px;
+      }
+      .footer {
+        margin-top: 48px;
+        padding-top: 20px;
+        border-top: 1px solid var(--border);
+        text-align: center;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .footer a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+      }
+      .dl-btn {
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        background: var(--accent);
+        border: none;
+        border-radius: 8px;
+        padding: 9px 18px;
+        cursor: pointer;
+        transition: opacity 0.15s ease;
+      }
+      .dl-btn:hover {
+        opacity: 0.88;
+      }
+      .dl-hint {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div id="loading" class="state"><h1></h1></div>
+      <div id="error" class="state hidden"><h1></h1><p id="error-detail"></p></div>
+      <article id="content" class="hidden">
+        <header class="page-head">
+          <h1 id="pTitle" class="page-title"></h1>
+          <a id="pUrl" class="page-url" target="_blank" rel="noopener"></a>
+          <div id="pMeta" class="page-meta"></div>
+          <div id="pTags" class="tags"></div>
+          <div class="actions">
+            <button type="button" id="dlBtn" class="dl-btn"></button>
+            <span id="dlHint" class="dl-hint"></span>
+          </div>
+        </header>
+
+        <section id="secEntries" class="section">
+          <h2 id="lblEntries" class="section-title"></h2>
+          <div id="pEntries"></div>
+        </section>
+
+        <section id="secAi" class="section hidden">
+          <h2 id="lblAi" class="section-title"></h2>
+          <p id="pAi" class="ai-note"></p>
+        </section>
+
+        <section id="secMindmap" class="section hidden">
+          <h2 id="lblMindmap" class="section-title"></h2>
+          <pre id="pMindmap" class="mindmap"></pre>
+        </section>
+      </article>
+
+      <div class="footer">
+        <span id="footText"></span>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        // 極簡中英字典（依瀏覽器語言切換），與擴充內 i18n.js 無關。
+        var isZh = (navigator.language || "en").toLowerCase().indexOf("zh") === 0;
+        var T = {
+          loading: isZh ? "載入筆記中…" : "Loading notes…",
+          notFoundTitle: isZh ? "找不到這頁筆記" : "Notes not found",
+          notFoundBody: isZh
+            ? "此頁尚未上傳，或分享連結已失效。"
+            : "This page hasn't been uploaded yet, or the link has expired.",
+          badLinkTitle: isZh ? "連結格式不正確" : "Invalid link",
+          badLinkBody: isZh
+            ? "缺少必要參數，無法載入筆記。"
+            : "The link is missing required parameters.",
+          parseTitle: isZh ? "無法讀取筆記" : "Couldn't read notes",
+          entries: isZh ? "標註內容" : "Highlights",
+          ai: isZh ? "AI 筆記" : "AI notes",
+          mindmap: isZh ? "心智圖大綱" : "Mind map outline",
+          noEntries: isZh ? "這頁沒有標註。" : "No highlights on this page.",
+          foot: isZh ? "由 Highlight Keeper 分享" : "Shared via Highlight Keeper",
+          download: isZh ? "下載筆記（JSON）" : "Download notes (JSON)",
+          downloadHint: isZh
+            ? "可用 Highlight Keeper →「管理所有筆記」→「匯入多個 JSON」匯入"
+            : "Import via Highlight Keeper → \"Manage all notes\" → \"Import JSON\"",
+          downloadedHint: isZh
+            ? "已自動下載。若被瀏覽器擋住，請按上方按鈕。可用 Highlight Keeper →「匯入多個 JSON」匯入。"
+            : "Downloaded automatically. If blocked, click the button above. Import via Highlight Keeper → \"Import JSON\".",
+        };
+
+        var $ = function (id) {
+          return document.getElementById(id);
+        };
+        $("loading").querySelector("h1").textContent = T.loading;
+        $("footText").textContent = T.foot;
+
+        function showError(title, body) {
+          $("loading").classList.add("hidden");
+          $("content").classList.add("hidden");
+          var el = $("error");
+          el.classList.remove("hidden");
+          el.querySelector("h1").textContent = title;
+          $("error-detail").textContent = body || "";
+        }
+
+        // 解析 hash：#o=&r=&b=&f=
+        function parseHash() {
+          var raw = (location.hash || "").replace(/^#/, "");
+          var params = new URLSearchParams(raw);
+          return {
+            owner: params.get("o"),
+            repo: params.get("r"),
+            branch: params.get("b"),
+            file: params.get("f"),
+          };
+        }
+
+        var cfg = parseHash();
+        if (!cfg.owner || !cfg.repo || !cfg.branch || !cfg.file) {
+          showError(T.badLinkTitle, T.badLinkBody);
+          return;
+        }
+
+        var rawUrl =
+          "https://raw.githubusercontent.com/" +
+          encodeURIComponent(cfg.owner) +
+          "/" +
+          encodeURIComponent(cfg.repo) +
+          "/" +
+          encodeURIComponent(cfg.branch) +
+          "/" +
+          cfg.file
+            .split("/")
+            .map(function (seg) {
+              return encodeURIComponent(seg);
+            })
+            .join("/");
+
+        fetch(rawUrl, { cache: "no-cache" })
+          .then(function (res) {
+            if (res.status === 404) {
+              showError(T.notFoundTitle, T.notFoundBody);
+              return null;
+            }
+            if (!res.ok) {
+              showError(T.parseTitle, "HTTP " + res.status);
+              return null;
+            }
+            return res.text();
+          })
+          .then(function (text) {
+            if (text == null) return;
+            var data;
+            try {
+              data = JSON.parse(text);
+            } catch (e) {
+              showError(T.parseTitle, String(e));
+              return;
+            }
+            var pages = Array.isArray(data && data.pages)
+              ? data.pages
+              : Array.isArray(data)
+              ? data
+              : [];
+            if (!pages.length) {
+              showError(T.notFoundTitle, T.notFoundBody);
+              return;
+            }
+            render(pages[0]);
+          })
+          .catch(function (e) {
+            showError(T.parseTitle, String(e));
+          });
+
+        function render(page) {
+          var title =
+            (page.title && String(page.title).trim()) ||
+            (page.url ? hostOf(page.url) : "Untitled");
+          $("pTitle").textContent = title;
+
+          var urlEl = $("pUrl");
+          if (page.url) {
+            urlEl.textContent = page.url;
+            urlEl.href = page.url;
+          } else {
+            urlEl.classList.add("hidden");
+          }
+
+          var entries = Array.isArray(page.entries) ? page.entries : [];
+          $("pMeta").textContent = isZh
+            ? entries.length + " 筆標註"
+            : entries.length + " highlight" + (entries.length === 1 ? "" : "s");
+
+          // 標籤
+          var tags = Array.isArray(page.tags)
+            ? page.tags
+                .map(function (x) {
+                  return String(x).trim();
+                })
+                .filter(Boolean)
+            : [];
+          var tagsWrap = $("pTags");
+          if (tags.length) {
+            tags.forEach(function (tg) {
+              var s = document.createElement("span");
+              s.className = "tag";
+              s.textContent = tg;
+              tagsWrap.appendChild(s);
+            });
+          } else {
+            tagsWrap.classList.add("hidden");
+          }
+
+          // 標註
+          $("lblEntries").textContent = T.entries;
+          var list = $("pEntries");
+          if (!entries.length) {
+            var empty = document.createElement("p");
+            empty.className = "state";
+            empty.style.padding = "24px 0";
+            empty.textContent = T.noEntries;
+            list.appendChild(empty);
+          } else {
+            entries.forEach(function (entry) {
+              var card = document.createElement("div");
+              card.className = "entry";
+              var txt = document.createElement("p");
+              txt.className = "entry-text";
+              txt.textContent = (entry && entry.text) || "";
+              card.appendChild(txt);
+              var note = entry && entry.note && String(entry.note).trim();
+              if (note) {
+                var n = document.createElement("p");
+                n.className = "entry-note";
+                n.textContent = note;
+                card.appendChild(n);
+              }
+              list.appendChild(card);
+            });
+          }
+
+          // AI 筆記
+          var aiText =
+            page.note && page.note.note ? String(page.note.note).trim() : "";
+          if (aiText) {
+            $("lblAi").textContent = T.ai;
+            $("pAi").textContent = aiText;
+            $("secAi").classList.remove("hidden");
+          }
+
+          // 心智圖大綱
+          var outline =
+            page.mindmap && page.mindmap.outline
+              ? String(page.mindmap.outline).trim()
+              : "";
+          if (outline) {
+            $("lblMindmap").textContent = T.mindmap;
+            $("pMindmap").textContent = outline;
+            $("secMindmap").classList.remove("hidden");
+          }
+
+          // 下載：存成可直接匯回 Highlight Keeper 的單頁 JSON。
+          var dlBtn = $("dlBtn");
+          dlBtn.textContent = T.download;
+          $("dlHint").textContent = T.downloadHint;
+          dlBtn.addEventListener("click", function () {
+            downloadPage(page, title);
+          });
+
+          document.title = title + " — Highlight Keeper";
+          $("loading").classList.add("hidden");
+          $("content").classList.remove("hidden");
+
+          // 打開連結即自動下載一次（瀏覽器擋住就退回讓使用者按按鈕）。
+          // 若對方也裝了 Highlight Keeper（content script 會標記 data-hk-ext），
+          // 就交給擴充的「一鍵匯入」橫幅處理，不再自動下載檔案。
+          if (!/[?#&]nodl=1/.test(location.href)) {
+            setTimeout(function () {
+              if (
+                document.documentElement.getAttribute("data-hk-ext") === "1"
+              ) {
+                return;
+              }
+              try {
+                downloadPage(page, title);
+                $("dlHint").textContent = T.downloadedHint;
+              } catch (_e) {}
+            }, 1000);
+          }
+        }
+
+        function downloadPage(page, title) {
+          var payload = {
+            type: "highlight-keeper-bulk",
+            version: 2,
+            exportedAt: Date.now(),
+            shared: true,
+            pages: [page],
+          };
+          var blob = new Blob([JSON.stringify(payload, null, 2)], {
+            type: "application/json",
+          });
+          var href = URL.createObjectURL(blob);
+          var a = document.createElement("a");
+          a.href = href;
+          a.download = fileSlug(title || hostOf(page.url) || "notes") + ".json";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(href);
+        }
+
+        function fileSlug(name) {
+          return (
+            String(name)
+              .replace(/[\/\\:*?"<>|]+/g, "-")
+              .replace(/\s+/g, "-")
+              .replace(/^-+|-+$/g, "")
+              .slice(0, 60) || "notes"
+          );
+        }
+
+        function hostOf(url) {
+          try {
+            return new URL(url).hostname.replace(/^www\./, "");
+          } catch (e) {
+            return url;
+          }
+        }
+      })();
+    </script>
+  </body>
+</html>

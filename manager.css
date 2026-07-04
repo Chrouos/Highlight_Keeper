@@ -592,6 +592,19 @@ body {
   margin-top: 4px;
 }
 
+.hk-manager-detail-header > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.hk-manager-detail-share {
+  flex-shrink: 0;
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
 .hk-manager-detail-close {
   flex-shrink: 0;
   border: none;
