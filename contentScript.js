@@ -1961,7 +1961,8 @@ const launchChatGPTBridge = async (type) => {
       const latestPalette = await refreshPaletteFromStorage();
       const usageCounts = await collectColorUsageCounts();
       const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-      prompt = buildAutoHighlightPrompt(pageData, preferredPalette, usageCounts);
+      // 與 popup／面板「複製 Prompt」統一：一次取得重點＋摘要＋標籤三區塊。
+      prompt = buildCombinedPrompt(pageData, preferredPalette, usageCounts);
     }
     const requestId = `hk-${Date.now()}`;
     await chrome.storage.local.set({

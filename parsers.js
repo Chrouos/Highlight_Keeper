@@ -216,6 +216,56 @@
       .filter(Boolean);
   };
 
+  // 把單頁匯出格式 {url,title,tags,entries,note,mindmap} 轉成可分享的 Markdown。
+  // 區塊標題由呼叫端以 labels 傳入（i18n 由呼叫端處理，維持本檔無相依）。
+  // labels: { tags, highlights, summary, mindmap }
+  const pageToMarkdown = (page, labels = {}) => {
+    if (!page || typeof page !== "object") return "";
+    const L = {
+      tags: labels.tags || "標籤",
+      highlights: labels.highlights || "重點",
+      summary: labels.summary || "摘要筆記",
+      mindmap: labels.mindmap || "心智圖大綱",
+    };
+    const lines = [];
+    const title = typeof page.title === "string" ? page.title.trim() : "";
+    if (title) lines.push(`# ${title}`);
+    if (page.url) lines.push(String(page.url));
+
+    const tags = Array.isArray(page.tags)
+      ? page.tags.map((t) => String(t).trim()).filter(Boolean)
+      : [];
+    if (tags.length) {
+      lines.push(`${L.tags}：${tags.map((t) => `#${t}`).join(" ")}`);
+    }
+
+    const entries = Array.isArray(page.entries) ? page.entries : [];
+    if (entries.length) {
+      lines.push("", `## ${L.highlights}`);
+      entries.forEach((entry) => {
+        const text = (entry?.text || "").trim();
+        if (!text) return;
+        lines.push(`- ${text.replace(/\n+/g, " ")}`);
+        const note = (entry?.note || "").trim();
+        if (note) lines.push(`  > ${note.replace(/\n+/g, " ")}`);
+      });
+    }
+
+    const summary =
+      page.note && typeof page.note.note === "string"
+        ? page.note.note.trim()
+        : "";
+    if (summary) lines.push("", `## ${L.summary}`, summary);
+
+    const outline =
+      page.mindmap && typeof page.mindmap.outline === "string"
+        ? page.mindmap.outline.trim()
+        : "";
+    if (outline) lines.push("", `## ${L.mindmap}`, outline);
+
+    return lines.join("\n").trim();
+  };
+
   root.HkParsers = {
     isHttpUrl,
     AI_SECTION_ALIASES,
@@ -225,5 +275,6 @@
     looksLikeMindmapOutline,
     parseHighlightBlocks,
     normalizeBulkPages,
+    pageToMarkdown,
   };
 })(typeof window !== "undefined" ? window : globalThis);

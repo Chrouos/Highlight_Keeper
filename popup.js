@@ -3,7 +3,8 @@ const addColorBtn = document.getElementById("addColorBtn");
 const paletteListEl = document.getElementById("paletteList");
 const openPanelBtn = document.getElementById("openPanelBtn");
 const openManagerBtn = document.getElementById("openManagerBtn");
-const sharePageBtn = document.getElementById("sharePageBtn");
+const copyNotesBtn = document.getElementById("copyNotesBtn");
+const downloadNotesBtn = document.getElementById("downloadNotesBtn");
 const langSelect = document.getElementById("langSelect");
 const statusEl = document.querySelector(".status");
 
@@ -17,7 +18,6 @@ const normalizePageKey = (href) =>
 const PAGE_META_KEY = "__hk_page_meta__";
 const GENERATED_NOTES_KEY = "hkGeneratedNotes";
 const MINDMAP_KEY = "hkMindmaps";
-const GITHUB_SETTINGS_KEY = "hkGithubSyncSettings";
 
 const DEFAULT_COLOR = "#ffeb3b";
 const DEFAULT_PALETTE = [
@@ -295,64 +295,92 @@ const loadPageInfo = async () => {
   }
 };
 
-// 分享「當頁」：組出該頁匯出資料 + 讀 GitHub 設定，委派 HkShare 上傳並複製連結。
-const shareCurrentPage = async () => {
-  if (!window.HkShare) {
-    setStatusVisible(t("popup.errShareUnavailable"), true);
-    return;
+// 讀出「當頁」的匯出格式資料 {url,title,tags,entries,note,mindmap}；沒筆記回 null。
+const collectCurrentPageEntry = async () => {
+  const { key } = await resolveCurrentPageKey();
+  if (!key) return { error: t("popup.errNoTabSimple") };
+  const stored = await chrome.storage?.local.get([
+    key,
+    PAGE_META_KEY,
+    GENERATED_NOTES_KEY,
+    MINDMAP_KEY,
+  ]);
+  const entries = Array.isArray(stored?.[key]) ? stored[key] : [];
+  const meta = stored?.[PAGE_META_KEY]?.[key] || {};
+  const note = stored?.[GENERATED_NOTES_KEY]?.[key] || null;
+  const mindmap = stored?.[MINDMAP_KEY]?.[key] || null;
+  if (!entries.length && !note && !mindmap) {
+    return { error: t("popup.errNoNotes") };
   }
-  if (sharePageBtn) sharePageBtn.disabled = true;
-  setStatusVisible(t("popup.statusSharing"));
-  try {
-    const { key } = await resolveCurrentPageKey();
-    if (!key) {
-      setStatusVisible(t("popup.errNoTabSimple"), true);
-      return;
-    }
-    const stored = await chrome.storage?.local.get([
-      key,
-      PAGE_META_KEY,
-      GENERATED_NOTES_KEY,
-      MINDMAP_KEY,
-      GITHUB_SETTINGS_KEY,
-    ]);
-    const settings = stored?.[GITHUB_SETTINGS_KEY] || {};
-    if (window.HkShare.validateSettings(settings)) {
-      setStatusVisible(t("popup.errShareNoGithub"), true);
-      return;
-    }
-    const entries = Array.isArray(stored?.[key]) ? stored[key] : [];
-    const meta = stored?.[PAGE_META_KEY]?.[key] || {};
-    const note = stored?.[GENERATED_NOTES_KEY]?.[key] || null;
-    const mindmap = stored?.[MINDMAP_KEY]?.[key] || null;
-    if (!entries.length && !note && !mindmap) {
-      setStatusVisible(t("popup.errShareNoNotes"), true);
-      return;
-    }
-    const pageEntry = {
+  return {
+    pageEntry: {
       url: key,
       title: meta.title || "",
       tags: Array.isArray(meta.tags) ? meta.tags : [],
       entries,
       note,
       mindmap,
-    };
-    const { link } = await window.HkShare.sharePage({
-      settings,
-      pageEntry,
-      commitMessage: `share: ${pageEntry.title || key}`,
-    });
-    try {
-      await navigator.clipboard.writeText(link);
-      setStatusVisible(t("popup.statusShareCopied"));
-    } catch (_e) {
-      setStatusVisible(t("popup.statusShareReady", { link }));
+    },
+  };
+};
+
+// 複製本頁筆記成 Markdown（貼到聊天／筆記軟體都可讀）。
+const copyCurrentPageNotes = async () => {
+  try {
+    const { pageEntry, error } = await collectCurrentPageEntry();
+    if (error) {
+      setStatusVisible(error, true);
+      return;
     }
+    const markdown = window.HkParsers.pageToMarkdown(pageEntry, {
+      tags: t("notesMd.tags"),
+      highlights: t("notesMd.highlights"),
+      summary: t("notesMd.summary"),
+      mindmap: t("notesMd.mindmap"),
+    });
+    await navigator.clipboard.writeText(markdown);
+    setStatusVisible(t("popup.statusNotesCopied"));
   } catch (error) {
-    console.debug("分享此頁失敗", error);
-    setStatusVisible(error?.message || t("popup.errShareFail"), true);
-  } finally {
-    if (sharePageBtn) sharePageBtn.disabled = false;
+    console.debug("複製本頁筆記失敗", error);
+    setStatusVisible(error?.message || t("popup.errNotesCopy"), true);
+  }
+};
+
+// 下載本頁筆記 JSON（給也用 Highlight Keeper 的人「匯入多個 JSON」）。
+const downloadCurrentPageNotes = async () => {
+  try {
+    const { pageEntry, error } = await collectCurrentPageEntry();
+    if (error) {
+      setStatusVisible(error, true);
+      return;
+    }
+    const payload = {
+      type: "highlight-keeper-bulk",
+      version: 2,
+      exportedAt: Date.now(),
+      pages: [pageEntry],
+    };
+    const name =
+      (pageEntry.title || pageEntry.url)
+        .replace(/[\/\\:*?"<>|]+/g, "-")
+        .replace(/\s+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 60) || "notes";
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = `${name}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(href);
+    setStatusVisible(t("popup.statusNotesDownloaded"));
+  } catch (error) {
+    console.debug("下載本頁筆記失敗", error);
+    setStatusVisible(error?.message || t("popup.errNotesDownload"), true);
   }
 };
 
@@ -431,7 +459,8 @@ openManagerBtn?.addEventListener("click", () => {
   chrome.tabs.create({ url });
 });
 
-sharePageBtn?.addEventListener("click", shareCurrentPage);
+copyNotesBtn?.addEventListener("click", copyCurrentPageNotes);
+downloadNotesBtn?.addEventListener("click", downloadCurrentPageNotes);
 
 document.getElementById("aiHighlightBtn")?.addEventListener("click", async () => {
   try {

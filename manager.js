@@ -974,6 +974,32 @@ const exportFilteredPages = () => {
   setStatus(t("manager.statusCategoryExported", { count: pages.length }));
 };
 
+// 複製單頁筆記成 Markdown（貼到聊天／筆記軟體都可讀）。
+const copyPageNotesAsMarkdown = async (page) => {
+  try {
+    const markdown = window.HkParsers.pageToMarkdown(pageToExportEntry(page), {
+      tags: t("notesMd.tags"),
+      highlights: t("notesMd.highlights"),
+      summary: t("notesMd.summary"),
+      mindmap: t("notesMd.mindmap"),
+    });
+    await navigator.clipboard.writeText(markdown);
+    setStatus(t("manager.statusNotesCopied"));
+  } catch (error) {
+    console.debug("複製頁面筆記失敗", error);
+    setStatus(t("manager.errNotesCopy"), true);
+  }
+};
+
+// 下載單頁筆記 JSON（給也用 Highlight Keeper 的人「匯入多個 JSON」）。
+const downloadSinglePage = (page) => {
+  const name = safeFileSlug(
+    state.meta[page.url]?.title || getPageDisplayName(page.url)
+  );
+  downloadJson(buildExportPayloadForPages([page]), `${name}.json`);
+  setStatus(t("manager.statusNotesDownloaded"));
+};
+
 const ensureConfirmOverlay = () => {
   let overlay = document.getElementById(confirmOverlayId);
   if (overlay) return overlay;
@@ -1129,17 +1155,30 @@ const ensureDetailOverlay = () => {
   headingWrap.appendChild(urlEl);
   headingWrap.appendChild(metaEl);
 
-  const shareBtn = document.createElement("button");
-  shareBtn.type = "button";
-  shareBtn.id = "hk-manager-detail-share";
-  shareBtn.className =
-    "hk-manager-btn hk-manager-btn-ghost hk-manager-detail-share";
-  shareBtn.textContent = t("manager.sharePage");
-  shareBtn.title = t("manager.shareTitle");
-  shareBtn.addEventListener("click", () => {
+  const withCurrentDetailPage = (fn) => {
     const page = state.pages.find((p) => p.url === detailCurrentPageUrl);
-    if (page) sharePageToGithub(page);
-  });
+    if (page) fn(page);
+  };
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className =
+    "hk-manager-btn hk-manager-btn-ghost hk-manager-detail-action";
+  copyBtn.textContent = t("manager.copyNotes");
+  copyBtn.title = t("manager.copyNotesTitle");
+  copyBtn.addEventListener("click", () =>
+    withCurrentDetailPage((page) => copyPageNotesAsMarkdown(page))
+  );
+
+  const downloadBtn = document.createElement("button");
+  downloadBtn.type = "button";
+  downloadBtn.className =
+    "hk-manager-btn hk-manager-btn-ghost hk-manager-detail-action";
+  downloadBtn.textContent = t("manager.downloadNotes");
+  downloadBtn.title = t("manager.downloadNotesTitle");
+  downloadBtn.addEventListener("click", () =>
+    withCurrentDetailPage((page) => downloadSinglePage(page))
+  );
 
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
@@ -1148,7 +1187,8 @@ const ensureDetailOverlay = () => {
   closeBtn.addEventListener("click", () => closePageDetail());
 
   header.appendChild(headingWrap);
-  header.appendChild(shareBtn);
+  header.appendChild(copyBtn);
+  header.appendChild(downloadBtn);
   header.appendChild(closeBtn);
 
   const body = document.createElement("div");
@@ -1766,40 +1806,6 @@ const buildCategorizedFiles = (settings, payload) => {
   };
   files.push({ path: joinPath(dir, "index.json"), content: JSON.stringify(index, null, 2) });
   return { files, index };
-};
-
-// 分享某一頁：委派共用的 HkShare（github-share.js，manager.html 已先載入），
-// 只 commit 該頁小檔（+ viewer.html），並把公開瀏覽連結複製到剪貼簿。
-const sharePageToGithub = async (page) => {
-  const settings = getGithubSettingsSnapshot();
-  const validationError = validateGithubSettings(settings);
-  if (validationError) {
-    setGithubStatus(validationError, true);
-    return;
-  }
-  const shareBtn = document.getElementById("hk-manager-detail-share");
-  if (shareBtn) shareBtn.disabled = true;
-  setGithubActionsDisabled(true);
-  setGithubStatus(t("manager.statusSharing"));
-  try {
-    const { link } = await window.HkShare.sharePage({
-      settings,
-      pageEntry: pageToExportEntry(page),
-      commitMessage: `share: ${getPageDisplayName(page.url)}`,
-    });
-    try {
-      await navigator.clipboard.writeText(link);
-      setGithubStatus(t("manager.statusShareCopied"));
-    } catch (_e) {
-      setGithubStatus(t("manager.statusShareReady", { link }));
-    }
-  } catch (error) {
-    console.debug("分享此頁失敗", error);
-    setGithubStatus(error?.message || t("manager.statusShareFail"), true);
-  } finally {
-    if (shareBtn) shareBtn.disabled = false;
-    setGithubActionsDisabled(false);
-  }
 };
 
 const fetchGithubBackupContent = async (settings, overridePath) => {

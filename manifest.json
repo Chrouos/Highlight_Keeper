@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Highlight Keeper",
-  "version": "1.2.35",
+  "version": "1.2.36",
   "description": "網頁畫重點神器。支援 AI 自動標記、摘要筆記、指引閱讀、翻譯附註，搭配顏色分類、標籤管理與跨頁搜尋，讓閱讀更有效率。",
   "permissions": ["storage", "unlimitedStorage", "activeTab", "scripting", "clipboardRead"],
   "host_permissions": ["<all_urls>"],
@@ -35,7 +35,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["shared.js", "parsers.js", "i18n.js", "share-import.js", "contentScript.js"],
+      "js": ["shared.js", "parsers.js", "i18n.js", "contentScript.js"],
       "css": ["contentStyles.css"],
       "run_at": "document_idle"
     }

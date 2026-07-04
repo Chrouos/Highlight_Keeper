@@ -597,7 +597,7 @@ body {
   min-width: 0;
 }
 
-.hk-manager-detail-share {
+.hk-manager-detail-action {
   flex-shrink: 0;
   align-self: flex-start;
   font-size: 12px;

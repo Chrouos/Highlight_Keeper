@@ -29,16 +29,28 @@
         <button type="button" id="openPanelBtn" class="panel-open-btn" data-i18n="popup.openPanel">
           在頁面開啟面板
         </button>
-        <button
-          type="button"
-          id="sharePageBtn"
-          class="panel-open-btn panel-share-btn"
-          data-i18n="popup.sharePage"
-          data-i18n-title="popup.shareTitle"
-          title="上傳這一頁並複製公開分享連結（需先在「管理所有筆記」設定 GitHub 備份）"
-        >
-          分享此頁筆記
-        </button>
+        <div class="share-row">
+          <button
+            type="button"
+            id="copyNotesBtn"
+            class="panel-open-btn panel-copy-btn"
+            data-i18n="popup.copyNotes"
+            data-i18n-title="popup.copyNotesTitle"
+            title="把本頁筆記複製成 Markdown，貼到聊天、筆記軟體都可讀"
+          >
+            複製本頁筆記
+          </button>
+          <button
+            type="button"
+            id="downloadNotesBtn"
+            class="panel-open-btn panel-download-btn"
+            data-i18n="popup.downloadNotes"
+            data-i18n-title="popup.downloadNotesTitle"
+            title="下載本頁筆記 JSON，給也用 Highlight Keeper 的人匯入"
+          >
+            下載本頁 JSON
+          </button>
+        </div>
       </section>
       <section class="ai-tools" data-i18n-aria-label="popup.aiToolsAria" aria-label="AI 工具">
         <button type="button" id="aiHighlightBtn" class="panel-open-btn panel-ai-btn" data-i18n="popup.aiAutoHighlight">
@@ -82,7 +94,7 @@
       <p data-i18n="popup.contact">若有任何問題，私信到 chrouodiu@gmail.com</p>
     </main>
     <script src="shared.js"></script>
-    <script src="github-share.js"></script>
+    <script src="parsers.js"></script>
     <script src="i18n.js"></script>
     <script src="popup.js"></script>
   </body>

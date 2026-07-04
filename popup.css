@@ -268,15 +268,39 @@ h1 {
   border-color: #b45309;
 }
 
-.panel-share-btn {
+/* 分享列：複製（主要）＋下載 JSON（次要）並排 */
+.share-row {
+  display: flex;
+  gap: 8px;
+}
+
+.share-row .panel-open-btn {
+  flex: 1;
+  width: auto;
+  padding: 9px 8px;
+  white-space: nowrap;
+}
+
+.panel-copy-btn {
   border-color: #2563eb;
   color: #1d4ed8;
 }
 
-.panel-share-btn:hover,
-.panel-share-btn:focus-visible {
+.panel-copy-btn:hover,
+.panel-copy-btn:focus-visible {
   background: #eff6ff;
   border-color: #1d4ed8;
+}
+
+.panel-download-btn {
+  border-color: #d4d2ce;
+  color: #57534e;
+}
+
+.panel-download-btn:hover,
+.panel-download-btn:focus-visible {
+  background: #fafaf9;
+  border-color: #a8a29e;
 }
 
 /* ── AI tools ─────────────────────────────────────────── */
