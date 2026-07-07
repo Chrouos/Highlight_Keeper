@@ -417,6 +417,43 @@ body {
   background: #fffbeb;
 }
 
+/* 標籤整理視窗 */
+.hk-manager-tagmgr-dialog {
+  max-width: 640px;
+}
+
+.hk-manager-tagmgr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0ece4;
+}
+
+.hk-manager-tagmgr-row:last-child {
+  border-bottom: none;
+}
+
+.hk-manager-tagmgr-name {
+  flex: 0 0 200px;
+  font-size: 13px;
+  color: #1c1917;
+  word-break: break-word;
+}
+
+.hk-manager-tagmgr-input {
+  flex: 1;
+  min-width: 120px;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.hk-manager-tagmgr-row .hk-manager-btn {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
 .hk-manager-card {
   position: relative;
   border: 1.5px solid #f0ece4;

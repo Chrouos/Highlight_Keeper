@@ -30,6 +30,7 @@ const listEl = document.getElementById("pageList");
 const pageCountEl = document.getElementById("pageCount");
 const downloadBtn = document.getElementById("downloadAllBtn");
 const mergeBtn = document.getElementById("mergeDuplicatesBtn");
+const tagManagerBtn = document.getElementById("tagManagerBtn");
 const importInput = document.getElementById("bulkImportInput");
 const closeBtn = document.getElementById("closeManagerBtn");
 const searchInput = document.getElementById("managerSearch");
@@ -1619,6 +1620,200 @@ const normalizeTagsInput = (input) => {
   );
 };
 
+// ── 標籤整理：改名／併入／刪除，一次套用到所有頁面 ─────────────────
+// newTag 已存在＝合併（去重）；newTag 空字串＝從所有頁面移除。回傳動到的頁數。
+const renameTagEverywhere = async (oldTag, newTag) => {
+  const stored = await chrome.storage.local.get(PAGE_META_KEY);
+  const meta = { ...(stored[PAGE_META_KEY] || {}) };
+  let touched = 0;
+  Object.entries(meta).forEach(([url, entry]) => {
+    const tags = Array.isArray(entry?.tags) ? entry.tags : [];
+    if (!tags.includes(oldTag)) return;
+    const seen = new Set();
+    const next = [];
+    tags.forEach((tag) => {
+      const name = tag === oldTag ? newTag : tag;
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      next.push(name);
+    });
+    meta[url] = { ...entry, tags: next, updatedAt: Date.now() };
+    touched += 1;
+  });
+  if (touched) await chrome.storage.local.set({ [PAGE_META_KEY]: meta });
+  return touched;
+};
+
+let tagManagerOverlayEl = null;
+const ensureTagManagerOverlay = () => {
+  if (tagManagerOverlayEl) return tagManagerOverlayEl;
+  const overlay = document.createElement("div");
+  overlay.className = "hk-manager-detail is-hidden";
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "hk-manager-detail-backdrop";
+  backdrop.addEventListener("click", () => overlay.classList.add("is-hidden"));
+
+  const dialog = document.createElement("div");
+  dialog.className = "hk-manager-detail-dialog hk-manager-tagmgr-dialog";
+
+  const header = document.createElement("header");
+  header.className = "hk-manager-detail-header";
+  const headingWrap = document.createElement("div");
+  const titleEl = document.createElement("h3");
+  titleEl.textContent = t("manager.tagManager");
+  const hintEl = document.createElement("div");
+  hintEl.className = "hk-manager-detail-meta";
+  hintEl.textContent = t("manager.tagManagerHint");
+  headingWrap.appendChild(titleEl);
+  headingWrap.appendChild(hintEl);
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "hk-manager-detail-close";
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("click", () => overlay.classList.add("is-hidden"));
+  header.appendChild(headingWrap);
+  header.appendChild(closeBtn);
+
+  const body = document.createElement("div");
+  body.className = "hk-manager-detail-body";
+  const list = document.createElement("div");
+  list.id = "hk-manager-tagmgr-list";
+  const datalist = document.createElement("datalist");
+  datalist.id = "hk-manager-tagmgr-datalist";
+  body.appendChild(list);
+  body.appendChild(datalist);
+
+  dialog.appendChild(header);
+  dialog.appendChild(body);
+  overlay.appendChild(backdrop);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
+  tagManagerOverlayEl = overlay;
+  return overlay;
+};
+
+// 重新整理狀態並重繪清單／篩選列／標籤整理視窗。
+const refreshAfterTagChange = async () => {
+  await fetchAllPages();
+  renderTagFilter();
+  renderPageList();
+  renderTagManagerRows();
+};
+
+const renderTagManagerRows = () => {
+  const overlay = ensureTagManagerOverlay();
+  const list = overlay.querySelector("#hk-manager-tagmgr-list");
+  const datalist = overlay.querySelector("#hk-manager-tagmgr-datalist");
+  if (!list || !datalist) return;
+
+  const counts = new Map();
+  state.pages.forEach((page) => {
+    (Array.isArray(page.tags) ? page.tags : []).forEach((tag) => {
+      const name = String(tag).trim();
+      if (name) counts.set(name, (counts.get(name) || 0) + 1);
+    });
+  });
+
+  datalist.innerHTML = "";
+  [...counts.keys()]
+    .sort((a, b) => counts.get(b) - counts.get(a))
+    .forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      datalist.appendChild(option);
+    });
+
+  list.innerHTML = "";
+  if (!counts.size) {
+    const empty = document.createElement("p");
+    empty.className = "hk-manager-detail-empty";
+    empty.textContent = t("manager.tagMgrEmpty");
+    list.appendChild(empty);
+    return;
+  }
+
+  // 用得少的排前面：一次性標籤正是要清的對象。
+  const sorted = [...counts.entries()].sort(
+    (a, b) => a[1] - b[1] || a[0].localeCompare(b[0])
+  );
+  sorted.forEach(([name, count]) => {
+    const row = document.createElement("div");
+    row.className = "hk-manager-tagmgr-row";
+
+    const label = document.createElement("span");
+    label.className = "hk-manager-tagmgr-name";
+    label.textContent = `${name}（${t("manager.tagMgrPages", { count })}）`;
+
+    const input = document.createElement("input");
+    input.className = "hk-manager-input hk-manager-tagmgr-input";
+    input.placeholder = t("manager.tagMgrPlaceholder");
+    input.setAttribute("list", "hk-manager-tagmgr-datalist");
+
+    const applyRename = async () => {
+      const target = input.value.trim();
+      if (!target || target === name) return;
+      try {
+        const touched = await renameTagEverywhere(name, target);
+        await refreshAfterTagChange();
+        setStatus(
+          t("manager.statusTagRenamed", { old: name, new: target, count: touched })
+        );
+      } catch (error) {
+        console.debug("標籤改名失敗", error);
+        setStatus(t("manager.errTagsUpdate"), true);
+      }
+    };
+
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.className = "hk-manager-btn hk-manager-btn-muted";
+    applyBtn.textContent = t("manager.tagMgrApply");
+    applyBtn.addEventListener("click", applyRename);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        applyRename();
+      }
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "hk-manager-btn hk-manager-btn-ghost";
+    deleteBtn.textContent = t("manager.tagMgrDelete");
+    deleteBtn.addEventListener("click", async () => {
+      const ok = await openConfirmDialog({
+        title: t("manager.tagManager"),
+        message: t("manager.tagMgrConfirmDelete", { tag: name, count }),
+        confirmLabel: t("manager.tagMgrDelete"),
+        cancelLabel: t("manager.btnCancel"),
+      });
+      if (!ok) return;
+      try {
+        const touched = await renameTagEverywhere(name, "");
+        await refreshAfterTagChange();
+        setStatus(t("manager.statusTagDeleted", { tag: name, count: touched }));
+      } catch (error) {
+        console.debug("刪除標籤失敗", error);
+        setStatus(t("manager.errTagsUpdate"), true);
+      }
+    });
+
+    row.appendChild(label);
+    row.appendChild(input);
+    row.appendChild(applyBtn);
+    row.appendChild(deleteBtn);
+    list.appendChild(row);
+  });
+};
+
+const openTagManager = async () => {
+  await fetchAllPages();
+  const overlay = ensureTagManagerOverlay();
+  renderTagManagerRows();
+  overlay.classList.remove("is-hidden");
+};
+
 const savePageTagsInStorage = async (url, tags) => {
   const stored = await chrome.storage.local.get(PAGE_META_KEY);
   const current = stored[PAGE_META_KEY] || {};
@@ -2456,6 +2651,12 @@ const init = async () => {
     runMergeDuplicates().catch((error) => {
       console.debug("整理重複頁面失敗", error);
       setStatus(error?.message || t("manager.statusDeleteFail"), true);
+    });
+  });
+  tagManagerBtn?.addEventListener("click", () => {
+    openTagManager().catch((error) => {
+      console.debug("開啟標籤整理失敗", error);
+      setStatus(error?.message || t("manager.errTagsUpdate"), true);
     });
   });
   closeBtn?.addEventListener("click", () => {
