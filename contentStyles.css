@@ -87,7 +87,7 @@
 
 /* ── Highlight mark ───────────────────────────────────── */
 .hk-highlight {
-  background-color: var(--hk-highlight-color, #ffeb3b) !important;
+  background-color: var(--hk-highlight-color, #fff5b8) !important;
   background-image: none !important;
   color: inherit !important;
   border-radius: 2px;
@@ -111,13 +111,14 @@
 }
 
 .hk-highlight::selection {
-  background-color: rgba(217, 119, 6, 0.3);
+  background-color: rgba(55, 53, 47, 0.16);
 }
 
+/* 淺色底不再需要放大：hover 只補一圈中性描邊，閱讀時不跳動。 */
 .hk-highlight:hover,
 .hk-highlight:focus-visible {
-  transform: scale(1.04);
-  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.35);
+  transform: none;
+  box-shadow: 0 0 0 1.5px rgba(55, 53, 47, 0.28);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -126,7 +127,7 @@
   }
   .hk-highlight:hover,
   .hk-highlight:focus-visible {
-    transform: none;
+    box-shadow: 0 0 0 1.5px rgba(55, 53, 47, 0.28);
   }
 }
 
@@ -486,32 +487,33 @@
 }
 
 /* ════════════════════════════════════════════════════════
-   Side panel — Editorial / Reading-Room aesthetic
-   - Warm paper palette, hairline rules, color reserved for
-     highlight swatches. Serif display + sans body.
+   Side panel — Notion-minimal
+   - 白底、細灰線、字重與留白分層；色彩只保留給標註色與焦點。
+   - 變數名沿用舊名（paper/rule/ink…）讓既有規則不必逐條改寫，
+     值全部換成中性灰階；視覺細節在檔尾的 override 區塊定案。
    ══════════════════════════════════════════════════════ */
 .hk-page-panel {
-  /* Editorial paper palette */
-  --hk-paper: #faf6ee;
-  --hk-paper-lit: #fdfbf4;
-  --hk-paper-deep: #f2ebd9;
-  --hk-ink: #1a1410;
-  --hk-ink-soft: #5c4f3e;
-  --hk-ink-faint: #9c8b73;
-  --hk-rule: #e6dcc4;
-  --hk-rule-strong: #c9b893;
-  --hk-accent: #7a3e0a;
-  --hk-accent-soft: #b46d2e;
-  --hk-accent-lit: #f5e6cf;
-  --hk-danger: #8b2818;
-  --hk-success: #355c3a;
-  /* Typographic stacks */
-  --hk-serif: "Source Serif Pro", "Iowan Old Style", "Apple Garamond",
-    "PingFang TC", "Noto Serif TC", Georgia, serif;
-  --hk-sans: "IBM Plex Sans", "Pretendard", "PingFang TC",
-    "Noto Sans CJK TC", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
-  --hk-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas,
+  /* Neutral surface palette */
+  --hk-paper: #ffffff;
+  --hk-paper-lit: #ffffff;
+  --hk-paper-deep: #f7f7f5;
+  --hk-ink: #37352f;
+  --hk-ink-soft: #787774;
+  --hk-ink-faint: #9b9a97;
+  --hk-rule: #ededec;
+  --hk-rule-strong: #e0e0dd;
+  --hk-accent: #2383e2;
+  --hk-accent-soft: #5aa9ec;
+  --hk-accent-lit: #e7f1fb;
+  --hk-danger: #eb5757;
+  --hk-success: #2f9e44;
+  --hk-radius: 6px;
+  /* Typographic stacks — single neutral sans, no serif display */
+  --hk-serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  --hk-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  --hk-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
     monospace;
 
   position: fixed;
@@ -519,39 +521,25 @@
   transform: translateY(-50%);
   --hk-panel-font-scale: 1;
   font-size: calc(14px * var(--hk-panel-font-scale, 1));
-  width: 360px;
+  width: 372px;
   max-width: calc(100vw - 40px);
   max-height: 84vh;
   display: none;
   flex-direction: column;
   padding: 0;
-  border-radius: 2px;
+  border-radius: 10px;
   background: var(--hk-paper);
   color: var(--hk-ink);
   border: 1px solid var(--hk-rule-strong);
   box-shadow:
-    0 1px 0 var(--hk-paper-deep),
-    0 16px 40px -16px rgba(26, 20, 16, 0.28),
-    0 4px 12px -6px rgba(26, 20, 16, 0.12);
+    0 12px 32px -8px rgba(15, 15, 15, 0.14),
+    0 2px 8px -2px rgba(15, 15, 15, 0.08);
   z-index: 2147483647;
   overflow: hidden;
   font-family: var(--hk-sans);
   font-feature-settings: "kern", "liga", "calt";
   line-height: 1.5;
-}
-
-/* paper texture overlay — extremely subtle warm noise */
-.hk-page-panel::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image: radial-gradient(
-      rgba(26, 20, 16, 0.018) 1px,
-      transparent 1px
-    );
-  background-size: 3px 3px;
-  z-index: 0;
+  -webkit-font-smoothing: antialiased;
 }
 
 .hk-page-panel > * {
@@ -2584,4 +2572,1176 @@
   .hk-mm-children::before { left: -22px; width: 11px; }
   .hk-mm-children > .hk-mm-node::before { left: -11px; }
   .hk-mm-children > .hk-mm-node::after { left: -11px; width: 11px; }
+}
+
+/* ════════════════════════════════════════════════════════
+   ▓▓ NOTION-MINIMAL REDESIGN LAYER ▓▓
+   最後載入，統一覆蓋上面的舊視覺。原則：
+   1. 只有白 / 灰 / 一個藍焦點色，標註色本身是唯一的彩度來源
+   2. 邊框一律 1px 淺灰，圓角 6px，陰影只在浮動層
+   3. 字級 12–14px，層級靠字重與顏色而非大小
+   ══════════════════════════════════════════════════════ */
+
+:where(.hk-page-panel, .hk-floating-toolbar, .hk-highlight-menu,
+  .hk-translate-card, .hk-guided-bar, .hk-mindmap-overlay, .hk-toast,
+  .hk-preview-bar, .hk-chatgpt-banner) {
+  --hkn-bg: #ffffff;
+  --hkn-sub: #f7f7f5;
+  --hkn-hover: #efefed;
+  --hkn-line: #ededec;
+  --hkn-line-strong: #e0e0dd;
+  --hkn-ink: #37352f;
+  --hkn-soft: #787774;
+  --hkn-faint: #9b9a97;
+  --hkn-blue: #2383e2;
+  --hkn-blue-lit: #e7f1fb;
+  --hkn-red: #eb5757;
+  --hkn-green: #2f9e44;
+  --hkn-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+  font-family: var(--hkn-font);
+}
+
+/* ── Panel header ─────────────────────────────────────── */
+.hk-page-panel .hk-panel-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hkn-line);
+  background: var(--hkn-bg);
+  gap: 8px;
+}
+
+.hk-page-panel .hk-panel-title {
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-weight: 600;
+  font-size: calc(14px * var(--hk-panel-font-scale, 1));
+  letter-spacing: -0.01em;
+  color: var(--hkn-ink);
+  border: none;
+  padding: 0;
+  margin: 0;
+  flex: 1;
+}
+
+.hk-page-panel .hk-panel-iconbtn,
+.hk-page-panel .hk-panel-close,
+.hk-page-panel .hk-panel-font-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--hkn-faint);
+  font-size: calc(14px * var(--hk-panel-font-scale, 1));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.hk-page-panel .hk-panel-iconbtn:hover,
+.hk-page-panel .hk-panel-close:hover,
+.hk-page-panel .hk-panel-font-btn:hover {
+  background: var(--hkn-hover);
+  color: var(--hkn-ink);
+}
+
+.hk-page-panel .hk-panel-iconbtn[aria-expanded="true"] {
+  background: var(--hkn-hover);
+  color: var(--hkn-ink);
+}
+
+.hk-page-panel .hk-panel-font-btn {
+  width: auto;
+  min-width: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--hkn-line-strong);
+  font-size: calc(12px * var(--hk-panel-font-scale, 1));
+  font-weight: 500;
+}
+
+/* ── AI card（複製 → 貼回）─────────────────────────────── */
+.hk-page-panel .hk-ai-card {
+  margin: 0;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--hkn-line);
+  border-radius: 0;
+  background: var(--hkn-sub);
+  gap: 8px;
+}
+
+.hk-page-panel .hk-ai-hint {
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-size: calc(12px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-soft);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.hk-page-panel .hk-ai-step {
+  gap: 8px;
+  align-items: center;
+}
+
+.hk-page-panel .hk-ai-step-num {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--hkn-line-strong);
+  background: var(--hkn-bg);
+  color: var(--hkn-faint);
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-size: calc(11px * var(--hk-panel-font-scale, 1));
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.hk-page-panel .hk-ai-copy-btn {
+  flex: 1;
+  padding: 7px 12px;
+  border: none !important;
+  border-radius: 6px;
+  background: var(--hkn-ink) !important;
+  color: #fff !important;
+  font-family: var(--hkn-font);
+  font-size: calc(13px * var(--hk-panel-font-scale, 1));
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.hk-page-panel .hk-ai-copy-btn:hover { background: #4b4844 !important; }
+.hk-page-panel .hk-ai-copy-btn.is-done { background: var(--hkn-green) !important; }
+
+.hk-page-panel .hk-ai-paste {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  color: var(--hkn-ink);
+  font-family: var(--hkn-font);
+  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.hk-page-panel .hk-ai-paste:focus,
+.hk-page-panel .hk-ai-paste:focus-visible {
+  outline: none;
+  border-color: var(--hkn-blue);
+  box-shadow: 0 0 0 2px var(--hkn-blue-lit);
+}
+
+.hk-page-panel .hk-ai-actions { gap: 6px; }
+
+.hk-page-panel .hk-ai-apply,
+.hk-page-panel .hk-ai-direct {
+  padding: 6px 12px;
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  color: var(--hkn-ink);
+  font-family: var(--hkn-font);
+  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.hk-page-panel .hk-ai-apply:hover,
+.hk-page-panel .hk-ai-direct:hover {
+  background: var(--hkn-hover);
+  border-color: var(--hkn-line-strong);
+  color: var(--hkn-ink);
+}
+
+.hk-page-panel .hk-ai-secondary-row {
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.hk-page-panel .hk-ai-secondary {
+  padding: 3px 7px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--hkn-faint);
+  font-family: var(--hkn-font);
+  font-size: calc(11.5px * var(--hk-panel-font-scale, 1));
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.hk-page-panel .hk-ai-secondary:hover {
+  background: var(--hkn-hover);
+  color: var(--hkn-ink);
+}
+
+.hk-page-panel .hk-ai-clear-page { color: var(--hkn-red); margin-left: auto; }
+.hk-page-panel .hk-ai-clear-page:hover { background: #fdecec; color: #c53030; }
+
+/* ── Tabs ─────────────────────────────────────────────── */
+.hk-page-panel .hk-panel-tabs {
+  gap: 2px;
+  padding: 6px 10px 0;
+  border-bottom: 1px solid var(--hkn-line);
+  background: var(--hkn-bg);
+}
+
+.hk-page-panel .hk-panel-tab-btn {
+  padding: 6px 10px 8px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--hkn-faint);
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-size: calc(13px * var(--hk-panel-font-scale, 1));
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.hk-page-panel .hk-panel-tab-btn:hover:not(.is-active) {
+  color: var(--hkn-soft);
+  background: transparent;
+}
+
+.hk-page-panel .hk-panel-tab-btn.is-active {
+  color: var(--hkn-ink);
+  border-bottom-color: var(--hkn-ink);
+  font-weight: 600;
+  background: transparent;
+}
+
+.hk-page-panel .hk-tab-count {
+  margin-left: 4px;
+  color: var(--hkn-faint);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
+.hk-page-panel .hk-panel-tab-btn.is-active .hk-tab-count { color: var(--hkn-soft); }
+
+.hk-page-panel .hk-panel-tab-content { padding: 12px 14px 14px; gap: 10px; }
+
+/* ── Search & filters ─────────────────────────────────── */
+.hk-page-panel .hk-panel-search-input,
+.hk-page-panel .hk-panel-search-select,
+.hk-page-panel .hk-panel-ai-input,
+.hk-page-panel .hk-panel-ai-select,
+.hk-page-panel .hk-panel-ai-textarea,
+.hk-page-panel .hk-panel-tag-input {
+  padding: 6px 9px;
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  color: var(--hkn-ink);
+  font-family: var(--hkn-font);
+  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
+}
+
+.hk-page-panel .hk-panel-search-input:focus,
+.hk-page-panel .hk-panel-search-select:focus,
+.hk-page-panel .hk-panel-ai-input:focus,
+.hk-page-panel .hk-panel-ai-select:focus,
+.hk-page-panel .hk-panel-ai-textarea:focus,
+.hk-page-panel .hk-panel-tag-input:focus {
+  outline: none;
+  border-color: var(--hkn-blue);
+  box-shadow: 0 0 0 2px var(--hkn-blue-lit);
+}
+
+.hk-page-panel .hk-panel-search { border: none; padding: 0; gap: 6px; }
+
+/* ── Tag chips ────────────────────────────────────────── */
+.hk-page-panel .hk-panel-tag-chip {
+  padding: 2px 8px;
+  border: none;
+  border-radius: 4px;
+  background: var(--hkn-sub);
+  color: var(--hkn-soft);
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-size: calc(11.5px * var(--hk-panel-font-scale, 1));
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.hk-page-panel .hk-panel-tag-chip:hover { background: var(--hkn-hover); color: var(--hkn-ink); }
+
+.hk-page-panel .hk-panel-tag-chip.is-active {
+  background: var(--hkn-ink);
+  border: none;
+  color: #fff;
+}
+
+/* ── Highlight list items ─────────────────────────────── */
+.hk-page-panel .hk-panel-list { gap: 2px; }
+
+.hk-page-panel .hk-panel-item {
+  padding: 9px 10px 10px;
+  border: 1px solid transparent;
+  border-bottom: 1px solid var(--hkn-line);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.hk-page-panel .hk-panel-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--hk-color, #fff5b8);
+}
+
+.hk-page-panel .hk-panel-item {
+  position: relative;
+  padding-left: 14px;
+}
+
+.hk-page-panel .hk-panel-item:hover {
+  background: var(--hkn-sub);
+  border-bottom-color: var(--hkn-line);
+}
+
+.hk-page-panel .hk-panel-item:hover::before { width: 3px; }
+
+.hk-page-panel .hk-panel-text {
+  font-family: var(--hkn-font);
+  font-size: calc(13px * var(--hk-panel-font-scale, 1));
+  line-height: 1.55;
+  color: var(--hkn-ink);
+  margin: 4px 0 0;
+}
+
+.hk-page-panel .hk-panel-item-note {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: none;
+  border-left: 2px solid var(--hkn-line-strong);
+  border-radius: 0 4px 4px 0;
+  background: var(--hkn-sub);
+  color: var(--hkn-soft);
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-size: calc(12px * var(--hk-panel-font-scale, 1));
+}
+
+.hk-page-panel .hk-panel-meta { gap: 6px; align-items: center; }
+
+.hk-page-panel .hk-panel-time,
+.hk-page-panel .hk-panel-page {
+  font-family: var(--hkn-font);
+  font-size: calc(11px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-faint);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.hk-page-panel .hk-panel-entry-title {
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-weight: 500;
+  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-ink);
+  border: none;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hk-page-panel .hk-panel-entry-title:hover { color: var(--hkn-blue); background: none; }
+
+.hk-page-panel .hk-panel-entry-url {
+  font-family: var(--hkn-mono, monospace);
+  font-size: calc(10.5px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-faint);
+}
+
+.hk-page-panel .hk-panel-color {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  border: none;
+  flex-shrink: 0;
+}
+
+.hk-page-panel .hk-panel-delete-btn {
+  margin-left: auto;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--hkn-faint);
+  font-family: var(--hkn-font);
+  font-size: calc(11px * var(--hk-panel-font-scale, 1));
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.hk-page-panel .hk-panel-item:hover .hk-panel-delete-btn { opacity: 1; }
+
+.hk-page-panel .hk-panel-delete-btn:hover {
+  background: #fdecec;
+  color: var(--hkn-red);
+}
+
+.hk-page-panel .hk-panel-placeholder {
+  padding: 28px 12px;
+  border: none;
+  background: transparent;
+  color: var(--hkn-faint);
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
+  text-align: center;
+}
+
+/* ── Summary tab ──────────────────────────────────────── */
+.hk-page-panel .hk-panel-ai-note {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.hk-page-panel .hk-panel-ai-note-title {
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-weight: 600;
+  font-size: calc(12px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-soft);
+  letter-spacing: 0.02em;
+}
+
+.hk-page-panel .hk-panel-ai-note-content {
+  font-family: var(--hkn-font);
+  font-size: calc(13px * var(--hk-panel-font-scale, 1));
+  line-height: 1.65;
+  color: var(--hkn-ink);
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.hk-page-panel .hk-panel-ai-note-copy,
+.hk-page-panel .hk-panel-export-btn,
+.hk-page-panel .hk-panel-import-label,
+.hk-page-panel .hk-panel-ai-generate,
+.hk-page-panel .hk-panel-ai-chatgpt-apply-btn,
+.hk-page-panel .hk-panel-ai-cat-add,
+.hk-page-panel .hk-panel-ai-cat-reset,
+.hk-page-panel .hk-panel-tag-add {
+  padding: 5px 10px;
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  color: var(--hkn-ink);
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-size: calc(12px * var(--hk-panel-font-scale, 1));
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.hk-page-panel .hk-panel-ai-note-copy:hover:not(:disabled),
+.hk-page-panel .hk-panel-export-btn:hover,
+.hk-page-panel .hk-panel-import-label:hover,
+.hk-page-panel .hk-panel-ai-generate:not(:disabled):hover,
+.hk-page-panel .hk-panel-ai-chatgpt-apply-btn:not(:disabled):hover,
+.hk-page-panel .hk-panel-ai-cat-add:hover,
+.hk-page-panel .hk-panel-ai-cat-reset:hover,
+.hk-page-panel .hk-panel-tag-add:hover {
+  background: var(--hkn-hover);
+  color: var(--hkn-ink);
+  border-color: var(--hkn-line-strong);
+}
+
+.hk-page-panel .hk-summary-jump-head {
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-weight: 600;
+  color: var(--hkn-soft);
+}
+
+.hk-page-panel .hk-summary-jump-item {
+  border: 1px solid var(--hkn-line);
+  border-left: 3px solid var(--hk-color, var(--hkn-line-strong));
+  border-radius: 6px;
+  background: var(--hkn-bg);
+}
+
+.hk-page-panel .hk-summary-jump-item:hover { background: var(--hkn-sub); }
+
+/* ── Settings drawer ──────────────────────────────────── */
+.hk-page-panel .hk-panel-drawer {
+  background: var(--hkn-bg);
+  border-left: 1px solid var(--hkn-line);
+}
+
+.hk-page-panel .hk-panel-drawer-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hkn-line);
+  background: var(--hkn-bg);
+}
+
+.hk-page-panel .hk-panel-drawer-title {
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-weight: 600;
+  font-size: calc(14px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-ink);
+  letter-spacing: -0.01em;
+}
+
+.hk-page-panel .hk-panel-drawer-body { padding: 0; }
+
+.hk-page-panel .hk-panel-drawer-section {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hkn-line);
+}
+
+.hk-page-panel .hk-panel-drawer-section-title {
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-weight: 600;
+  font-size: calc(11px * var(--hk-panel-font-scale, 1));
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hkn-faint);
+  margin: 0 0 8px;
+}
+
+/* ── 色票管理（從 popup 搬過來）──────────────────────── */
+.hk-panel-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hk-panel-palette-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hk-panel-palette-empty {
+  margin: 0;
+  font-size: calc(12px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-faint);
+}
+
+.hk-panel-swatch-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.hk-panel-swatch-item:hover { background: var(--hkn-sub); }
+
+.hk-panel-swatch-item.is-active {
+  border-color: var(--hkn-line-strong);
+  background: var(--hkn-sub);
+}
+
+.hk-panel-swatch {
+  flex: 1;
+  height: 22px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.hk-panel-swatch-edit {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 4px;
+  background: var(--hkn-bg);
+  cursor: pointer;
+}
+
+.hk-panel-swatch-remove {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--hkn-faint);
+  font-size: calc(14px * var(--hk-panel-font-scale, 1));
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hk-panel-swatch-remove:hover { background: #fdecec; color: var(--hkn-red); }
+
+.hk-panel-palette-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hk-panel-palette-input {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 5px;
+  background: var(--hkn-bg);
+  cursor: pointer;
+}
+
+.hk-panel-palette-add-btn {
+  flex: 1;
+  padding: 5px 10px;
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  color: var(--hkn-ink);
+  font-family: var(--hkn-font);
+  font-size: calc(12px * var(--hk-panel-font-scale, 1));
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.hk-panel-palette-add-btn:hover { background: var(--hkn-hover); }
+
+/* ── 面板內雜項訊息 ───────────────────────────────────── */
+.hk-page-panel .hk-panel-orphan-notice {
+  border: 1px solid #f7d4d4;
+  background: #fdf2f2;
+  color: #c53030;
+  border-radius: 6px;
+}
+
+.hk-page-panel .hk-panel-ai-status,
+.hk-page-panel .hk-panel-export-status {
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-size: calc(11.5px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-soft);
+}
+
+.hk-page-panel .hk-panel-ai-label,
+.hk-page-panel .hk-panel-archive-hint,
+.hk-page-panel .hk-panel-page-tags-hint,
+.hk-page-panel .hk-panel-ai-block-desc {
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-size: calc(11.5px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-soft);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── 選取後的浮動工具列 ───────────────────────────────── */
+.hk-floating-toolbar {
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--hkn-line-strong);
+  box-shadow: 0 6px 20px -4px rgba(15, 15, 15, 0.18);
+}
+
+.hk-floating-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px !important;
+  background-color: var(--hkn-ink) !important;
+  color: #fff;
+  font-family: var(--hkn-font);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.hk-floating-btn:hover {
+  background-color: #4b4844 !important;
+  transform: none;
+}
+
+.hk-floating-tr-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--hkn-line-strong);
+  background: var(--hkn-bg);
+  color: var(--hkn-soft);
+  font-family: var(--hkn-font);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.hk-floating-tr-btn:hover {
+  background: var(--hkn-hover);
+  border-color: var(--hkn-line-strong);
+  color: var(--hkn-ink);
+  transform: none;
+}
+
+.hk-floating-btn:focus-visible,
+.hk-floating-tr-btn:focus-visible {
+  outline: 2px solid var(--hkn-blue);
+  outline-offset: 1px;
+}
+
+/* ── 點擊標註的細節選單 ───────────────────────────────── */
+.hk-highlight-menu {
+  border-radius: 8px;
+  border: 1px solid var(--hkn-line-strong);
+  background: var(--hkn-bg);
+  box-shadow: 0 10px 28px -6px rgba(15, 15, 15, 0.18);
+  font-family: var(--hkn-font);
+}
+
+.hk-menu-header,
+.hk-menu-label {
+  font-family: var(--hkn-font);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--hkn-faint);
+}
+
+.hk-menu-swatch {
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.hk-menu-swatch:hover { transform: none; box-shadow: 0 0 0 2px var(--hkn-line-strong); }
+
+.hk-menu-note {
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  font-family: var(--hkn-font);
+  font-size: 12.5px;
+  color: var(--hkn-ink);
+}
+
+.hk-menu-note:focus,
+.hk-menu-note:focus-visible {
+  outline: none;
+  border-color: var(--hkn-blue);
+  box-shadow: 0 0 0 2px var(--hkn-blue-lit);
+}
+
+.hk-menu-btn {
+  padding: 5px 10px;
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  color: var(--hkn-ink);
+  font-family: var(--hkn-font);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.hk-menu-btn:hover { background: var(--hkn-hover); }
+
+.hk-menu-btn-primary {
+  background: var(--hkn-ink);
+  border-color: var(--hkn-ink);
+  color: #fff;
+}
+
+.hk-menu-btn-primary:hover { background: #4b4844; }
+
+.hk-menu-btn-danger {
+  border-color: var(--hkn-line-strong);
+  background: var(--hkn-bg);
+  color: var(--hkn-red);
+}
+
+.hk-menu-btn-danger:hover { background: #fdecec; border-color: #f7d4d4; }
+
+.hk-menu-translate-btn {
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  color: var(--hkn-soft);
+  font-family: var(--hkn-font);
+  font-size: 12px;
+}
+
+.hk-menu-translate-btn:hover { background: var(--hkn-hover); color: var(--hkn-ink); }
+
+/* ── 翻譯卡片 ─────────────────────────────────────────── */
+.hk-translate-card {
+  border-radius: 8px;
+  border: 1px solid var(--hkn-line-strong);
+  box-shadow: 0 10px 28px -6px rgba(15, 15, 15, 0.18);
+  font-family: var(--hkn-font);
+}
+
+.hk-tc-select {
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 5px;
+  background: var(--hkn-bg);
+  font-family: var(--hkn-font);
+  font-size: 12px;
+  color: var(--hkn-ink);
+}
+
+.hk-tc-result { font-family: var(--hkn-font); font-size: 13px; color: var(--hkn-ink); }
+.hk-tc-detected { font-size: 11px; color: var(--hkn-faint); }
+
+/* ── Toast / 預覽列 / 指引閱讀 ────────────────────────── */
+.hk-toast {
+  border-radius: 8px;
+  background: var(--hkn-ink);
+  font-family: var(--hkn-font);
+  box-shadow: 0 10px 28px -6px rgba(15, 15, 15, 0.28);
+}
+
+.hk-toast.is-error { background: #c53030; }
+
+.hk-preview-bar,
+.hk-guided-bar {
+  border-radius: 10px;
+  border: 1px solid var(--hkn-line-strong);
+  background: var(--hkn-bg);
+  box-shadow: 0 12px 32px -8px rgba(15, 15, 15, 0.18);
+  font-family: var(--hkn-font);
+  color: var(--hkn-ink);
+}
+
+.hk-preview-bar-confirm,
+.hk-guided-next {
+  border: none;
+  border-radius: 6px;
+  background: var(--hkn-ink);
+  color: #fff;
+  font-family: var(--hkn-font);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.hk-preview-bar-confirm:hover,
+.hk-guided-next:hover:not(:disabled) { background: #4b4844; }
+
+.hk-preview-bar-cancel,
+.hk-guided-prev,
+.hk-guided-exit {
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  color: var(--hkn-soft);
+  font-family: var(--hkn-font);
+  font-size: 12.5px;
+}
+
+.hk-preview-bar-cancel:hover,
+.hk-guided-prev:hover:not(:disabled),
+.hk-guided-exit:hover { background: var(--hkn-hover); color: var(--hkn-ink); }
+
+.hk-guided-text { font-family: var(--hkn-font); color: var(--hkn-ink); }
+.hk-guided-counter { font-family: var(--hkn-font); color: var(--hkn-faint); font-variant-numeric: tabular-nums; }
+.hk-guided-note { font-family: var(--hkn-font); color: var(--hkn-soft); }
+
+/* ── 心智圖 ───────────────────────────────────────────── */
+.hk-mindmap-overlay {
+  --hk-mm-accent: var(--hkn-blue);
+  background: rgba(255, 255, 255, 0.97);
+  font-family: var(--hkn-font);
+}
+
+.hk-mindmap-overlay::before { display: none; }
+
+.hk-mindmap-head {
+  border-bottom: 1px solid var(--hkn-line);
+  background: var(--hkn-bg);
+}
+
+.hk-mindmap-title {
+  font-family: var(--hkn-font);
+  font-style: normal;
+  font-weight: 600;
+  color: var(--hkn-ink);
+}
+
+.hk-mindmap-action,
+.hk-mindmap-close {
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  color: var(--hkn-soft);
+  font-family: var(--hkn-font);
+  font-size: 12.5px;
+}
+
+.hk-mindmap-action:hover,
+.hk-mindmap-close:hover { background: var(--hkn-hover); color: var(--hkn-ink); }
+
+.hk-mm-label {
+  border: 1px solid var(--hkn-line-strong);
+  border-radius: 6px;
+  background: var(--hkn-bg);
+  font-family: var(--hkn-font);
+  color: var(--hkn-ink);
+  box-shadow: none;
+}
+
+.hk-mm-label:hover { transform: none; background: var(--hkn-sub); }
+
+.hk-mm-depth-0 > .hk-mm-label {
+  background: var(--hkn-ink);
+  border-color: var(--hkn-ink);
+  color: #fff;
+}
+
+/* ════════════════════════════════════════════════════════
+   ▓▓ 面板內外一致化 ▓▓
+   舊版是「編輯室」風：斜體小標、0.12em 寬字距全大寫、圓角 2px。
+   外框換成 Notion 後，這些殘留讓抽屜／分頁內容看起來像另一個產品。
+   下面把面板內所有元素拉回同一套字體、字距與圓角。
+   ══════════════════════════════════════════════════════ */
+
+/* 1. 全面取消斜體與襯線 —— 面板內不再有「編輯室」語氣 */
+.hk-page-panel :where(h1, h2, h3, h4, h5, h6, p, span, div, label, a, li,
+  button, input, select, textarea, article, section, header, footer) {
+  font-family: var(--hkn-font);
+  font-style: normal;
+}
+
+/* 2. 小標統一：11px / 600 / 0.06em，不再有 0.12em 的寬字距 */
+.hk-page-panel :where(.hk-panel-page-tags-header, .hk-panel-ai-block-title,
+  .hk-panel-list-header, .hk-panel-ai-note-title, .hk-panel-drawer-section-title,
+  .hk-summary-jump-head, .hk-menu-header, .hk-menu-label) {
+  font-size: calc(11px * var(--hk-panel-font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hkn-faint);
+}
+
+/* 3. 正文級文字統一字距（舊版某些區塊帶 0.02～0.04em） */
+.hk-page-panel :where(.hk-panel-text, .hk-panel-ai-note-content,
+  .hk-panel-item-note, .hk-panel-placeholder, .hk-panel-archive-hint,
+  .hk-panel-ai-block-desc, .hk-panel-ai-label, .hk-panel-page-tags-hint,
+  .hk-panel-ai-chatgpt-info) {
+  letter-spacing: 0;
+}
+
+/* 4. 圓角統一：面板 10px、抽屜跟著、內部元件 6px */
+.hk-page-panel .hk-panel-drawer { border-radius: 10px; }
+
+.hk-page-panel :where(.hk-panel-ai-cat-name, .hk-panel-ai-cat-color,
+  .hk-panel-ai-chatgpt-paste-area, .hk-panel-ai-chatgpt-cancel,
+  .hk-panel-import-label, .hk-panel-clear-page-btn,
+  .hk-panel-guided-reading-btn, .hk-panel-list-clear) {
+  border-radius: 6px;
+}
+
+/* 5. 分頁內容與 AI 卡片、抽屜共用同一組左右內距 */
+.hk-page-panel :where(.hk-panel-tab-content) { padding: 12px 14px 16px; }
+.hk-page-panel .hk-panel-status-banner {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--hkn-line);
+  background: var(--hkn-sub);
+  color: var(--hkn-soft);
+  font-size: calc(12px * var(--hk-panel-font-scale, 1));
+}
+
+/* 6. 抽屜內的容器一律無邊框無底色，靠 section 分隔線分組 */
+.hk-page-panel :where(.hk-panel-archive, .hk-panel-page-tags,
+  .hk-panel-ai-settings, .hk-panel-ai-note) {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.hk-page-panel :where(.hk-panel-ai-block, .hk-panel-ai-config-block) {
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--hkn-line);
+  background: transparent;
+}
+
+.hk-page-panel :where(.hk-panel-ai-block:last-child) {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+/* 7. 分類列與勾選列 */
+.hk-page-panel .hk-panel-ai-cat-row {
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--hkn-line);
+}
+
+.hk-page-panel .hk-panel-ai-cat-color {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--hkn-line-strong);
+  background: var(--hkn-bg);
+  cursor: pointer;
+}
+
+.hk-page-panel .hk-panel-ai-cat-name {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-ink);
+}
+
+.hk-page-panel .hk-panel-ai-cat-name:hover { background: var(--hkn-sub); }
+
+.hk-page-panel .hk-panel-ai-cat-name:focus,
+.hk-page-panel .hk-panel-ai-cat-name:focus-visible {
+  outline: none;
+  background: var(--hkn-bg);
+  border-color: var(--hkn-blue);
+  box-shadow: 0 0 0 2px var(--hkn-blue-lit);
+}
+
+.hk-page-panel .hk-panel-ai-cat-del {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--hkn-faint);
+  cursor: pointer;
+}
+
+.hk-page-panel .hk-panel-ai-cat-del:hover { background: #fdecec; color: var(--hkn-red); }
+
+.hk-page-panel .hk-panel-ai-options-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.hk-page-panel .hk-panel-ai-check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(12px * var(--hk-panel-font-scale, 1));
+  color: var(--hkn-soft);
+  cursor: pointer;
+}
+
+.hk-page-panel .hk-panel-ai-check-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--hkn-blue);
+  cursor: pointer;
+}
+
+/* 8. 抽屜內的檔案匯入標籤與一般按鈕長一樣 */
+.hk-page-panel .hk-panel-import-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.hk-page-panel .hk-panel-import-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* 9. 摘要分頁的「延伸補充」小標（AI 回覆用 ## 開頭，這裡只是行距） */
+.hk-page-panel .hk-panel-ai-note-content { white-space: pre-wrap; }
+
+/* 舊標註重上色：資料型操作，用比「加入色票」更低調的樣式 */
+.hk-panel-palette-recolor {
+  width: 100%;
+  margin-top: 2px;
+  padding: 5px 10px;
+  border: 1px dashed var(--hkn-line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--hkn-faint);
+  font-family: var(--hkn-font);
+  font-size: calc(11.5px * var(--hk-panel-font-scale, 1));
+  cursor: pointer;
+}
+
+.hk-panel-palette-recolor:hover {
+  background: var(--hkn-sub);
+  color: var(--hkn-ink);
+  border-style: solid;
+}
+
+.hk-panel-palette-recolor:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 標註註解：AI 重點與延伸分行呈現，延伸再往後退一階顏色 */
+.hk-page-panel .hk-panel-item-note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hk-page-panel .hk-note-line { display: block; }
+
+.hk-page-panel .hk-note-line-extra {
+  padding-top: 3px;
+  border-top: 1px dashed var(--hkn-line-strong);
+  color: var(--hkn-faint);
+}
+
+/* hover 標註時的浮動註解也要能斷行 */
+.hk-note-tooltip { white-space: pre-line; }
+
+/* 來源：AI 憑記憶給的線索，做成搜尋連結。樣式刻意最低調 —— 它是待查證的，不是事實 */
+.hk-page-panel .hk-note-line-source {
+  display: block;
+  color: var(--hkn-faint);
+  font-size: calc(11px * var(--hk-panel-font-scale, 1));
+  text-decoration: none;
+  border-bottom: 1px dotted var(--hkn-line-strong);
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+}
+
+.hk-page-panel .hk-note-line-source::after {
+  content: " ↗";
+  opacity: 0.6;
+}
+
+.hk-page-panel .hk-note-line-source:hover {
+  color: var(--hkn-blue);
+  border-bottom-color: var(--hkn-blue);
 }

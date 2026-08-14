@@ -1,89 +1,69 @@
-const colorInput = document.getElementById("color");
-const addColorBtn = document.getElementById("addColorBtn");
-const paletteListEl = document.getElementById("paletteList");
-const openPanelBtn = document.getElementById("openPanelBtn");
-const openManagerBtn = document.getElementById("openManagerBtn");
-const shareLinkBtn = document.getElementById("shareLinkBtn");
-const copyNotesBtn = document.getElementById("copyNotesBtn");
-const downloadNotesBtn = document.getElementById("downloadNotesBtn");
-const langSelect = document.getElementById("langSelect");
-const statusEl = document.querySelector(".status");
+/* ══════════════════════════════════════════════════════
+   Highlight Keeper — Popup
+   三個快捷區塊：① 複製 Prompt ② 貼上 ③ 分享此網頁
+   其餘設定（色票、標籤、備份、AI 服務）都在頁面面板裡。
+   ════════════════════════════════════════════════════ */
+
+const els = {
+  markCount: document.getElementById("markCount"),
+  aiMode: document.getElementById("aiMode"),
+  status: document.getElementById("popStatus"),
+  copyPromptBtn: document.getElementById("aiHighlightBtn"),
+  mindmapPromptBtn: document.getElementById("mindmapPromptBtn"),
+  pasteInput: document.getElementById("aiPasteInput"),
+  pasteApplyBtn: document.getElementById("aiPasteApplyBtn"),
+  shareLinkBtn: document.getElementById("shareLinkBtn"),
+  copyNotesBtn: document.getElementById("copyNotesBtn"),
+  downloadNotesBtn: document.getElementById("downloadNotesBtn"),
+  openPanelBtn: document.getElementById("openPanelBtn"),
+  openManagerBtn: document.getElementById("openManagerBtn"),
+  langSelect: document.getElementById("langSelect"),
+};
 
 const t = (key, params) => HkI18n.t(key, params);
 
-// 網址正規化共用自 shared.js（manifest/popup.html 已先載入）。
+// 網址正規化共用自 shared.js（popup.html 已先載入）。
 const normalizePageKey = (href) =>
   window.HkUrlKey ? window.HkUrlKey.normalizePageKey(href) : href;
 
-// 與 manager.js / contentScript 一致的 storage 主鍵，用來組出「當頁」的匯出資料。
+// 與 manager.js / contentScript 一致的 storage 主鍵。
 const PAGE_META_KEY = "__hk_page_meta__";
 const GENERATED_NOTES_KEY = "hkGeneratedNotes";
 const MINDMAP_KEY = "hkMindmaps";
 const GITHUB_SETTINGS_KEY = "hkGithubSyncSettings";
 
-const DEFAULT_COLOR = "#ffeb3b";
-const DEFAULT_PALETTE = [
-  "#ffeb3b",
-  "#ffa726",
-  "#81c784",
-  "#64b5f6",
-  "#f48fb1",
-  "#c792ea",
-];
-
-let palette = [...DEFAULT_PALETTE];
-let isInitializing = true;
-let panelSide = "right";
 const RECEIVER_MISSING_ERROR = "Receiving end does not exist.";
 
-const normalizeColor = (value) => {
-  if (typeof value !== "string") return DEFAULT_COLOR;
-  const trimmed = value.trim().toLowerCase();
-  if (/^#[0-9a-f]{6}$/.test(trimmed)) return trimmed;
-  if (/^#[0-9a-f]{3}$/.test(trimmed)) {
-    return `#${trimmed[1]}${trimmed[1]}${trimmed[2]}${trimmed[2]}${trimmed[3]}${trimmed[3]}`;
-  }
-  const match = trimmed.match(
-    /^rgba?\((\d{1,3}),\s*(\d{1,3}),\s*(\d{1,3})(?:,\s*(\d+(?:\.\d+)?))?\)$/
-  );
-  if (match) {
-    const toHex = (component) =>
-      Math.max(0, Math.min(255, Number(component)))
-        .toString(16)
-        .padStart(2, "0");
-    return `#${toHex(match[1])}${toHex(match[2])}${toHex(match[3])}`;
-  }
-  return DEFAULT_COLOR;
-};
+let panelSide = "right";
+let statusTimer = 0;
 
-const normalizePalette = (input) => {
-  if (!Array.isArray(input)) return [...DEFAULT_PALETTE];
-  const seen = new Set();
-  const result = [];
-  input.forEach((value) => {
-    if (typeof value !== "string") return;
-    const color = normalizeColor(value);
-    if (!seen.has(color)) {
-      seen.add(color);
-      result.push(color);
-    }
-  });
-  return result.length ? result : [...DEFAULT_PALETTE];
-};
-
+/* ── 狀態列 ─────────────────────────────────────────── */
 const setStatus = (message, isError = false) => {
-  statusEl.textContent = message;
-  statusEl.style.color = isError ? "#d93025" : "#1a73e8";
+  if (!els.status) return;
+  window.clearTimeout(statusTimer);
+  els.status.textContent = message || "";
+  els.status.classList.toggle("is-error", Boolean(isError));
+  els.status.classList.toggle("is-visible", Boolean(message));
+  if (message && !isError) {
+    statusTimer = window.setTimeout(() => {
+      els.status.classList.remove("is-visible");
+    }, 6000);
+  }
 };
 
-// popup 很長、狀態列在最底部——回饋常被推到看不見。分享等操作用這個把它捲進視野。
-const setStatusVisible = (message, isError = false) => {
-  setStatus(message, isError);
-  try {
-    statusEl.scrollIntoView({ block: "center", behavior: "smooth" });
-  } catch (_e) {}
+// 按鈕短暫變成「已複製 ✓」，比只看狀態列更直覺。
+const flashBtn = (btn, doneText) => {
+  if (!btn) return;
+  const original = btn.textContent;
+  btn.textContent = doneText;
+  btn.classList.add("is-done");
+  window.setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove("is-done");
+  }, 1500);
 };
 
+/* ── 與 content script 溝通（必要時自動注入）─────────── */
 const injectContentAssets = async (tabId) => {
   try {
     await chrome.scripting?.insertCSS({
@@ -93,23 +73,17 @@ const injectContentAssets = async (tabId) => {
   } catch (error) {
     console.debug("注入面板樣式失敗", error);
   }
-  try {
-    await chrome.scripting?.executeScript({
-      target: { tabId },
-      files: ["shared.js", "parsers.js", "i18n.js", "contentScript.js"],
-    });
-  } catch (error) {
-    console.debug("注入內容腳本失敗", error);
-    throw error;
-  }
+  await chrome.scripting?.executeScript({
+    target: { tabId },
+    files: ["shared.js", "parsers.js", "i18n.js", "contentScript.js"],
+  });
 };
 
 const sendMessageToTab = async (tabId, payload) => {
   try {
     return await chrome.tabs.sendMessage(tabId, payload);
   } catch (error) {
-    const message =
-      chrome.runtime.lastError?.message || error?.message || "";
+    const message = chrome.runtime.lastError?.message || error?.message || "";
     if (message.includes(RECEIVER_MISSING_ERROR)) {
       await injectContentAssets(tabId);
       await new Promise((resolve) => setTimeout(resolve, 150));
@@ -119,126 +93,12 @@ const sendMessageToTab = async (tabId, payload) => {
   }
 };
 
-const persistColor = async (color) => {
-  try {
-    await chrome.storage?.local.set({ hkLastColor: color });
-  } catch (error) {
-    console.debug("儲存顏色失敗", error);
-  }
+const getActiveTab = async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
 };
 
-const persistPalette = async (nextPalette) => {
-  palette = normalizePalette(nextPalette);
-  try {
-    await chrome.storage?.local.set({ hkColorPalette: palette });
-  } catch (error) {
-    console.debug("儲存顏色列表失敗", error);
-  }
-  renderPalette();
-  return palette;
-};
-
-const renderPalette = () => {
-  paletteListEl.innerHTML = "";
-  if (!palette.length) {
-    const placeholder = document.createElement("p");
-    placeholder.className = "palette-empty";
-    placeholder.textContent = t("popup.emptyPalette");
-    paletteListEl.appendChild(placeholder);
-    return;
-  }
-
-  palette.forEach((color, index) => {
-    const item = document.createElement("div");
-    item.className = "palette-item";
-    item.dataset.index = String(index);
-    if (color === colorInput.value.toLowerCase()) {
-      item.classList.add("is-active");
-    }
-
-    const applyBtn = document.createElement("button");
-    applyBtn.type = "button";
-    applyBtn.className = "palette-swatch";
-    applyBtn.style.backgroundColor = color;
-    applyBtn.title = t("popup.useColor", { color });
-    applyBtn.addEventListener("click", () => selectColor(color));
-
-    const editInput = document.createElement("input");
-    editInput.type = "color";
-    editInput.className = "palette-edit";
-    editInput.value = color;
-    editInput.title = t("popup.editColor", { color });
-    editInput.addEventListener("input", (event) => {
-      updatePaletteColor(index, event.target.value);
-    });
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "palette-remove";
-    deleteBtn.textContent = t("popup.deleteColor");
-    deleteBtn.title = t("popup.deleteColorTitle", { color });
-    deleteBtn.addEventListener("click", () => removePaletteColor(index));
-
-    item.appendChild(applyBtn);
-    item.appendChild(editInput);
-    item.appendChild(deleteBtn);
-    paletteListEl.appendChild(item);
-  });
-};
-
-const selectColor = async (color, silent = false) => {
-  const normalized = normalizeColor(color);
-  if (colorInput.value.toLowerCase() !== normalized) {
-    colorInput.value = normalized;
-  }
-  await persistColor(normalized);
-  if (!silent) {
-    setStatus(t("popup.statusSelected", { color: normalized }));
-  }
-  renderPalette();
-};
-
-const updatePaletteColor = async (index, color) => {
-  const previousColor = palette[index];
-  const normalized = normalizeColor(color);
-  const nextPalette = [...palette];
-  nextPalette[index] = normalized;
-  await persistPalette(nextPalette);
-  if (colorInput.value.toLowerCase() === previousColor) {
-    await selectColor(normalized, true);
-  }
-  setStatus(t("popup.statusUpdated", { color: normalized }));
-  window.requestAnimationFrame(() => {
-    const nextInput = paletteListEl.querySelector(
-      `.palette-item[data-index="${index}"] .palette-edit`
-    );
-    if (nextInput instanceof HTMLInputElement) {
-      nextInput.focus();
-    }
-  });
-};
-
-const removePaletteColor = async (index) => {
-  const removed = palette[index];
-  const nextPalette = palette.filter((_, i) => i !== index);
-  await persistPalette(nextPalette);
-  const current = colorInput.value.toLowerCase();
-  if (!palette.includes(current)) {
-    await selectColor(palette[0] ?? DEFAULT_COLOR, true);
-  }
-  setStatus(t("popup.statusDeleted", { color: removed }));
-};
-
-const handleAddColor = async () => {
-  const color = normalizeColor(colorInput.value);
-  if (palette.includes(color)) {
-    setStatus(t("popup.statusDuplicate"));
-    return;
-  }
-  await persistPalette([...palette, color]);
-  setStatus(t("popup.statusAdded", { color }));
-};
-
+/* ── 頁面資訊 ───────────────────────────────────────── */
 const aiModeLabel = (provider) => {
   switch (provider) {
     case "gemini":
@@ -254,8 +114,8 @@ const aiModeLabel = (provider) => {
 // 找出「當頁」的 storage 主鍵：contentScript 以 canonical 連結為主鍵，popup 不在
 // 頁面內，先輕量讀取該頁 canonical（不觸發全文擷取），讓鍵與標註鍵一致。
 const resolveCurrentPageKey = async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.url) return { tab: tab || null, key: "" };
+  const tab = await getActiveTab();
+  if (!tab?.url) return { tab, key: "" };
   let canonical = "";
   try {
     const [{ result } = {}] = await chrome.scripting.executeScript({
@@ -270,34 +130,34 @@ const resolveCurrentPageKey = async () => {
 };
 
 const loadPageInfo = async () => {
-  const markEl = document.getElementById("markCount");
-  const modeEl = document.getElementById("aiMode");
   try {
     const stored = await chrome.storage?.local.get("hkAISettings");
     const provider = stored?.hkAISettings?.provider || "openai";
-    if (modeEl) modeEl.textContent = aiModeLabel(provider);
+    if (els.aiMode) els.aiMode.textContent = aiModeLabel(provider);
   } catch (_e) {
-    if (modeEl) modeEl.textContent = "—";
+    if (els.aiMode) els.aiMode.textContent = "—";
   }
   try {
-    // Read the count straight from storage — waking the content script for
-    // this forced a full-page text extraction and made the popup feel slow.
+    // 直接讀 storage：喚醒 content script 會強制全文擷取，popup 會變慢。
     const { key } = await resolveCurrentPageKey();
     if (!key) {
-      if (markEl) markEl.textContent = "—";
+      if (els.markCount) els.markCount.textContent = "—";
       return;
     }
     const stored = await chrome.storage?.local.get(key);
     const entries = stored?.[key];
-    if (markEl) {
-      markEl.textContent = Array.isArray(entries) ? String(entries.length) : "0";
+    if (els.markCount) {
+      els.markCount.textContent = t("popup.markCountValue", {
+        count: Array.isArray(entries) ? entries.length : 0,
+      });
     }
   } catch (_e) {
-    if (markEl) markEl.textContent = "—";
+    if (els.markCount) els.markCount.textContent = "—";
   }
 };
 
-// 讀出「當頁」的匯出格式資料 {url,title,tags,entries,note,mindmap}；沒筆記回 null。
+/* ── 本頁匯出資料 ───────────────────────────────────── */
+// 讀出「當頁」的匯出格式資料 {url,title,tags,entries,note,mindmap}；沒筆記回 error。
 const collectCurrentPageEntry = async () => {
   const { key } = await resolveCurrentPageKey();
   if (!key) return { error: t("popup.errNoTabSimple") };
@@ -326,38 +186,104 @@ const collectCurrentPageEntry = async () => {
   };
 };
 
-// 複製分享連結：預設把筆記壓進「原文網址#hk=…」（零設定）；
-// 筆記太多放不下時，改 commit 到 GitHub 備份 repo 分享 raw 連結（免 Pages）。
+/* ── ① 複製 Prompt ──────────────────────────────────── */
+const copyPrompt = async (kind) => {
+  const btn = kind === "mindmap" ? els.mindmapPromptBtn : els.copyPromptBtn;
+  try {
+    const tab = await getActiveTab();
+    if (!tab?.id) {
+      setStatus(t("popup.errNoTabSimple"), true);
+      return;
+    }
+    const response = await sendMessageToTab(tab.id, {
+      type: kind === "mindmap" ? "BUILD_MINDMAP_PROMPT" : "BUILD_AI_HIGHLIGHT_PROMPT",
+    });
+    if (!response?.success || !response.prompt) {
+      throw new Error(response?.error ?? t("popup.errCannotTrigger"));
+    }
+    await navigator.clipboard.writeText(response.prompt);
+    flashBtn(btn, t("popup.copied"));
+    setStatus(
+      kind === "mindmap" ? t("popup.statusMindmapCopied") : t("popup.statusAiCopied")
+    );
+  } catch (error) {
+    setStatus(error?.message || t("popup.errAiTrigger"), true);
+  }
+};
+
+/* ── ② 貼上並套用 ───────────────────────────────────── */
+const applyPastedAiResponse = async () => {
+  try {
+    const tab = await getActiveTab();
+    if (!tab?.id) {
+      setStatus(t("popup.errNoTabSimple"), true);
+      return;
+    }
+    let text = els.pasteInput?.value?.trim() || "";
+    // 框內沒東西就直接讀剪貼簿（已要求 clipboardRead），按一下即可帶入。
+    if (!text) {
+      try {
+        text = (await navigator.clipboard.readText())?.trim() || "";
+        if (els.pasteInput && text) els.pasteInput.value = text;
+      } catch (_e) {
+        /* 剪貼簿空或被拒 → 維持空字串 */
+      }
+    }
+    if (!text) {
+      els.pasteInput?.focus();
+      setStatus(t("popup.errPasteEmpty"), true);
+      return;
+    }
+    setStatus(t("popup.statusApplyingPaste"));
+    const response = await sendMessageToTab(tab.id, {
+      type: "APPLY_AI_RESPONSE",
+      text,
+    });
+    if (!response?.success) {
+      throw new Error(response?.error ?? t("popup.errCannotTrigger"));
+    }
+    setStatus(response.summary || t("popup.statusPasteApplied"));
+    if (els.pasteInput) els.pasteInput.value = "";
+    loadPageInfo();
+  } catch (error) {
+    setStatus(error?.message || t("popup.errAiTrigger"), true);
+  }
+};
+
+/* ── ③ 分享此網頁 ───────────────────────────────────── */
+// 預設把筆記壓進「原文網址#hk=…」（零設定）；筆記太多放不下時，
+// 改 commit 到 GitHub 備份 repo 分享 raw 連結（免開 Pages）。
 const shareCurrentPageLink = async () => {
-  if (shareLinkBtn) shareLinkBtn.disabled = true;
+  if (els.shareLinkBtn) els.shareLinkBtn.disabled = true;
   try {
     const { pageEntry, error } = await collectCurrentPageEntry();
     if (error) {
-      setStatusVisible(error, true);
+      setStatus(error, true);
       return;
     }
     const fragmentLink = await window.HkShareLink.buildFragmentShareUrl(pageEntry);
     if (fragmentLink) {
       await navigator.clipboard.writeText(fragmentLink);
-      setStatusVisible(t("popup.statusLinkCopied"));
+      flashBtn(els.shareLinkBtn, t("popup.copied"));
+      setStatus(t("popup.statusLinkCopied"));
       return;
     }
-    // fragment 放不下 → 走 GitHub raw（沿用備份設定，不需開 Pages）
+    // fragment 放不下 → 走 GitHub raw（沿用備份設定）
     const stored = await chrome.storage?.local.get(GITHUB_SETTINGS_KEY);
     const settings = stored?.[GITHUB_SETTINGS_KEY] || {};
     if (window.HkShareLink.validateGithubSettings(settings)) {
-      setStatusVisible(t("popup.errLinkTooLong"), true);
+      setStatus(t("popup.errLinkTooLong"), true);
       return;
     }
-    setStatusVisible(t("popup.statusLinkUploading"));
+    setStatus(t("popup.statusLinkUploading"));
     const rawLink = await window.HkShareLink.commitPageToGithub(settings, pageEntry);
     await navigator.clipboard.writeText(rawLink);
-    setStatusVisible(t("popup.statusLinkCopiedGithub"));
+    setStatus(t("popup.statusLinkCopiedGithub"));
   } catch (error) {
     console.debug("複製分享連結失敗", error);
-    setStatusVisible(error?.message || t("popup.errLinkShare"), true);
+    setStatus(error?.message || t("popup.errLinkShare"), true);
   } finally {
-    if (shareLinkBtn) shareLinkBtn.disabled = false;
+    if (els.shareLinkBtn) els.shareLinkBtn.disabled = false;
   }
 };
 
@@ -366,7 +292,7 @@ const copyCurrentPageNotes = async () => {
   try {
     const { pageEntry, error } = await collectCurrentPageEntry();
     if (error) {
-      setStatusVisible(error, true);
+      setStatus(error, true);
       return;
     }
     const markdown = window.HkParsers.pageToMarkdown(pageEntry, {
@@ -376,10 +302,11 @@ const copyCurrentPageNotes = async () => {
       mindmap: t("notesMd.mindmap"),
     });
     await navigator.clipboard.writeText(markdown);
-    setStatusVisible(t("popup.statusNotesCopied"));
+    flashBtn(els.copyNotesBtn, t("popup.copied"));
+    setStatus(t("popup.statusNotesCopied"));
   } catch (error) {
     console.debug("複製本頁筆記失敗", error);
-    setStatusVisible(error?.message || t("popup.errNotesCopy"), true);
+    setStatus(error?.message || t("popup.errNotesCopy"), true);
   }
 };
 
@@ -388,7 +315,7 @@ const downloadCurrentPageNotes = async () => {
   try {
     const { pageEntry, error } = await collectCurrentPageEntry();
     if (error) {
-      setStatusVisible(error, true);
+      setStatus(error, true);
       return;
     }
     const payload = {
@@ -414,66 +341,17 @@ const downloadCurrentPageNotes = async () => {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(href);
-    setStatusVisible(t("popup.statusNotesDownloaded"));
+    setStatus(t("popup.statusNotesDownloaded"));
   } catch (error) {
     console.debug("下載本頁筆記失敗", error);
-    setStatusVisible(error?.message || t("popup.errNotesDownload"), true);
+    setStatus(error?.message || t("popup.errNotesDownload"), true);
   }
 };
 
-const loadInitialState = async () => {
-  await HkI18n.initI18n();
-  HkI18n.applyDOMTranslations();
-  if (langSelect) {
-    langSelect.value = HkI18n.getLang();
-    langSelect.addEventListener("change", (event) => {
-      HkI18n.setLang(event.target.value);
-    });
-  }
-  HkI18n.onLangChange(() => {
-    renderPalette();
-    loadPageInfo();
-    if (langSelect) langSelect.value = HkI18n.getLang();
-  });
-
+/* ── 開啟面板 / 管理所有筆記 ────────────────────────── */
+const openPagePanel = async () => {
   try {
-    const stored = await chrome.storage?.local.get([
-      "hkLastColor",
-      "hkColorPalette",
-      "hkPanelSide",
-    ]);
-    palette = normalizePalette(stored?.hkColorPalette);
-    renderPalette();
-    const initialColor = stored?.hkLastColor
-      ? normalizeColor(stored.hkLastColor)
-      : palette[0] ?? DEFAULT_COLOR;
-    colorInput.value = initialColor;
-    await persistColor(initialColor);
-    panelSide =
-      stored?.hkPanelSide === "left" || stored?.hkPanelSide === "right"
-        ? stored.hkPanelSide
-        : "right";
-  } catch (error) {
-    console.debug("載入初始設定失敗", error);
-    palette = [...DEFAULT_PALETTE];
-    renderPalette();
-    colorInput.value = DEFAULT_COLOR;
-    panelSide = "right";
-  } finally {
-    isInitializing = false;
-  }
-};
-
-colorInput.addEventListener("input", (event) => {
-  if (isInitializing) return;
-  selectColor(event.target.value);
-});
-
-addColorBtn.addEventListener("click", handleAddColor);
-
-openPanelBtn.addEventListener("click", async () => {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = await getActiveTab();
     if (!tab?.id) {
       setStatus(t("popup.errNoTab"), true);
       return;
@@ -485,88 +363,58 @@ openPanelBtn.addEventListener("click", async () => {
     if (!response?.success) {
       throw new Error(response?.error ?? t("popup.errOpenPanel"));
     }
-    setStatus(t("popup.statusPanelOpened"));
+    window.close();
   } catch (error) {
     setStatus(error?.message || t("popup.errOpenPanel2"), true);
   }
-});
+};
 
-openManagerBtn?.addEventListener("click", () => {
-  const url = chrome.runtime.getURL("manager.html");
-  chrome.tabs.create({ url });
-});
-
-shareLinkBtn?.addEventListener("click", shareCurrentPageLink);
-copyNotesBtn?.addEventListener("click", copyCurrentPageNotes);
-downloadNotesBtn?.addEventListener("click", downloadCurrentPageNotes);
-
-document.getElementById("aiHighlightBtn")?.addEventListener("click", async () => {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) { setStatus(t("popup.errNoTabSimple"), true); return; }
-    const response = await sendMessageToTab(tab.id, { type: "BUILD_AI_HIGHLIGHT_PROMPT" });
-    if (!response?.success || !response.prompt) {
-      throw new Error(response?.error ?? t("popup.errCannotTrigger"));
-    }
-    await navigator.clipboard.writeText(response.prompt);
-    setStatus(t("popup.statusAiCopied"));
-  } catch (error) {
-    setStatus(error?.message || t("popup.errAiTrigger"), true);
-  }
-});
-
-const aiPasteInput = document.getElementById("aiPasteInput");
-
-// 套用框內的 AI 回覆（重點／摘要／標籤／心智圖）。按鈕與「貼上即套用」共用。
-const applyPastedAiResponse = async () => {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) { setStatus(t("popup.errNoTabSimple"), true); return; }
-    let text = aiPasteInput?.value?.trim() || "";
-    // 框內沒東西就直接讀剪貼簿（已要求 clipboardRead），按一下即可帶入。
-    if (!text) {
-      try {
-        text = (await navigator.clipboard.readText())?.trim() || "";
-        if (aiPasteInput && text) aiPasteInput.value = text;
-      } catch (_e) {
-        /* 剪貼簿空或被拒 → 維持空字串 */
-      }
-    }
-    if (!text) {
-      aiPasteInput?.focus();
-      setStatus(t("popup.errPasteEmpty"), true);
-      return;
-    }
-    setStatus(t("popup.statusApplyingPaste"));
-    const response = await sendMessageToTab(tab.id, {
-      type: "APPLY_AI_RESPONSE",
-      text,
+/* ── 初始化 ─────────────────────────────────────────── */
+const loadInitialState = async () => {
+  await HkI18n.initI18n();
+  HkI18n.applyDOMTranslations();
+  if (els.langSelect) {
+    els.langSelect.value = HkI18n.getLang();
+    els.langSelect.addEventListener("change", (event) => {
+      HkI18n.setLang(event.target.value);
     });
-    if (!response?.success) {
-      throw new Error(response?.error ?? t("popup.errCannotTrigger"));
-    }
-    setStatus(response.summary || t("popup.statusPasteApplied"));
-    if (aiPasteInput) aiPasteInput.value = "";
+  }
+  HkI18n.onLangChange(() => {
     loadPageInfo();
-  } catch (error) {
-    setStatus(error?.message || t("popup.errAiTrigger"), true);
+    if (els.langSelect) els.langSelect.value = HkI18n.getLang();
+  });
+
+  try {
+    const stored = await chrome.storage?.local.get("hkPanelSide");
+    panelSide = stored?.hkPanelSide === "left" ? "left" : "right";
+  } catch (_e) {
+    panelSide = "right";
   }
 };
 
-document.getElementById("aiPasteApplyBtn")?.addEventListener("click", applyPastedAiResponse);
+els.copyPromptBtn?.addEventListener("click", () => copyPrompt("combined"));
+els.mindmapPromptBtn?.addEventListener("click", () => copyPrompt("mindmap"));
+els.pasteApplyBtn?.addEventListener("click", applyPastedAiResponse);
+els.shareLinkBtn?.addEventListener("click", shareCurrentPageLink);
+els.copyNotesBtn?.addEventListener("click", copyCurrentPageNotes);
+els.downloadNotesBtn?.addEventListener("click", downloadCurrentPageNotes);
+els.openPanelBtn?.addEventListener("click", openPagePanel);
+els.openManagerBtn?.addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("manager.html") });
+});
 
 // 貼上即自動套用（setTimeout 讓 textarea 先吃到剪貼簿內容），與頁面面板一致。
 // 註：右鍵選單貼上會走這條；鍵盤 Cmd/Ctrl+V 走下方 keydown（popup 收不到原生快捷鍵）。
-aiPasteInput?.addEventListener("paste", () => {
+els.pasteInput?.addEventListener("paste", () => {
   window.setTimeout(() => {
-    if (aiPasteInput.value.trim()) applyPastedAiResponse();
+    if (els.pasteInput.value.trim()) applyPastedAiResponse();
   }, 30);
 });
 
 // macOS 的擴充 popup 沒有「編輯」選單，收不到 Cmd+A/C/X/V/Z，這裡用 JS 補回來。
-aiPasteInput?.addEventListener("keydown", (event) => {
+els.pasteInput?.addEventListener("keydown", (event) => {
   if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
-  const el = aiPasteInput;
+  const el = els.pasteInput;
   switch (event.key.toLowerCase()) {
     case "a":
       event.preventDefault();
@@ -607,37 +455,12 @@ aiPasteInput?.addEventListener("keydown", (event) => {
   }
 });
 
-document.getElementById("clearPageBtn")?.addEventListener("click", async () => {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id) { setStatus(t("popup.errNoTabSimple"), true); return; }
-    const response = await sendMessageToTab(tab.id, { type: "CLEAR_PAGE_HIGHLIGHTS" });
-    if (!response?.success) throw new Error(response?.error ?? t("popup.errCannotClear"));
-    setStatus(t("popup.statusCleared"));
-    loadPageInfo();
-  } catch (error) {
-    setStatus(error?.message || t("popup.errClear"), true);
-  }
-});
-
 chrome.storage?.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") return;
-  if (changes.hkColorPalette && !isInitializing) {
-    palette = normalizePalette(changes.hkColorPalette.newValue);
-    renderPalette();
-  }
-  if (changes.hkLastColor && !isInitializing) {
-    const nextColor = normalizeColor(changes.hkLastColor.newValue);
-    colorInput.value = nextColor;
-    renderPalette();
-  }
   if (changes.hkPanelSide) {
-    panelSide =
-      changes.hkPanelSide.newValue === "left" ? "left" : "right";
+    panelSide = changes.hkPanelSide.newValue === "left" ? "left" : "right";
   }
-  if (changes.hkAISettings) {
-    loadPageInfo();
-  }
+  if (changes.hkAISettings) loadPageInfo();
 });
 
 loadInitialState();

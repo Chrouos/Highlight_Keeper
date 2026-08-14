@@ -18,6 +18,15 @@
     note: ["摘要", "筆記", "摘要筆記", "summary", "notes"],
     mindmap: ["心智圖", "mindmap"],
     tags: ["標籤", "tags", "tag", "關鍵字", "keywords"],
+    extra: [
+      "延伸",
+      "延伸補充",
+      "補充",
+      "延伸閱讀",
+      "extra",
+      "background",
+      "further",
+    ],
   };
 
   // 把 AI「標籤」區塊解析成乾淨的字串陣列：
@@ -129,7 +138,7 @@
     if (typeof rawText !== "string" || !rawText.trim()) return [];
     const toHexColor =
       typeof deps.toHexColor === "function" ? deps.toHexColor : (c) => c;
-    const defaultColor = deps.defaultColor || "#ffeb3b";
+    const defaultColor = deps.defaultColor || "#fff5b8";
     const cats = Array.isArray(deps.categories) ? deps.categories : [];
     const catByName = new Map();
     cats.forEach((c) => {
@@ -162,11 +171,23 @@
       let text = "";
       let tag = "";
       let reason = "";
+      let extra = "";
+      let source = "";
       for (const line of lines) {
         const asText = stripPrefix(line, [
           "原文", "原句", "片段", "source", "quote", "excerpt", "text",
         ]);
         if (asText !== null) { text = asText; continue; }
+        // 「延伸／來源」都要先於「重點」比對：同一個區塊裡三者可能並存。
+        // 注意不要把 "source" 放進來源別名 —— 它已經是「原文」的英文別名。
+        const asSource = stripPrefix(line, [
+          "來源", "出處", "參考來源", "參考", "ref", "reference", "citation",
+        ]);
+        if (asSource !== null) { source = asSource; continue; }
+        const asExtra = stripPrefix(line, [
+          "延伸", "延伸補充", "補充", "背景", "extra", "background", "context",
+        ]);
+        if (asExtra !== null) { extra = asExtra; continue; }
         const asReason = stripPrefix(line, [
           "重點", "摘要", "說明", "理由", "point", "summary", "note", "reason", "insight",
         ]);
@@ -181,10 +202,67 @@
         }
       }
       if (!text) continue;
-      items.push({ text, color: resolveColor(tag), reason });
+      // 「來源」只有在有延伸時才有意義（是延伸那句話的出處）。
+      // 明確寫「無／none」的一律當成沒有，不要把佔位字當來源存下去。
+      const cleanSource = /^(無|沒有|none|n\/a|-|—)$/i.test(source.trim())
+        ? ""
+        : source.trim();
+      items.push({
+        text,
+        color: resolveColor(tag),
+        reason,
+        extra,
+        source: extra ? cleanSource : "",
+      });
     }
     return items;
   };
+
+  // 解析「延伸」區塊：每組兩行「原文：…／延伸：…」，回傳 [{text, extra}]。
+  // 之所以要求 AI 附上原文片段，是為了把補充掛回「那一句」，而不是丟一大段
+  // 看不出在講哪裡的補充。
+  const parseExtraBlocks = (rawText) => {
+    if (typeof rawText !== "string" || !rawText.trim()) return [];
+    const stripPrefix = (line, labels) => {
+      for (const label of labels) {
+        const re = new RegExp(`^[-*•·\\s]*${label}\\s*[:：]\\s*`, "i");
+        if (re.test(line)) return line.replace(re, "").trim();
+      }
+      return null;
+    };
+    const items = [];
+    rawText.split(/\n\s*\n/).forEach((block) => {
+      const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+      let text = "";
+      const extras = [];
+      lines.forEach((line) => {
+        const asText = stripPrefix(line, [
+          "原文", "原句", "片段", "source", "quote", "excerpt", "text",
+        ]);
+        if (asText !== null) {
+          text = asText;
+          return;
+        }
+        const asExtra = stripPrefix(line, [
+          "延伸", "補充", "延伸補充", "背景", "另一面", "extra", "background", "note",
+        ]);
+        if (asExtra !== null && asExtra) extras.push(asExtra);
+      });
+      const extra = extras.join(" ").trim();
+      if (text && extra) items.push({ text, extra });
+    });
+    return items;
+  };
+
+  // 比對用的寬鬆正規化：去空白、標點與大小寫差異，讓 AI 回抄的片段
+  // 即使少了句號或換行也對得上原本的標註。
+  const looseKey = (input) =>
+    typeof input === "string"
+      ? input
+          .toLowerCase()
+          .replace(/\s+/g, "")
+          .replace(/[.,;:!?"'`()\[\]{}<>«»—–\-。，、；：！？「」『』（）【】…·]/g, "")
+      : "";
 
   // 把 bulk 備份的 pages 陣列正規化成 {url,title,tags,entries,note,mindmap}。
   const normalizeBulkPages = (pages) => {
@@ -364,6 +442,8 @@
     parseMindmapOutline,
     looksLikeMindmapOutline,
     parseHighlightBlocks,
+    parseExtraBlocks,
+    looseKey,
     normalizeBulkPages,
     pageToMarkdown,
     parseSharedMarkdown,

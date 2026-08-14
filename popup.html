@@ -6,102 +6,130 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <main>
-      <section class="lang-switch" aria-label="Language">
-        <label for="langSelect" data-i18n="popup.langLabel">顯示語言</label>
-        <select id="langSelect">
+    <main class="hk-pop">
+      <!-- ── Header：標題 + 本頁狀態 ─────────────────────── -->
+      <header class="hk-pop-head">
+        <div class="hk-pop-brand">
+          <img class="hk-pop-logo" src="Icon/32.png" alt="" />
+          <span class="hk-pop-name">Highlight Keeper</span>
+        </div>
+        <div class="hk-pop-meta">
+          <span id="markCount" class="hk-pop-count">—</span>
+          <span class="hk-pop-dot">·</span>
+          <span id="aiMode" class="hk-pop-mode">—</span>
+        </div>
+      </header>
+
+      <div class="hk-pop-body">
+        <!-- ── ① 複製 Prompt ──────────────────────────── -->
+        <section class="hk-card" aria-labelledby="stepCopyTitle">
+          <div class="hk-card-head">
+            <span class="hk-step">1</span>
+            <h2 id="stepCopyTitle" class="hk-card-title" data-i18n="popup.stepCopyTitle">
+              複製 Prompt
+            </h2>
+          </div>
+          <p class="hk-card-desc" data-i18n="popup.stepCopyDesc">
+            把本頁全文與色票組成 Prompt，貼到 ChatGPT 讓它畫重點、寫摘要。
+          </p>
+          <button type="button" id="aiHighlightBtn" class="hk-btn hk-btn-primary" data-i18n="popup.aiAutoHighlight">
+            複製 AI 畫重點 Prompt
+          </button>
+          <button type="button" id="mindmapPromptBtn" class="hk-btn hk-btn-quiet" data-i18n="popup.copyMindmapPrompt">
+            改複製心智圖 Prompt
+          </button>
+        </section>
+
+        <!-- ── ② 貼上 ────────────────────────────────── -->
+        <section class="hk-card" aria-labelledby="stepPasteTitle">
+          <div class="hk-card-head">
+            <span class="hk-step">2</span>
+            <h2 id="stepPasteTitle" class="hk-card-title" data-i18n="popup.stepPasteTitle">
+              貼上
+            </h2>
+          </div>
+          <p class="hk-card-desc" data-i18n="popup.stepPasteDesc">
+            把 AI 的回覆貼進來，會自動套用重點、摘要、標籤與心智圖。
+          </p>
+          <textarea
+            id="aiPasteInput"
+            class="hk-textarea"
+            rows="3"
+            data-i18n-placeholder="popup.aiPastePlaceholder"
+            placeholder="把 ChatGPT 的回覆貼在這裡，直接套用…"
+          ></textarea>
+          <button type="button" id="aiPasteApplyBtn" class="hk-btn hk-btn-primary" data-i18n="popup.aiPasteApply">
+            貼上並套用
+          </button>
+        </section>
+
+        <!-- ── ③ 分享此網頁 ──────────────────────────── -->
+        <section class="hk-card" aria-labelledby="stepShareTitle">
+          <div class="hk-card-head">
+            <span class="hk-step">3</span>
+            <h2 id="stepShareTitle" class="hk-card-title" data-i18n="popup.stepShareTitle">
+              分享此網頁
+            </h2>
+          </div>
+          <p class="hk-card-desc" data-i18n="popup.stepShareDesc">
+            對方點開就是原文；裝了 Highlight Keeper 會跳出「匯入」收下你的筆記。
+          </p>
+          <button
+            type="button"
+            id="shareLinkBtn"
+            class="hk-btn hk-btn-primary"
+            data-i18n="popup.shareLink"
+            data-i18n-title="popup.shareLinkTitle"
+            title="複製分享連結：對方點開原文，裝了 Highlight Keeper 就能一鍵匯入"
+          >
+            複製分享連結
+          </button>
+          <div class="hk-btn-row">
+            <button
+              type="button"
+              id="copyNotesBtn"
+              class="hk-btn hk-btn-ghost"
+              data-i18n="popup.copyNotesShort"
+              data-i18n-title="popup.copyNotesTitle"
+              title="把本頁筆記複製成 Markdown，貼到聊天、筆記軟體都可讀"
+            >
+              複製 Markdown
+            </button>
+            <button
+              type="button"
+              id="downloadNotesBtn"
+              class="hk-btn hk-btn-ghost"
+              data-i18n="popup.downloadNotesShort"
+              data-i18n-title="popup.downloadNotesTitle"
+              title="下載本頁筆記 JSON，給也用 Highlight Keeper 的人匯入"
+            >
+              下載 JSON
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <!-- ── 狀態列 ─────────────────────────────────── -->
+      <p id="popStatus" class="hk-pop-status" role="status" aria-live="polite"></p>
+
+      <!-- ── 開啟面板 ───────────────────────────────── -->
+      <div class="hk-pop-panel-cta">
+        <button type="button" id="openPanelBtn" class="hk-btn hk-btn-outline" data-i18n="popup.openPanel">
+          在頁面開啟面板
+        </button>
+        <span class="hk-pop-kbd" data-i18n="popup.panelHint">顏色、標籤、搜尋、備份都在面板裡</span>
+      </div>
+
+      <!-- ── 頁尾 ───────────────────────────────────── -->
+      <footer class="hk-pop-foot">
+        <button type="button" id="openManagerBtn" class="hk-link" data-i18n="popup.openManager">
+          管理所有筆記
+        </button>
+        <select id="langSelect" class="hk-pop-lang" data-i18n-aria-label="popup.langLabel" aria-label="顯示語言">
           <option value="zh" data-i18n="popup.langZh">繁體中文</option>
           <option value="en" data-i18n="popup.langEn">English</option>
         </select>
-      </section>
-      <h1 data-i18n="popup.title">頁面標註</h1>
-      <section class="page-info" data-i18n-aria-label="popup.pageInfoAria" aria-label="頁面資訊">
-        <div class="info-row">
-          <span class="info-label" data-i18n="popup.markCountLabel">本頁標記</span>
-          <span class="info-value" id="markCount">—</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label" data-i18n="popup.aiModeLabel">AI 模式</span>
-          <span class="info-value" id="aiMode">—</span>
-        </div>
-      </section>
-      <section class="panel-controls" data-i18n-aria-label="popup.panelControlAria" aria-label="頁面標註面板">
-        <button type="button" id="openPanelBtn" class="panel-open-btn" data-i18n="popup.openPanel">
-          在頁面開啟面板
-        </button>
-        <button
-          type="button"
-          id="shareLinkBtn"
-          class="panel-open-btn panel-link-btn"
-          data-i18n="popup.shareLink"
-          data-i18n-title="popup.shareLinkTitle"
-          title="複製分享連結：對方點開原文，裝了 Highlight Keeper 就能一鍵匯入"
-        >
-          複製分享連結
-        </button>
-        <div class="share-row">
-          <button
-            type="button"
-            id="copyNotesBtn"
-            class="panel-open-btn panel-copy-btn"
-            data-i18n="popup.copyNotes"
-            data-i18n-title="popup.copyNotesTitle"
-            title="把本頁筆記複製成 Markdown，貼到聊天、筆記軟體都可讀"
-          >
-            複製本頁筆記
-          </button>
-          <button
-            type="button"
-            id="downloadNotesBtn"
-            class="panel-open-btn panel-download-btn"
-            data-i18n="popup.downloadNotes"
-            data-i18n-title="popup.downloadNotesTitle"
-            title="下載本頁筆記 JSON，給也用 Highlight Keeper 的人匯入"
-          >
-            下載本頁 JSON
-          </button>
-        </div>
-      </section>
-      <section class="ai-tools" data-i18n-aria-label="popup.aiToolsAria" aria-label="AI 工具">
-        <button type="button" id="aiHighlightBtn" class="panel-open-btn panel-ai-btn" data-i18n="popup.aiAutoHighlight">
-          複製 AI 畫重點 Prompt
-        </button>
-        <textarea
-          id="aiPasteInput"
-          class="ai-paste-input"
-          rows="4"
-          data-i18n-placeholder="popup.aiPastePlaceholder"
-          placeholder="把 ChatGPT 的回覆貼在這裡，直接套用…"
-        ></textarea>
-        <button type="button" id="aiPasteApplyBtn" class="panel-open-btn panel-ai-btn" data-i18n="popup.aiPasteApply">
-          貼上並套用
-        </button>
-        <button type="button" id="clearPageBtn" class="panel-open-btn panel-clear-btn" data-i18n="popup.clearPage">
-          清除本頁標記
-        </button>
-      </section>
-      <section class="color-picker">
-        <label for="color">
-          <span data-i18n="popup.colorLabel">標註顏色</span>
-          <input type="color" id="color" value="#ffeb3b" />
-        </label>
-        <button type="button" id="addColorBtn" class="add-color-btn" data-i18n="popup.addToPalette">
-          加入到色票
-        </button>
-      </section>
-      <section class="palette-management" data-i18n-aria-label="popup.paletteAria" aria-label="顏色色票">
-        <header class="palette-header">
-          <span data-i18n="popup.availableColors">可用顏色</span>
-        </header>
-        <div id="paletteList" class="palette-list"></div>
-      </section>
-      <section class="data-tools" data-i18n-aria-label="popup.dataToolsAria" aria-label="資料管理">
-        <button type="button" id="openManagerBtn" class="panel-open-btn" data-i18n="popup.openManager">
-          管理所有筆記
-        </button>
-      </section>
-      <section class="status" role="status" aria-live="polite"></section>
-      <p data-i18n="popup.contact">若有任何問題，私信到 chrouodiu@gmail.com</p>
+      </footer>
     </main>
     <script src="shared.js"></script>
     <script src="parsers.js"></script>

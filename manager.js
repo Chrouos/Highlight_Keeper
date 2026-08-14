@@ -1,5 +1,5 @@
 const PAGE_META_KEY = "__hk_page_meta__";
-const DEFAULT_COLOR = "#ffeb3b";
+const DEFAULT_COLOR = "#fff5b8";
 const GITHUB_SETTINGS_KEY = "hkGithubSyncSettings";
 const GITHUB_DEFAULT_SETTINGS = {
   token: "",

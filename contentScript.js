@@ -37,25 +37,43 @@ HkI18n?.onLangChange?.(() => {
 });
 
 const storage = chrome.storage?.local;
-const DEFAULT_COLOR = "#ffeb3b";
+const DEFAULT_COLOR = "#fff5b8";
+// 淺色系預設：底色夠淡，黑字疊上去仍清楚，整頁不會被螢光色蓋掉。
 const DEFAULT_PALETTE = [
-  "#ffeb3b",
-  "#ffa726",
-  "#81c784",
-  "#64b5f6",
-  "#f48fb1",
-  "#c792ea",
+  "#fff5b8",
+  "#ffe6cc",
+  "#dff2e0",
+  "#dfeefc",
+  "#fce4ee",
+  "#ece3fa",
 ];
+// 舊版飽和色 → 新版淺色。升級後使用者的色票與既有標註都還存著舊色，
+// 只換程式裡的預設值是看不到差別的，所以另外做搬移。
+const LEGACY_COLOR_MAP = {
+  "#ffeb3b": "#fff5b8",
+  "#ffa726": "#ffe6cc",
+  "#81c784": "#dff2e0",
+  "#64b5f6": "#dfeefc",
+  "#f48fb1": "#fce4ee",
+  "#c792ea": "#ece3fa",
+  // 1.3.0 的中間深度
+  "#ffeb85": "#fff5b8",
+  "#ffd9b0": "#ffe6cc",
+  "#cdeccf": "#dff2e0",
+  "#cfe4fa": "#dfeefc",
+  "#fbd3e3": "#fce4ee",
+  "#e3d7f7": "#ece3fa",
+};
 const PAGE_META_KEY = "__hk_page_meta__";
 const DEFAULT_AI_PROMPT = `你是一位筆記整理助手，根據提供的網頁全文與標註內容，整理出淺顯易懂的筆記。優先考慮使用者標注段落，將重點控制在五百字以內，輸出內容需要像說故事一樣有脈絡的說明。`;
 const DEFAULT_AUTO_HIGHLIGHT_PROMPT = `你是一位文章結構分析助手。請全面標註文章中各個關鍵面向的重要片段，確保覆蓋文章的完整論述架構，不要只挑少數幾句。`;
 // 分類預設名依 UI 語言產生（使用者自訂後會覆蓋這些預設）。
 const getDefaultCategories = () => [
-  { name: t("cat.motivation"), color: "#c792ea" },
-  { name: t("cat.method"), color: "#64b5f6" },
-  { name: t("cat.pros"), color: "#81c784" },
-  { name: t("cat.cons"), color: "#ffa726" },
-  { name: t("cat.conclusion"), color: "#ffeb3b" },
+  { name: t("cat.motivation"), color: "#ece3fa" },
+  { name: t("cat.method"), color: "#dfeefc" },
+  { name: t("cat.pros"), color: "#dff2e0" },
+  { name: t("cat.cons"), color: "#ffe6cc" },
+  { name: t("cat.conclusion"), color: "#fff5b8" },
 ];
 const DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
 const MODEL_OPTIONS = {
@@ -142,6 +160,8 @@ let aiSettings = {
   categories: getDefaultCategories(),
   usePreview: true,
   selectionOnly: false,
+  // 延伸補充：讓模型先想過一輪，再補文章「沒寫到」的背景／反面說法／延伸讀物。
+  deepResearch: true,
 };
 let isGeneratingNote = false;
 let isAutoHighlighting = false;
@@ -523,12 +543,27 @@ const persistColorPalette = async (nextPalette) => {
   }
 };
 
+// 色票搬移：只有在「整組色票都還是舊預設」時才自動換掉，
+// 使用者自己調過顏色就不動他的設定。
+const migrateLegacyPalette = (palette) => {
+  if (!Array.isArray(palette) || !palette.length) return palette;
+  const allLegacy = palette.every((color) => LEGACY_COLOR_MAP[color]);
+  if (!allLegacy) return palette;
+  return palette.map((color) => LEGACY_COLOR_MAP[color] || color);
+};
+
 const loadPalette = async () => {
   if (!storage) return colorPalette;
   try {
     const stored = await storage.get("hkColorPalette");
-    const palette = sanitizePalette(stored?.hkColorPalette);
+    const raw = sanitizePalette(stored?.hkColorPalette);
+    const palette = migrateLegacyPalette(raw);
     setColorPaletteState(palette);
+    if (palette.join() !== raw.join()) {
+      storage
+        .set({ hkColorPalette: palette })
+        .catch((e) => console.debug("搬移舊色票失敗", e));
+    }
     return colorPalette;
   } catch (error) {
     console.debug("讀取顏色清單失敗", error);
@@ -761,6 +796,8 @@ const applyAiSettingsToUI = () => {
   if (previewCb) previewCb.checked = aiSettings.usePreview ?? true;
   const selOnlyCb = highlightPanelEls?.aiSelOnlyCheckbox;
   if (selOnlyCb) selOnlyCb.checked = aiSettings.selectionOnly ?? false;
+  const deepCb = highlightPanelEls?.aiDeepResearchCheckbox;
+  if (deepCb) deepCb.checked = aiSettings.deepResearch !== false;
   updateAiKeyVisibility();
   updateGenerateAvailability();
   renderCategoryList();
@@ -807,6 +844,18 @@ const renderCategoryList = () => {
   });
 };
 
+// 「自動畫重點」用的是分類色，跟色票一樣會留在 storage 裡。
+// 同樣採保守規則：整組都還是舊預設色才自動換淺，使用者調過就不動。
+const migrateLegacyCategories = (categories) => {
+  if (!Array.isArray(categories) || !categories.length) return categories;
+  const allLegacy = categories.every((c) => LEGACY_COLOR_MAP[toHexColor(c?.color || "")]);
+  if (!allLegacy) return categories;
+  return categories.map((c) => ({
+    ...c,
+    color: LEGACY_COLOR_MAP[toHexColor(c.color)] || c.color,
+  }));
+};
+
 const loadAISettings = async () => {
   try {
     const stored = await chrome.storage?.local.get("hkAISettings");
@@ -815,6 +864,11 @@ const loadAISettings = async () => {
         ...aiSettings,
         ...stored.hkAISettings,
       };
+    }
+    const migrated = migrateLegacyCategories(aiSettings.categories);
+    if (migrated !== aiSettings.categories) {
+      aiSettings.categories = migrated;
+      persistAISettings();
     }
   } catch (error) {
     console.debug("讀取 AI 設定失敗", error);
@@ -931,10 +985,32 @@ ${catLines}`;
       })
       .join("\n");
     colorSection = `### 可用顏色（依使用習慣排序，用「#色碼」標示）
-${colorLines || "- #ffeb3b（歷史使用次數：0）"}`;
-    tagInstruction = "從上方色碼選一個，寫成「#色碼」（例如 #ffeb3b）";
+${colorLines || "- #fff5b8（歷史使用次數：0）"}`;
+    tagInstruction = "從上方色碼選一個，寫成「#色碼」（例如 #fff5b8）";
     taskExtra = `- 盡量標註 10～20 個片段，確保覆蓋文章各個段落，不要只挑少數幾句。`;
   }
+
+  // 延伸掛在「每個重點」裡面，而不是另開一段：這樣讀的時候補充就在那句話旁邊。
+  const deep = aiSettings.deepResearch !== false;
+  const deepRule = deep
+    ? `
+- 每個重點再多寫一行「延伸」：**原文沒說、但讀到這句會想知道的一句話**。從下面擇一切入：
+  - 作者預設你已經知道、但沒交代的前提或背景
+  - 這個說法的適用邊界、時間點，或圈內常見的反駁／替代方案
+  - 想再往下追一層該查什麼（關鍵詞、人名、論文、專案）
+- 「延伸」必須是原文找不到的內容；只是換句話說「重點」的直接留空。
+- 40～80 字，一句講完，不要「值得注意的是」這類贅詞。
+- 真的沒東西可補的句子，「延伸」那行直接省略，不要硬湊。
+- 有「延伸」就再加一行「來源」：這句話的出處或可查證的線索，寫**查得到的名字**——論文標題、書名、規格／標準名稱、組織、人名，或最精準的搜尋關鍵詞。
+- **來源絕對不要寫網址**，我會自己搜。年份只有在你有把握時才寫，不確定就別寫。
+- 這是憑記憶回答，不是檢索：只要有一點不確定就寫「來源：無」，寧可留白也不要編出看起來像真的的論文名或數據。延伸句本身沒把握的地方在句尾標「（待查證）」。`
+    : "";
+  const deepFormatLine = deep
+    ? "\n延伸：原文沒說、但讀到這句會想知道的一句話（沒有就省略這兩行）\n來源：可查證的名字或搜尋關鍵詞（不確定就寫「無」，不要寫網址）"
+    : "";
+  const deepExampleLine = deep
+    ? "\n延伸：這個說法多半指 2020 後的生成式模型；製造業自動化其實在更早的 PLC 時代就開始了，兩者常被混為一談。\n來源：Brynjolfsson & McAfee, The Second Machine Age"
+    : "";
 
   return `${basePrompt}
 
@@ -943,20 +1019,20 @@ ${colorLines || "- #ffeb3b（歷史使用次數：0）"}`;
 - 每個重點必須是「原文中可直接找到」的連續文字。
 - 不要回傳與「已有標註」重複的內容。
 - 必須只使用下方提供的分類 / 顏色。
-- 「重點」用一句話直接摘要「這段原文的核心觀點或資訊」，不加任何前綴（不說「這段在說」「這裡提到」「作者指出」等），直接陳述內容本身。
+- 「重點」用一句話直接摘要「這段原文的核心觀點或資訊」，不加任何前綴（不說「這段在說」「這裡提到」「作者指出」等），直接陳述內容本身。${deepRule}
 ${taskExtra}
 
 ${colorSection}
 
-### 輸出格式（請勿使用 JSON。每個重點固定三行，重點之間空一行）
+### 輸出格式（請勿使用 JSON。每個重點一個區塊，區塊之間空一行）
 原文：要標註的原文片段（必須是原文中可直接找到的連續文字）
 #分類（${tagInstruction}）
-重點：用一句話直接摘要這段原文的核心觀點或資訊（不要加任何前綴）
+重點：用一句話直接摘要這段原文的核心觀點或資訊（不要加任何前綴）${deepFormatLine}
 
 範例：
 原文：人工智慧正在改變所有產業
-${categories ? `#${categories[0]?.name || "重點"}` : palette[0] || "#ffeb3b"}
-重點：AI 已成為產業變革的核心動力
+${categories ? `#${categories[0]?.name || "重點"}` : palette[0] || "#fff5b8"}
+重點：AI 已成為產業變革的核心動力${deepExampleLine}
 
 ### 網頁資訊
 - 標題：${pageData.title}
@@ -1015,9 +1091,10 @@ ${notePrompt}
 ${existingTagLines}
 - 用半形逗號分隔，例如：AI, 產業變革, 機器學習；不要加 # 號、不要編號、不要解釋。
 
+
 ### 最終輸出格式（三個區塊都要，使用以下分隔線，不要加其他標題）
 ===重點===
-（依前述「輸出格式」列出所有重點區塊）
+（依前述「輸出格式」列出所有重點區塊，延伸就寫在各自的重點裡）
 
 ===摘要===
 （五百字以內、有脈絡的筆記內容）
@@ -1104,12 +1181,12 @@ const saveMindmap = async (outlineText, title) => {
 // ── 心智圖 overlay ───────────────────────────────────────
 let mindmapOverlay = null;
 const MINDMAP_BRANCH_COLORS = [
-  "#b46d2e",
-  "#5b7a4e",
-  "#4e6e8e",
-  "#8e5a7a",
-  "#a8682f",
-  "#6b5e8e",
+  "#c9a227",
+  "#6f9c72",
+  "#5b8bbf",
+  "#b07a9b",
+  "#c68a5a",
+  "#8b7bbd",
 ];
 
 const updateMindmapAvailability = (hasMap) => {
@@ -1457,9 +1534,29 @@ const normalizeAutoHighlightItems = (payload, palette) => {
         typeof item.reason === "string"
           ? normalizeWhitespace(item.reason).slice(0, 180)
           : "";
-      return { text, color, reason };
+      // 延伸寫在同一個重點區塊裡，跟著重點一起變成這則標註的註解。
+      const extra =
+        typeof item.extra === "string"
+          ? normalizeWhitespace(item.extra).slice(0, 240)
+          : "";
+      // 來源刻意不收網址：模型編造連結的機率遠高於編造書名／論文名，
+      // 我們只存「查得到的名字」，要驗證時再由前端組搜尋連結。
+      const source =
+        typeof item.source === "string"
+          ? normalizeWhitespace(item.source).replace(/https?:\/\/\S+/g, "").slice(0, 120).trim()
+          : "";
+      return { text, color, reason, extra, source };
     })
     .filter(Boolean);
+};
+
+// 標註註解最多三行：「AI：重點」／「延伸：…」／「來源：…」。
+const formatAiNote = (reason, extra, source) => {
+  const lines = [];
+  if (reason) lines.push(`AI：${reason}`);
+  if (extra) lines.push(`${t("ai.extraNotePrefix")}${extra}`);
+  if (extra && source) lines.push(`${t("ai.sourceNotePrefix")}${source}`);
+  return lines.join("\n");
 };
 
 const rangeTouchesExistingHighlight = (range) => {
@@ -1592,13 +1689,13 @@ const findRangeForAutoHighlightText = (targetText, consumedSpans) => {
   return null;
 };
 
-const applyAutoHighlightRange = async (range, color, reason) => {
+const applyAutoHighlightRange = async (range, color, reason, extra = "", source = "") => {
   const snapshot = serializeRange(range.cloneRange());
   const text = normalizeWhitespace(snapshot.text);
   if (!text) return null;
   const highlightId = `hk-ai-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
   const normalizedColor = toHexColor(color || DEFAULT_COLOR);
-  const note = reason ? `AI：${reason}` : "";
+  const note = formatAiNote(reason, extra, source);
   const highlightEl = wrapRangeWithHighlight(range, normalizedColor, highlightId);
   setAllMarksMetadata(highlightId, { color: normalizedColor, note });
   await saveHighlight({
@@ -1704,7 +1801,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
         continue;
       }
       if (usePreview) {
-        const result = applyPreviewHighlight(range, task.color, task.reason);
+        const result = applyPreviewHighlight(range, task.color, task.reason, task.extra, task.source);
         if (result) {
           previewData.push(result);
           appliedCount += 1;
@@ -1721,7 +1818,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
       }
       const highlightId = `hk-ai-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
       const normalizedColor = toHexColor(task.color || DEFAULT_COLOR);
-      const note = task.reason ? `AI：${task.reason}` : "";
+      const note = formatAiNote(task.reason, task.extra, task.source);
       wrapRangeWithHighlight(range, normalizedColor, highlightId);
       setAllMarksMetadata(highlightId, { color: normalizedColor, note });
       newEntries.push({
@@ -1866,13 +1963,13 @@ const clearPageHighlights = async () => {
   setAiPanelStatus(t("ai.statusClearedAndReady"));
 };
 
-const applyPreviewHighlight = (range, color, reason) => {
+const applyPreviewHighlight = (range, color, reason, extra = "", source = "") => {
   const snapshot = serializeRange(range.cloneRange());
   const text = normalizeWhitespace(snapshot.text);
   if (!text) return null;
   const highlightId = `hk-ai-preview-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
   const normalizedColor = toHexColor(color || DEFAULT_COLOR);
-  const note = reason ? `AI：${reason}` : "";
+  const note = formatAiNote(reason, extra, source);
   const highlightEl = wrapRangeWithHighlight(range, normalizedColor, highlightId);
   if (highlightEl) highlightEl.classList.add("hk-highlight-preview");
   setAllMarksMetadata(highlightId, { color: normalizedColor, note });
@@ -2146,6 +2243,52 @@ const applySharedPayload = async (payload, { overwrite = false } = {}) => {
 // Outline heuristics: mostly list lines, no 原文： blocks.
 const looksLikeMindmapOutline = (text) => HkParsers.looksLikeMindmapOutline(text);
 
+// 把「延伸」區塊掛回對應的標註註解。對不上的丟回呼叫端，接在摘要後面。
+// 回傳 {attached, orphans[]}。
+const applyExtraToHighlights = async (extraText) => {
+  const blocks = HkParsers.parseExtraBlocks(extraText);
+  if (!blocks.length) return { attached: 0, orphans: [] };
+
+  const entries = await getStoredHighlights();
+  const indexed = entries.map((entry) => ({
+    entry,
+    key: HkParsers.looseKey(entry.text || ""),
+  }));
+
+  const label = t("ai.extraNotePrefix");
+  const orphans = [];
+  let attached = 0;
+
+  for (const block of blocks) {
+    const key = HkParsers.looseKey(block.text);
+    if (!key) continue;
+    // 先找完全相同，再退而求其次找互相包含的（AI 常只抄半句或多抄一句）。
+    const hit =
+      indexed.find((item) => item.key === key) ||
+      indexed.find(
+        (item) =>
+          item.key.length > 8 &&
+          (item.key.includes(key) || key.includes(item.key))
+      );
+    if (!hit) {
+      orphans.push(block);
+      continue;
+    }
+    const line = `${label}${block.extra}`;
+    const existing = (hit.entry.note || "").trim();
+    // 重複套用同一份回覆時不要疊加同一行。
+    if (existing.includes(block.extra)) continue;
+    const nextNote = existing ? `${existing}\n${line}` : line;
+    const ok = await updateHighlightEntry(hit.entry.id, { note: nextNote });
+    if (ok) {
+      hit.entry.note = nextNote;
+      setAllMarksMetadata(hit.entry.id, { note: nextNote });
+      attached += 1;
+    }
+  }
+  return { attached, orphans };
+};
+
 // 套用一段 AI 回應：智慧判斷重點／摘要／心智圖／標籤區塊並寫入。
 // 回傳結果摘要 {mindmap | highlight, noteImported, tagsAdded}；失敗會 throw。
 // ChatGPT 貼回（bridge）與 popup 直接貼上都共用這條。
@@ -2183,13 +2326,44 @@ const applyAiResponseSections = async (text, { type } = {}) => {
   }
 
   const highlightText = sections?.highlights ?? (type === "note" ? null : text);
-  const noteText = sections?.note ?? (type === "note" ? text : null);
+  const baseNote = sections?.note ?? (type === "note" ? text : null);
+  const extraText = sections?.extra?.trim();
 
   let highlight = null;
   if (highlightText) {
     setAiPanelStatus(t("ai.statusApplyingHighlights"));
     highlight = await applyHighlightResponseText(highlightText);
   }
+
+  // 延伸要在標註寫入之後才掛得上去（要先有 entry 才能寫 note）。
+  // 預覽模式下標註還沒真的落地，這時先不掛，整段退回摘要尾巴。
+  let extraAttached = 0;
+  let orphanText = "";
+  if (extraText) {
+    if (highlight?.previewing) {
+      orphanText = extraText;
+    } else {
+      try {
+        const res = await applyExtraToHighlights(extraText);
+        extraAttached = res.attached;
+        if (res.orphans.length) {
+          orphanText = res.orphans
+            .map((o) => `- ${o.text}\n  ${o.extra}`)
+            .join("\n");
+        }
+      } catch (extraError) {
+        console.debug("掛上延伸補充失敗", extraError);
+        orphanText = extraText;
+      }
+    }
+  }
+
+  // 對不上句子的延伸不要丟掉，接在摘要後面至少看得到。
+  const noteText =
+    orphanText && baseNote
+      ? `${baseNote.trim()}\n\n## ${t("ai.extraHeading")}\n${orphanText}`
+      : orphanText || baseNote;
+
   if (noteText) {
     await applyNotePayload(noteText);
   }
@@ -2216,7 +2390,12 @@ const applyAiResponseSections = async (text, { type } = {}) => {
   if (!highlightText && !noteText) {
     throw new Error(t("ai.errUnrecognized"));
   }
-  return { highlight, noteImported: Boolean(noteText), tagsAdded };
+  return {
+    highlight,
+    noteImported: Boolean(noteText),
+    tagsAdded,
+    extraAttached,
+  };
 };
 
 // 把套用結果組成一行可顯示的狀態文字（面板與 popup 共用）。
@@ -2224,9 +2403,11 @@ const summarizeAiApplyResult = (res) => {
   if (res?.mindmap) return t("mindmap.done");
   // 貼上的是別頁的分享筆記 → 前置提醒（原文文字在本頁可能找不到）。
   const otherPagePrefix = res.sharedOtherPage ? t("share.mdOtherPage") : "";
-  const tagSuffix = res.tagsAdded
-    ? t("ai.tagsImportedSuffix", { count: res.tagsAdded })
-    : "";
+  const tagSuffix =
+    (res.tagsAdded ? t("ai.tagsImportedSuffix", { count: res.tagsAdded }) : "") +
+    (res.extraAttached
+      ? t("ai.extraAttachedSuffix", { count: res.extraAttached })
+      : "");
   if (res.highlight?.previewing) {
     return (
       t("ai.statusPreviewN", { count: previewData.length }) +
@@ -2240,6 +2421,8 @@ const summarizeAiApplyResult = (res) => {
       parts.push(t("ai.skippedCount", { skipped: res.highlight.skippedCount }));
     if (res.noteImported) parts.push(t("ai.summaryImported"));
     if (res.tagsAdded) parts.push(t("ai.tagsImported", { count: res.tagsAdded }));
+    if (res.extraAttached)
+      parts.push(t("ai.extraAttached", { count: res.extraAttached }));
     return otherPagePrefix + parts.join("，");
   }
   return otherPagePrefix + t("ai.noteImported") + tagSuffix;
@@ -3661,7 +3844,38 @@ const createPanelEntryElement = (entry, options = {}) => {
   if (noteText) {
     const note = document.createElement("p");
     note.className = "hk-panel-item-note";
-    note.textContent = noteText;
+    // 註解可能有兩行（AI：重點 / 延伸：…）。分行渲染，延伸那行另外標色，
+    // 掃列表時一眼分得出「這是原文在講什麼」與「這是額外補的」。
+    const extraPrefix = t("ai.extraNotePrefix");
+    const sourcePrefix = t("ai.sourceNotePrefix");
+    noteText.split("\n").forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      // 來源：模型憑記憶寫的，一律當成「線索」而非事實。
+      // 做成搜尋連結——我們不信任模型給的網址，但可以幫他一鍵去查。
+      if (trimmed.startsWith(sourcePrefix)) {
+        const query = trimmed.slice(sourcePrefix.length).trim();
+        if (!query) return;
+        const link = document.createElement("a");
+        link.className = "hk-note-line hk-note-line-source";
+        link.href = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = `${sourcePrefix}${query}`;
+        link.title = t("ai.sourceSearchHint");
+        link.addEventListener("click", (event) => event.stopPropagation());
+        note.appendChild(link);
+        return;
+      }
+
+      const row = document.createElement("span");
+      row.className = trimmed.startsWith(extraPrefix)
+        ? "hk-note-line hk-note-line-extra"
+        : "hk-note-line";
+      row.textContent = trimmed;
+      note.appendChild(row);
+    });
     item.appendChild(note);
   }
 
@@ -3780,6 +3994,105 @@ const checkPendingFocusHighlight = async () => {
   } catch (error) {
     console.debug("聚焦指定標註失敗", error);
   }
+};
+
+// 掃過所有頁面的標註，把舊的飽和色換成對應的新淺色。回傳換掉的筆數。
+const recolorLegacyHighlights = async () => {
+  if (!storage) throw new Error(t("ai.errStorageUnavailable"));
+  const all = await storage.get(null);
+  const patch = {};
+  let changed = 0;
+
+  Object.entries(all || {}).forEach(([key, value]) => {
+    if (!/^https?:/i.test(key) || !Array.isArray(value)) return;
+    let touched = false;
+    const next = value.map((entry) => {
+      const mapped = LEGACY_COLOR_MAP[toHexColor(entry?.color || "")];
+      if (!mapped) return entry;
+      touched = true;
+      changed += 1;
+      return { ...entry, color: mapped };
+    });
+    if (touched) patch[key] = next;
+  });
+
+  if (!changed) return 0;
+  await storage.set(patch);
+
+  // 本頁的標記直接改色，不用重新整理。
+  document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach((el) => {
+    const mapped = LEGACY_COLOR_MAP[toHexColor(el.dataset?.hkColor || "")];
+    if (mapped) setHighlightMetadata(el, { color: mapped });
+  });
+  colorUsageCache = null;
+  return changed;
+};
+
+// 設定抽屜裡的色票管理（原本住在 popup，重做後移進面板）。
+const renderPanelPalette = () => {
+  const listEl = highlightPanelEls?.paletteList;
+  if (!listEl) return;
+  listEl.innerHTML = "";
+
+  if (!colorPalette.length) {
+    const empty = document.createElement("p");
+    empty.className = "hk-panel-palette-empty";
+    empty.textContent = t("popup.emptyPalette");
+    listEl.appendChild(empty);
+    return;
+  }
+
+  colorPalette.forEach((color, index) => {
+    const item = document.createElement("div");
+    item.className = "hk-panel-swatch-item";
+    if (color === currentColor) item.classList.add("is-active");
+
+    // 點色塊 = 設為之後畫重點的預設色
+    const useBtn = document.createElement("button");
+    useBtn.type = "button";
+    useBtn.className = "hk-panel-swatch";
+    useBtn.style.backgroundColor = color;
+    useBtn.title = t("popup.useColor", { color });
+    useBtn.addEventListener("click", async () => {
+      currentColor = color;
+      try {
+        await chrome.storage?.local.set({ hkLastColor: color });
+      } catch (error) {
+        console.debug("儲存預設顏色失敗", error);
+      }
+      renderPanelPalette();
+    });
+
+    const editInput = document.createElement("input");
+    editInput.type = "color";
+    editInput.className = "hk-panel-swatch-edit";
+    editInput.value = color;
+    editInput.title = t("popup.editColor", { color });
+    editInput.addEventListener("change", async (event) => {
+      const next = toHexColor(event.target.value);
+      const nextPalette = [...colorPalette];
+      nextPalette[index] = next;
+      await persistColorPalette(nextPalette);
+      renderPanelPalette();
+      renderHighlightMenuSwatches();
+    });
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "hk-panel-swatch-remove";
+    removeBtn.textContent = "×";
+    removeBtn.title = t("popup.deleteColorTitle", { color });
+    removeBtn.addEventListener("click", async () => {
+      await persistColorPalette(colorPalette.filter((_, i) => i !== index));
+      renderPanelPalette();
+      renderHighlightMenuSwatches();
+    });
+
+    item.appendChild(useBtn);
+    item.appendChild(editInput);
+    item.appendChild(removeBtn);
+    listEl.appendChild(item);
+  });
 };
 
 const ensureHighlightPanel = () => {
@@ -4358,8 +4671,23 @@ const ensureHighlightPanel = () => {
   });
   selOnlyCheckLabel.appendChild(selOnlyCheckbox);
   selOnlyCheckLabel.append("只標選取的文字");
+
+  // 延伸補充：Prompt 會多要一個「===延伸===」區塊，接在摘要後面。
+  const deepCheckLabel = document.createElement("label");
+  deepCheckLabel.className = "hk-panel-ai-check-row";
+  deepCheckLabel.title = t("panel.deepResearchHint");
+  const deepCheckbox = document.createElement("input");
+  deepCheckbox.type = "checkbox";
+  deepCheckbox.addEventListener("change", (e) => {
+    aiSettings.deepResearch = e.target.checked;
+    persistAISettings();
+  });
+  deepCheckLabel.appendChild(deepCheckbox);
+  deepCheckLabel.append(t("panel.deepResearch"));
+
   hlOptionsRow.appendChild(previewCheckLabel);
   hlOptionsRow.appendChild(selOnlyCheckLabel);
+  hlOptionsRow.appendChild(deepCheckLabel);
 
   aiHighlightBlock.appendChild(aiHlHead);
   aiHighlightBlock.appendChild(catField);
@@ -4661,6 +4989,73 @@ const ensureHighlightPanel = () => {
   aiCard.appendChild(aiStatus);
   aiCard.appendChild(aiCardSecondary);
 
+  // ── 色票管理（原本在 popup，重做後放進設定抽屜）────────
+  const paletteSection = document.createElement("div");
+  paletteSection.className = "hk-panel-palette";
+
+  const paletteList = document.createElement("div");
+  paletteList.className = "hk-panel-palette-list";
+
+  const paletteAddRow = document.createElement("div");
+  paletteAddRow.className = "hk-panel-palette-add";
+
+  const paletteAddInput = document.createElement("input");
+  paletteAddInput.type = "color";
+  paletteAddInput.className = "hk-panel-palette-input";
+  paletteAddInput.value = toHexColor(currentColor || DEFAULT_COLOR);
+
+  const paletteAddBtn = document.createElement("button");
+  paletteAddBtn.type = "button";
+  paletteAddBtn.className = "hk-panel-palette-add-btn";
+  paletteAddBtn.textContent = t("popup.addToPalette");
+  paletteAddBtn.addEventListener("click", async () => {
+    const color = toHexColor(paletteAddInput.value);
+    if (colorPalette.includes(color)) {
+      setAiPanelStatus(t("popup.statusDuplicate"), true);
+      return;
+    }
+    await persistColorPalette([...colorPalette, color]);
+    currentColor = color;
+    try {
+      await chrome.storage?.local.set({ hkLastColor: color });
+    } catch (error) {
+      console.debug("儲存預設顏色失敗", error);
+    }
+    renderPanelPalette();
+    renderHighlightMenuSwatches();
+  });
+
+  // 既有標註仍留著舊的飽和色 → 一鍵重上色（動到資料，先確認）。
+  const recolorBtn = document.createElement("button");
+  recolorBtn.type = "button";
+  recolorBtn.className = "hk-panel-palette-recolor";
+  recolorBtn.textContent = t("panel.recolorLegacy");
+  recolorBtn.title = t("panel.recolorLegacyHint");
+  recolorBtn.addEventListener("click", async () => {
+    if (!window.confirm(t("panel.recolorConfirm"))) return;
+    recolorBtn.disabled = true;
+    try {
+      const count = await recolorLegacyHighlights();
+      setAiPanelStatus(
+        count
+          ? t("panel.recolorDone", { count })
+          : t("panel.recolorNone"),
+        !count
+      );
+      if (count) await refreshHighlightPanelIfVisible();
+    } catch (error) {
+      setAiPanelStatus(error?.message || t("ai.errStorageAccess"), true);
+    } finally {
+      recolorBtn.disabled = false;
+    }
+  });
+
+  paletteAddRow.appendChild(paletteAddInput);
+  paletteAddRow.appendChild(paletteAddBtn);
+  paletteSection.appendChild(paletteList);
+  paletteSection.appendChild(paletteAddRow);
+  paletteSection.appendChild(recolorBtn);
+
   // ── Settings drawer (overlay, slides over the panel body) ─
   const drawer = document.createElement("div");
   drawer.className = "hk-panel-drawer";
@@ -4700,12 +5095,17 @@ const ensureHighlightPanel = () => {
   };
 
   const displaySection = makeDrawerSection("顯示", fontControls);
+  const paletteSectionWrap = makeDrawerSection(
+    t("popup.paletteTitle"),
+    paletteSection
+  );
   const pageToolsSection = makeDrawerSection("本頁工具", pageTagSection);
   const pageArchiveSectionWrap = makeDrawerSection("本頁備份", pageArchiveSection);
   const allArchiveSectionWrap = makeDrawerSection("全部備份", archiveSection);
   const aiSettingsWrap = makeDrawerSection("AI 服務", aiSettingsSection);
 
   drawerBody.appendChild(displaySection);
+  drawerBody.appendChild(paletteSectionWrap);
   drawerBody.appendChild(pageToolsSection);
   drawerBody.appendChild(pageArchiveSectionWrap);
   drawerBody.appendChild(allArchiveSectionWrap);
@@ -4763,6 +5163,8 @@ const ensureHighlightPanel = () => {
     drawer,
     drawerCloseBtn,
     toggleDrawer,
+    paletteList,
+    paletteAddInput,
     tabs,
     pageList,
     pagePlaceholder,
@@ -4807,6 +5209,7 @@ const ensureHighlightPanel = () => {
     aiCatList: catList,
     aiPreviewCheckbox: previewCheckbox,
     aiSelOnlyCheckbox: selOnlyCheckbox,
+    aiDeepResearchCheckbox: deepCheckbox,
     fontControls: {
       decrease: fontDecreaseBtn,
       increase: fontIncreaseBtn,
@@ -4876,6 +5279,10 @@ const ensureHighlightPanel = () => {
   updateExportButtonsState();
   applyAiSettingsToUI();
   applyHighlightPanelFontScale();
+  renderPanelPalette();
+  refreshPaletteFromStorage()
+    .then(() => renderPanelPalette())
+    .catch(() => {});
   setAiPanelStatus("");
   getStoredMindmaps()
     .then((maps) => updateMindmapAvailability(Boolean(maps[pageKey])))
@@ -5351,9 +5758,11 @@ chrome.storage?.onChanged.addListener((changes, areaName) => {
     } else {
       currentColor = DEFAULT_COLOR;
     }
+    renderPanelPalette();
   }
   if (changes.hkColorPalette) {
     setColorPaletteState(changes.hkColorPalette.newValue);
+    renderPanelPalette();
   }
   if (changes.hkPanelSide) {
     const nextSide =
@@ -6787,6 +7196,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     })();
     return true;
   }
+  if (message?.type === "BUILD_MINDMAP_PROMPT") {
+    // popup 的「改複製心智圖 Prompt」：與面板的心智圖鈕共用同一組 Prompt。
+    (async () => {
+      try {
+        const pageData = {
+          title: document.title,
+          url: pageKey,
+          pageText: getPagePlainText(),
+          highlights: await collectPageHighlights(),
+        };
+        const prompt = buildMindmapPrompt(pageData);
+        sendResponse({ success: true, prompt });
+      } catch (error) {
+        console.debug("建立心智圖 Prompt 失敗", error);
+        sendResponse({ success: false, error: error?.message || "無法建立 Prompt" });
+      }
+    })();
+    return true;
+  }
   if (message?.type === "APPLY_AI_RESPONSE") {
     // popup 直接貼上 AI 回覆 → 不用開面板就套用（重點／摘要／心智圖／標籤）。
     (async () => {
@@ -7379,7 +7807,7 @@ const renderGuidedBar = () => {
   if (!bar) return;
 
   const note = el.dataset.hkNote?.trim() ?? "";
-  const color = el.style.backgroundColor || "#ffeb3b";
+  const color = el.style.backgroundColor || "#fff5b8";
   const text = el.textContent?.trim() ?? "";
 
   bar.querySelector(".hk-guided-dot").style.backgroundColor = color;
