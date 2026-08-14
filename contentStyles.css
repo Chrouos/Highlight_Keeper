@@ -450,14 +450,14 @@
 }
 
 .hk-menu-btn-primary {
-  background-color: #d97706;
-  border-color: #d97706;
-  color: #ffffff;
+  background-color: #d97706 !important;
+  border-color: #d97706 !important;
+  color: #ffffff !important;
 }
 
 .hk-menu-btn-primary:hover {
-  background-color: #b45309;
-  border-color: #b45309;
+  background-color: #b45309 !important;
+  border-color: #b45309 !important;
 }
 
 .hk-menu-btn-primary:disabled {
