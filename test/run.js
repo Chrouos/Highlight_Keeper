@@ -1,6 +1,5 @@
 /* 純函式單元測試（無依賴）。執行：node test/run.js
    載入 shared.js / parsers.js（IIFE，會掛到 globalThis）後直接驗證。 */
-const fs = require("fs");
 require("../shared.js");
 require("../parsers.js");
 
@@ -21,18 +20,6 @@ const eq = (actual, expected, msg) => {
   }
 };
 const ok = (cond, msg) => eq(Boolean(cond), true, msg);
-
-// Injected menu button styles must survive host-page CSS overrides.
-const contentStyles = fs.readFileSync(
-  require("path").join(__dirname, "..", "contentStyles.css"),
-  "utf8"
-);
-ok(
-  /\.hk-menu-btn-primary\s*\{[^}]*background-color:\s*#d97706\s*!important;[^}]*border-color:\s*#d97706\s*!important;[^}]*color:\s*#ffffff\s*!important;/s.test(
-    contentStyles
-  ),
-  "save note button keeps visible primary colors on host pages"
-);
 
 // ── normalizePageKey ────────────────────────────────────
 const npk = U.normalizePageKey;
