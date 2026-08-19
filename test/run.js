@@ -2,6 +2,7 @@
    載入 shared.js / parsers.js（IIFE，會掛到 globalThis）後直接驗證。 */
 require("../shared.js");
 require("../parsers.js");
+require("../highlightDom.js");
 
 const U = globalThis.HkUrlKey;
 const P = globalThis.HkParsers;
@@ -20,6 +21,43 @@ const eq = (actual, expected, msg) => {
   }
 };
 const ok = (cond, msg) => eq(Boolean(cond), true, msg);
+
+// Chrome 對照翻譯會在原文外層插入 translated-ltr / translated-rtl，
+// 並可能以 <font style="vertical-align: inherit"> 包住翻譯文字。
+ok(
+  HkHighlightDom.shouldUseTextNodeWrapping(
+    {
+      documentElement: { classList: { contains: (name) => name === "translated-ltr" } },
+      body: null,
+    },
+    null
+  ),
+  "translated document uses text-node wrapping"
+);
+ok(
+  HkHighlightDom.shouldUseTextNodeWrapping(
+    {
+      documentElement: { classList: { contains: () => false } },
+      body: {
+        classList: { contains: () => false },
+        querySelector: (selector) =>
+          selector === 'font[style*="vertical-align"]' ? {} : null,
+      },
+    },
+    null
+  ),
+  "translated font wrapper uses text-node wrapping"
+);
+ok(
+  !HkHighlightDom.shouldUseTextNodeWrapping(
+    {
+      documentElement: { classList: { contains: () => false } },
+      body: { classList: { contains: () => false }, querySelector: () => null },
+    },
+    null
+  ),
+  "ordinary document keeps normal wrapping"
+);
 
 // ── normalizePageKey ────────────────────────────────────
 const npk = U.normalizePageKey;

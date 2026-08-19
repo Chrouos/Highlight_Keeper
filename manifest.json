@@ -35,7 +35,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["shared.js", "parsers.js", "i18n.js", "contentScript.js"],
+      "js": ["shared.js", "parsers.js", "i18n.js", "highlightDom.js", "contentScript.js"],
       "css": ["contentStyles.css"],
       "run_at": "document_idle"
     }

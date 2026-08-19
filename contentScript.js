@@ -27,6 +27,7 @@ const HkI18n = typeof window !== "undefined" ? window.HkI18n : null;
 const t = (key, params) => (HkI18n ? HkI18n.t(key, params) : key);
 // 純解析函式（manifest 內已於本檔前載入 parsers.js）
 const HkParsers = window.HkParsers;
+const HkHighlightDom = window.HkHighlightDom;
 HkI18n?.initI18n?.();
 // 語言切換時：面板是用 JS textContent 直接建立的，整個重建最單純可靠
 // （面板狀態 highlightPanelState 另外保存，分頁/側邊不受影響）。
@@ -6685,7 +6686,10 @@ const wrapRangeWithHighlight = (range, color, id) => {
   const startBlock = nearestBlockAncestor(range.startContainer);
   const endBlock = nearestBlockAncestor(range.endContainer);
 
-  if (startBlock === endBlock) {
+  const useTextNodeWrapping =
+    HkHighlightDom?.shouldUseTextNodeWrapping?.(document, range) ?? false;
+
+  if (startBlock === endBlock && !useTextNodeWrapping) {
     try {
       const mark = createHighlightElement(color, id);
       const extracted = range.extractContents();
