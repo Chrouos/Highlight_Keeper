@@ -50,6 +50,25 @@
     return false;
   };
 
+  const getTranslationLayer = (node) => {
+    let current = node?.nodeType === 1 ? node : node?.parentElement;
+    while (current) {
+      if (current.tagName === "FONT") {
+        const style = current.getAttribute?.("style") || "";
+        if (/vertical-align\s*:\s*inherit/i.test(style)) return current;
+      }
+      if (
+        current !== node?.ownerDocument?.documentElement &&
+        current !== node?.ownerDocument?.body &&
+        hasTranslatedClass(current)
+      ) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return null;
+  };
+
   const shouldUseTextNodeWrapping = (doc, range) => {
     if (isGoogleTranslatedDocument(doc)) return true;
     return [range?.startContainer, range?.endContainer].some(
@@ -62,6 +81,7 @@
 
   const api = {
     getHighlightMode,
+    getTranslationLayer,
     isGoogleTranslatedDocument,
     shouldUseTextNodeWrapping,
   };

@@ -88,6 +88,19 @@ eq(
   "ordinary document keeps inline highlights"
 );
 
+const translatedFont = {
+  nodeType: 1,
+  tagName: "FONT",
+  parentElement: null,
+  getAttribute: (name) =>
+    name === "style" ? "vertical-align: inherit" : null,
+};
+eq(
+  HkHighlightDom.getTranslationLayer(translatedFont),
+  translatedFont,
+  "translated text nodes expose their translation layer"
+);
+
 const npk = U.normalizePageKey;
 eq(
   npk("https://x.com/p/a?utm_source=mail&id=7#sec"),

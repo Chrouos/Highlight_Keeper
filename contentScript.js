@@ -6553,10 +6553,63 @@ const TRANSLATED_OVERLAY_CLASS = "hk-highlight-overlay";
 const translatedCssHighlightColors = new Map();
 let translatedCssHighlightStyle = null;
 
-const getTranslatedHighlightRects = (range) =>
-  Array.from(range?.getClientRects?.() ?? []).filter(
-    (rect) => rect.width > 0 && rect.height > 0
+const getTranslatedVisualRanges = (range) => {
+  const getLayer = HkHighlightDom?.getTranslationLayer;
+  if (typeof getLayer !== "function") return [range.cloneRange()];
+  const textNodes = getTextNodesInRange(range);
+  const layeredNodes = textNodes.filter((node) => getLayer(node));
+  if (!layeredNodes.length) return [range.cloneRange()];
+
+  const targetLayer = getLayer(range.startContainer);
+  const ranges = [];
+  textNodes.forEach((node) => {
+    if ((getLayer(node) || null) !== (targetLayer || null)) return;
+    let start = 0;
+    let end = node.length;
+    if (node === range.startContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
+      start = range.startOffset;
+    }
+    if (node === range.endContainer && range.endContainer.nodeType === Node.TEXT_NODE) {
+      end = range.endOffset;
+    }
+    if (start >= end) return;
+    const visualRange = document.createRange();
+    visualRange.setStart(node, start);
+    visualRange.setEnd(node, end);
+    ranges.push(visualRange);
+  });
+  return ranges.length ? ranges : [range.cloneRange()];
+};
+
+const getTranslatedHighlightRects = (rangeOrRanges) => {
+  const ranges = Array.isArray(rangeOrRanges)
+    ? rangeOrRanges
+    : [rangeOrRanges];
+  return ranges.flatMap((range) =>
+    Array.from(range?.getClientRects?.() ?? []).filter(
+      (rect) => rect.width > 0 && rect.height > 0
+    )
   );
+};
+
+const getTranslatedHighlightBounds = (entry) => {
+  const rects = getTranslatedHighlightRects(
+    entry?.visualRanges || entry?.range
+  );
+  if (!rects.length) return null;
+  const left = Math.min(...rects.map((rect) => rect.left));
+  const top = Math.min(...rects.map((rect) => rect.top));
+  const right = Math.max(...rects.map((rect) => rect.right));
+  const bottom = Math.max(...rects.map((rect) => rect.bottom));
+  return {
+    bottom,
+    height: bottom - top,
+    left,
+    right,
+    top,
+    width: right - left,
+  };
+};
 
 const supportsCssHighlights = () =>
   Boolean(
@@ -6596,7 +6649,9 @@ const renderTranslatedHighlightOverlay = (entry) => {
     rebuildTranslatedCssHighlightStyle();
     return true;
   }
-  const rects = getTranslatedHighlightRects(entry.range);
+  const rects = getTranslatedHighlightRects(
+    entry.visualRanges || entry.range
+  );
   entry.shadowRoot?.replaceChildren();
   rects.forEach((rect) => {
     const overlay = document.createElement("span");
@@ -6632,7 +6687,6 @@ const createTranslatedHighlightOverlay = (range, color, id) => {
   group.setAttribute("data-hk-overlay", "true");
   group.setAttribute("translate", "no");
   group.setAttribute("data-translate", "no");
-  group.dataset.hkText = range.toString().trim();
   group.setAttribute("aria-hidden", "true");
   group.style.setProperty("position", "fixed", "important");
   group.style.setProperty("left", "0", "important");
@@ -6649,13 +6703,18 @@ const createTranslatedHighlightOverlay = (range, color, id) => {
     id,
     note: "",
     range: range.cloneRange(),
+    visualRanges: getTranslatedVisualRanges(range),
     mode: supportsCssHighlights() ? "css" : "shadow",
     cssName: getTranslatedCssHighlightName(id),
     shadowRoot: null,
   };
+  group.dataset.hkText = entry.visualRanges
+    .map((visualRange) => visualRange.toString())
+    .join("")
+    .trim();
   if (entry.mode === "css") {
     try {
-      entry.cssHighlight = new globalThis.Highlight(entry.range.cloneRange());
+      entry.cssHighlight = new globalThis.Highlight(...entry.visualRanges);
       globalThis.CSS.highlights.set(entry.cssName, entry.cssHighlight);
     } catch (_error) {
       entry.mode = "shadow";
@@ -6706,7 +6765,7 @@ const getHighlightVisualRect = (highlightEl) => {
   const entry = translatedHighlightOverlays.get(
     highlightEl?.getAttribute?.(HIGHLIGHT_ATTR)
   );
-  if (entry?.mode === "css") return entry.range.getBoundingClientRect();
+  if (entry?.mode === "css") return getTranslatedHighlightBounds(entry);
   return getHighlightVisualElement(highlightEl)?.getBoundingClientRect?.();
 };
 
@@ -7352,7 +7411,7 @@ const findTranslatedHighlightAtPoint = (event) => {
   for (const entry of translatedHighlightOverlays.values()) {
     const rects =
       entry.mode === "css"
-        ? getTranslatedHighlightRects(entry.range)
+        ? getTranslatedHighlightRects(entry.visualRanges || entry.range)
         : [getHighlightVisualRect(entry.group)].filter(Boolean);
     for (const rect of rects) {
       if (
