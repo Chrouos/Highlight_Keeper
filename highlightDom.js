@@ -58,7 +58,7 @@
   };
 
   const getHighlightMode = (doc, range) =>
-    shouldUseTextNodeWrapping(doc, range) ? "overlay" : "inline";
+    shouldUseTextNodeWrapping(doc, range) ? "shadow-overlay" : "inline";
 
   const api = {
     getHighlightMode,

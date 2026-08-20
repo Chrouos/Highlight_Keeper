@@ -6559,7 +6559,7 @@ const getTranslatedHighlightRects = (range) =>
 const renderTranslatedHighlightOverlay = (entry) => {
   if (!entry?.group || !entry.range) return false;
   const rects = getTranslatedHighlightRects(entry.range);
-  entry.group.replaceChildren();
+  entry.shadowRoot?.replaceChildren();
   rects.forEach((rect) => {
     const overlay = document.createElement("span");
     overlay.className = `${HIGHLIGHT_CLASS} ${TRANSLATED_OVERLAY_CLASS}`;
@@ -6575,20 +6575,26 @@ const renderTranslatedHighlightOverlay = (entry) => {
     overlay.style.setProperty("display", "block", "important");
     overlay.style.setProperty("pointer-events", "none", "important");
     overlay.style.setProperty("z-index", "2147483646", "important");
+    overlay.style.setProperty("box-sizing", "border-box", "important");
+    overlay.style.setProperty("border-radius", "2px", "important");
+    overlay.style.setProperty("background-color", entry.color, "important");
     setHighlightMetadata(overlay, {
       color: entry.color,
       note: entry.note ?? "",
     });
-    entry.group.appendChild(overlay);
+    entry.shadowRoot?.appendChild(overlay);
   });
   return rects.length > 0;
 };
 
 const createTranslatedHighlightOverlay = (range, color, id) => {
   const group = document.createElement("span");
-  group.className = TRANSLATED_OVERLAY_GROUP_CLASS;
+  group.className = `${HIGHLIGHT_CLASS} ${TRANSLATED_OVERLAY_GROUP_CLASS}`;
+  const shadowRoot = group.attachShadow({ mode: "open" });
   group.setAttribute(HIGHLIGHT_ATTR, id);
   group.setAttribute("data-hk-overlay", "true");
+  group.setAttribute("translate", "no");
+  group.setAttribute("data-translate", "no");
   group.dataset.hkText = range.toString().trim();
   group.setAttribute("aria-hidden", "true");
   group.style.setProperty("position", "fixed", "important");
@@ -6598,6 +6604,7 @@ const createTranslatedHighlightOverlay = (range, color, id) => {
   group.style.setProperty("height", "0", "important");
   group.style.setProperty("pointer-events", "none", "important");
   group.style.setProperty("z-index", "2147483646", "important");
+  group.style.setProperty("contain", "strict", "important");
 
   const entry = {
     color,
@@ -6605,9 +6612,10 @@ const createTranslatedHighlightOverlay = (range, color, id) => {
     id,
     note: "",
     range: range.cloneRange(),
+    shadowRoot,
   };
   translatedHighlightOverlays.set(id, entry);
-  (document.body || document.documentElement).appendChild(group);
+  document.documentElement.appendChild(group);
   if (!renderTranslatedHighlightOverlay(entry)) {
     translatedHighlightOverlays.delete(id);
     group.remove();
@@ -6629,7 +6637,9 @@ const updateTranslatedHighlightOverlays = () => {
 const getHighlightVisualElement = (highlightEl) => {
   if (highlightEl?.classList?.contains(TRANSLATED_OVERLAY_GROUP_CLASS)) {
     return (
-      highlightEl.querySelector(`.${TRANSLATED_OVERLAY_CLASS}`) || highlightEl
+      translatedHighlightOverlays.get(
+        highlightEl.getAttribute(HIGHLIGHT_ATTR)
+      )?.shadowRoot?.querySelector(`.${TRANSLATED_OVERLAY_CLASS}`) || highlightEl
     );
   }
   return highlightEl;
@@ -6678,6 +6688,9 @@ const setHighlightMetadata = (element, { color, note }) => {
       element.removeAttribute("data-highlight-note");
     }
     if (overlayEntry) overlayEntry.note = trimmed;
+  }
+  if (overlayEntry && element === overlayEntry.group) {
+    renderTranslatedHighlightOverlay(overlayEntry);
   }
 };
 
@@ -6800,9 +6813,9 @@ const wrapRangeWithHighlight = (range, color, id) => {
   const highlightMode =
     HkHighlightDom?.getHighlightMode?.(document, range) ??
     (HkHighlightDom?.shouldUseTextNodeWrapping?.(document, range)
-      ? "overlay"
+      ? "shadow-overlay"
       : "inline");
-  if (highlightMode === "overlay") {
+  if (highlightMode === "shadow-overlay") {
     return createTranslatedHighlightOverlay(range, color, id);
   }
   // If range start and end are in the SAME block, use extractContents — one mark,
@@ -7268,9 +7281,11 @@ const findTranslatedHighlightAtPoint = (event) => {
   const x = event.clientX;
   const y = event.clientY;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  for (const overlay of document.querySelectorAll(
-    `.${TRANSLATED_OVERLAY_CLASS}`
-  )) {
+  for (const entry of translatedHighlightOverlays.values()) {
+    const overlay = entry.shadowRoot?.querySelector(
+      `.${TRANSLATED_OVERLAY_CLASS}`
+    );
+    if (!overlay) continue;
     const rect = overlay.getBoundingClientRect();
     if (
       x >= rect.left &&
