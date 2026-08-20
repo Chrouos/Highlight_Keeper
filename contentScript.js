@@ -6550,14 +6550,52 @@ const resolveRangeSnapshot = (snapshot) => {
 const translatedHighlightOverlays = new Map();
 const TRANSLATED_OVERLAY_GROUP_CLASS = "hk-highlight-overlay-group";
 const TRANSLATED_OVERLAY_CLASS = "hk-highlight-overlay";
+const translatedCssHighlightColors = new Map();
+let translatedCssHighlightStyle = null;
 
 const getTranslatedHighlightRects = (range) =>
   Array.from(range?.getClientRects?.() ?? []).filter(
     (rect) => rect.width > 0 && rect.height > 0
   );
 
+const supportsCssHighlights = () =>
+  Boolean(
+    globalThis.CSS?.highlights && typeof globalThis.Highlight === "function"
+  );
+
+const getTranslatedCssHighlightName = (id) =>
+  `hkText_${String(id).replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+
+const rebuildTranslatedCssHighlightStyle = () => {
+  if (!translatedCssHighlightColors.size) {
+    translatedCssHighlightStyle?.remove();
+    translatedCssHighlightStyle = null;
+    return;
+  }
+  if (!translatedCssHighlightStyle) {
+    translatedCssHighlightStyle = document.createElement("style");
+    translatedCssHighlightStyle.setAttribute("translate", "no");
+    translatedCssHighlightStyle.setAttribute("data-translate", "no");
+    (document.head || document.documentElement).appendChild(
+      translatedCssHighlightStyle
+    );
+  }
+  translatedCssHighlightStyle.textContent = Array.from(
+    translatedCssHighlightColors,
+    ([name, color]) =>
+      `::highlight(${name}) { background-color: ${toHexColor(
+        color
+      )}; color: inherit; }`
+  ).join("\n");
+};
+
 const renderTranslatedHighlightOverlay = (entry) => {
   if (!entry?.group || !entry.range) return false;
+  if (entry.mode === "css") {
+    translatedCssHighlightColors.set(entry.cssName, entry.color);
+    rebuildTranslatedCssHighlightStyle();
+    return true;
+  }
   const rects = getTranslatedHighlightRects(entry.range);
   entry.shadowRoot?.replaceChildren();
   rects.forEach((rect) => {
@@ -6590,7 +6628,6 @@ const renderTranslatedHighlightOverlay = (entry) => {
 const createTranslatedHighlightOverlay = (range, color, id) => {
   const group = document.createElement("span");
   group.className = `${HIGHLIGHT_CLASS} ${TRANSLATED_OVERLAY_GROUP_CLASS}`;
-  const shadowRoot = group.attachShadow({ mode: "open" });
   group.setAttribute(HIGHLIGHT_ATTR, id);
   group.setAttribute("data-hk-overlay", "true");
   group.setAttribute("translate", "no");
@@ -6612,11 +6649,29 @@ const createTranslatedHighlightOverlay = (range, color, id) => {
     id,
     note: "",
     range: range.cloneRange(),
-    shadowRoot,
+    mode: supportsCssHighlights() ? "css" : "shadow",
+    cssName: getTranslatedCssHighlightName(id),
+    shadowRoot: null,
   };
+  if (entry.mode === "css") {
+    try {
+      entry.cssHighlight = new globalThis.Highlight(entry.range.cloneRange());
+      globalThis.CSS.highlights.set(entry.cssName, entry.cssHighlight);
+    } catch (_error) {
+      entry.mode = "shadow";
+    }
+  }
+  if (entry.mode === "shadow") {
+    entry.shadowRoot = group.attachShadow({ mode: "open" });
+  }
   translatedHighlightOverlays.set(id, entry);
   document.documentElement.appendChild(group);
   if (!renderTranslatedHighlightOverlay(entry)) {
+    if (entry.mode === "css") {
+      globalThis.CSS.highlights.delete(entry.cssName);
+      translatedCssHighlightColors.delete(entry.cssName);
+      rebuildTranslatedCssHighlightStyle();
+    }
     translatedHighlightOverlays.delete(id);
     group.remove();
     return null;
@@ -6630,23 +6685,30 @@ const updateTranslatedHighlightOverlays = () => {
       translatedHighlightOverlays.delete(id);
       return;
     }
-    renderTranslatedHighlightOverlay(entry);
+    if (entry.mode !== "css") renderTranslatedHighlightOverlay(entry);
   });
 };
 
 const getHighlightVisualElement = (highlightEl) => {
   if (highlightEl?.classList?.contains(TRANSLATED_OVERLAY_GROUP_CLASS)) {
-    return (
-      translatedHighlightOverlays.get(
-        highlightEl.getAttribute(HIGHLIGHT_ATTR)
-      )?.shadowRoot?.querySelector(`.${TRANSLATED_OVERLAY_CLASS}`) || highlightEl
+    const entry = translatedHighlightOverlays.get(
+      highlightEl.getAttribute(HIGHLIGHT_ATTR)
     );
+    if (entry?.mode === "shadow") {
+      return entry.shadowRoot?.querySelector(`.${TRANSLATED_OVERLAY_CLASS}`);
+    }
+    return highlightEl;
   }
   return highlightEl;
 };
 
-const getHighlightVisualRect = (highlightEl) =>
-  getHighlightVisualElement(highlightEl)?.getBoundingClientRect?.();
+const getHighlightVisualRect = (highlightEl) => {
+  const entry = translatedHighlightOverlays.get(
+    highlightEl?.getAttribute?.(HIGHLIGHT_ATTR)
+  );
+  if (entry?.mode === "css") return entry.range.getBoundingClientRect();
+  return getHighlightVisualElement(highlightEl)?.getBoundingClientRect?.();
+};
 
 const getHighlightText = (highlightEl) =>
   highlightEl?.dataset?.hkText || highlightEl?.textContent?.trim() || "";
@@ -6709,6 +6771,12 @@ const unwrapHighlightElement = (highlightEl) => {
     : highlightEl.closest?.(`.${TRANSLATED_OVERLAY_GROUP_CLASS}`);
   if (overlayGroup) {
     const id = overlayGroup.getAttribute(HIGHLIGHT_ATTR);
+    const entry = id ? translatedHighlightOverlays.get(id) : null;
+    if (entry?.mode === "css") {
+      globalThis.CSS?.highlights?.delete(entry.cssName);
+      translatedCssHighlightColors.delete(entry.cssName);
+      rebuildTranslatedCssHighlightStyle();
+    }
     if (id) translatedHighlightOverlays.delete(id);
     overlayGroup.remove();
     return;
@@ -6813,9 +6881,9 @@ const wrapRangeWithHighlight = (range, color, id) => {
   const highlightMode =
     HkHighlightDom?.getHighlightMode?.(document, range) ??
     (HkHighlightDom?.shouldUseTextNodeWrapping?.(document, range)
-      ? "shadow-overlay"
+      ? "css-highlight"
       : "inline");
-  if (highlightMode === "shadow-overlay") {
+  if (highlightMode === "css-highlight") {
     return createTranslatedHighlightOverlay(range, color, id);
   }
   // If range start and end are in the SAME block, use extractContents — one mark,
@@ -7282,18 +7350,19 @@ const findTranslatedHighlightAtPoint = (event) => {
   const y = event.clientY;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   for (const entry of translatedHighlightOverlays.values()) {
-    const overlay = entry.shadowRoot?.querySelector(
-      `.${TRANSLATED_OVERLAY_CLASS}`
-    );
-    if (!overlay) continue;
-    const rect = overlay.getBoundingClientRect();
-    if (
-      x >= rect.left &&
-      x <= rect.right &&
-      y >= rect.top &&
-      y <= rect.bottom
-    ) {
-      return overlay.closest(`.${TRANSLATED_OVERLAY_GROUP_CLASS}`) || overlay;
+    const rects =
+      entry.mode === "css"
+        ? getTranslatedHighlightRects(entry.range)
+        : [getHighlightVisualRect(entry.group)].filter(Boolean);
+    for (const rect of rects) {
+      if (
+        x >= rect.left &&
+        x <= rect.right &&
+        y >= rect.top &&
+        y <= rect.bottom
+      ) {
+        return entry.group;
+      }
     }
   }
   return null;

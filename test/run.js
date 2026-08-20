@@ -70,8 +70,8 @@ eq(
     },
     null
   ),
-  "shadow-overlay",
-  "translated document uses isolated non-mutating overlay highlights"
+  "css-highlight",
+  "translated document uses text-background highlights"
 );
 eq(
   HkHighlightDom.getHighlightMode(
