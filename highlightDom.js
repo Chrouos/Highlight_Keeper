@@ -57,7 +57,11 @@
     );
   };
 
+  const getHighlightMode = (doc, range) =>
+    shouldUseTextNodeWrapping(doc, range) ? "overlay" : "inline";
+
   const api = {
+    getHighlightMode,
     isGoogleTranslatedDocument,
     shouldUseTextNodeWrapping,
   };

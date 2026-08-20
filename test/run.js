@@ -60,6 +60,34 @@ ok(
 );
 
 // ── normalizePageKey ────────────────────────────────────
+eq(
+  HkHighlightDom.getHighlightMode(
+    {
+      documentElement: {
+        classList: { contains: (name) => name === "translated-ltr" },
+      },
+      body: null,
+    },
+    null
+  ),
+  "overlay",
+  "translated document uses non-mutating overlay highlights"
+);
+eq(
+  HkHighlightDom.getHighlightMode(
+    {
+      documentElement: { classList: { contains: () => false } },
+      body: {
+        classList: { contains: () => false },
+        querySelector: () => null,
+      },
+    },
+    null
+  ),
+  "inline",
+  "ordinary document keeps inline highlights"
+);
+
 const npk = U.normalizePageKey;
 eq(
   npk("https://x.com/p/a?utm_source=mail&id=7#sec"),

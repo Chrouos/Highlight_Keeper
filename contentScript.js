@@ -3969,10 +3969,14 @@ const focusHighlightElement = (id) => {
   const element = document.querySelector(`[${HIGHLIGHT_ATTR}="${id}"]`);
   if (!element) return;
   closeHighlightMenu();
-  element.scrollIntoView({ behavior: "smooth", block: "center" });
-  element.classList.add("hk-highlight-focus");
+  const scrollTarget =
+    translatedHighlightOverlays.get(id)?.range?.startContainer?.parentElement ||
+    getHighlightVisualElement(element);
+  scrollTarget?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  const focusElement = getHighlightVisualElement(element);
+  focusElement?.classList.add("hk-highlight-focus");
   window.setTimeout(() => {
-    element.classList.remove("hk-highlight-focus");
+    focusElement?.classList.remove("hk-highlight-focus");
   }, 1600);
 };
 
@@ -5578,9 +5582,9 @@ const ensureHighlightMenu = () => {
   menuTranslateBtn.title = t("detail.translateTitle");
   menuTranslateBtn.addEventListener("click", () => {
     if (!activeHighlight) return;
-    const text = activeHighlight.textContent?.trim();
+    const text = getHighlightText(activeHighlight);
     if (!text) return;
-    const rect = activeHighlight.getBoundingClientRect();
+    const rect = getHighlightVisualRect(activeHighlight);
     showTranslateCard(text, rect, activeHighlight);
   });
   noteLabel.appendChild(menuTranslateBtn);
@@ -5656,7 +5660,8 @@ const positionHighlightMenu = (highlightEl) => {
   menu.style.display = "flex";
 
   window.requestAnimationFrame(() => {
-    const rect = highlightEl.getBoundingClientRect();
+    const rect = getHighlightVisualRect(highlightEl);
+    if (!rect) return;
     const menuRect = menu.getBoundingClientRect();
     let top = rect.bottom + margin;
     let left = rect.left;
@@ -6542,6 +6547,100 @@ const resolveRangeSnapshot = (snapshot) => {
   return { range: null, snapshot, updated: false };
 };
 
+const translatedHighlightOverlays = new Map();
+const TRANSLATED_OVERLAY_GROUP_CLASS = "hk-highlight-overlay-group";
+const TRANSLATED_OVERLAY_CLASS = "hk-highlight-overlay";
+
+const getTranslatedHighlightRects = (range) =>
+  Array.from(range?.getClientRects?.() ?? []).filter(
+    (rect) => rect.width > 0 && rect.height > 0
+  );
+
+const renderTranslatedHighlightOverlay = (entry) => {
+  if (!entry?.group || !entry.range) return false;
+  const rects = getTranslatedHighlightRects(entry.range);
+  entry.group.replaceChildren();
+  rects.forEach((rect) => {
+    const overlay = document.createElement("span");
+    overlay.className = `${HIGHLIGHT_CLASS} ${TRANSLATED_OVERLAY_CLASS}`;
+    overlay.setAttribute(HIGHLIGHT_ATTR, entry.id);
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.style.setProperty("position", "fixed", "important");
+    overlay.style.setProperty("left", `${rect.left}px`, "important");
+    overlay.style.setProperty("top", `${rect.top}px`, "important");
+    overlay.style.setProperty("width", `${rect.width}px`, "important");
+    overlay.style.setProperty("height", `${rect.height}px`, "important");
+    overlay.style.setProperty("padding", "0", "important");
+    overlay.style.setProperty("margin", "0", "important");
+    overlay.style.setProperty("display", "block", "important");
+    overlay.style.setProperty("pointer-events", "none", "important");
+    overlay.style.setProperty("z-index", "2147483646", "important");
+    setHighlightMetadata(overlay, {
+      color: entry.color,
+      note: entry.note ?? "",
+    });
+    entry.group.appendChild(overlay);
+  });
+  return rects.length > 0;
+};
+
+const createTranslatedHighlightOverlay = (range, color, id) => {
+  const group = document.createElement("span");
+  group.className = TRANSLATED_OVERLAY_GROUP_CLASS;
+  group.setAttribute(HIGHLIGHT_ATTR, id);
+  group.setAttribute("data-hk-overlay", "true");
+  group.dataset.hkText = range.toString().trim();
+  group.setAttribute("aria-hidden", "true");
+  group.style.setProperty("position", "fixed", "important");
+  group.style.setProperty("left", "0", "important");
+  group.style.setProperty("top", "0", "important");
+  group.style.setProperty("width", "0", "important");
+  group.style.setProperty("height", "0", "important");
+  group.style.setProperty("pointer-events", "none", "important");
+  group.style.setProperty("z-index", "2147483646", "important");
+
+  const entry = {
+    color,
+    group,
+    id,
+    note: "",
+    range: range.cloneRange(),
+  };
+  translatedHighlightOverlays.set(id, entry);
+  (document.body || document.documentElement).appendChild(group);
+  if (!renderTranslatedHighlightOverlay(entry)) {
+    translatedHighlightOverlays.delete(id);
+    group.remove();
+    return null;
+  }
+  return group;
+};
+
+const updateTranslatedHighlightOverlays = () => {
+  translatedHighlightOverlays.forEach((entry, id) => {
+    if (!entry.group.isConnected) {
+      translatedHighlightOverlays.delete(id);
+      return;
+    }
+    renderTranslatedHighlightOverlay(entry);
+  });
+};
+
+const getHighlightVisualElement = (highlightEl) => {
+  if (highlightEl?.classList?.contains(TRANSLATED_OVERLAY_GROUP_CLASS)) {
+    return (
+      highlightEl.querySelector(`.${TRANSLATED_OVERLAY_CLASS}`) || highlightEl
+    );
+  }
+  return highlightEl;
+};
+
+const getHighlightVisualRect = (highlightEl) =>
+  getHighlightVisualElement(highlightEl)?.getBoundingClientRect?.();
+
+const getHighlightText = (highlightEl) =>
+  highlightEl?.dataset?.hkText || highlightEl?.textContent?.trim() || "";
+
 const createHighlightElement = (color, id) => {
   const mark = document.createElement("mark");
   mark.className = HIGHLIGHT_CLASS;
@@ -6556,9 +6655,14 @@ const createHighlightElement = (color, id) => {
 
 const setHighlightMetadata = (element, { color, note }) => {
   if (!element) return;
+  const overlayId = element.getAttribute?.(HIGHLIGHT_ATTR);
+  const overlayEntry = overlayId
+    ? translatedHighlightOverlays.get(overlayId)
+    : null;
   if (color) {
     element.style.backgroundColor = color;
     element.style.setProperty("--hk-highlight-color", color);
+    if (overlayEntry) overlayEntry.color = color;
     if (element.dataset) {
       element.dataset.hkColor = color;
     }
@@ -6573,6 +6677,7 @@ const setHighlightMetadata = (element, { color, note }) => {
       delete element.dataset.hkNote;
       element.removeAttribute("data-highlight-note");
     }
+    if (overlayEntry) overlayEntry.note = trimmed;
   }
 };
 
@@ -6584,6 +6689,17 @@ const setAllMarksMetadata = (id, meta) => {
 
 const unwrapHighlightElement = (highlightEl) => {
   if (!highlightEl) return;
+  const overlayGroup = highlightEl.classList?.contains(
+    TRANSLATED_OVERLAY_GROUP_CLASS
+  )
+    ? highlightEl
+    : highlightEl.closest?.(`.${TRANSLATED_OVERLAY_GROUP_CLASS}`);
+  if (overlayGroup) {
+    const id = overlayGroup.getAttribute(HIGHLIGHT_ATTR);
+    if (id) translatedHighlightOverlays.delete(id);
+    overlayGroup.remove();
+    return;
+  }
   const parent = highlightEl.parentNode;
   if (!parent) {
     highlightEl.remove();
@@ -6681,6 +6797,14 @@ const wrapRangeWithHighlight = (range, color, id) => {
   // 先把兩端空白縮掉，否則尾端空白會讓背景／下線多出來一截。
   trimRangeWhitespace(range);
   if (range.collapsed) return null;
+  const highlightMode =
+    HkHighlightDom?.getHighlightMode?.(document, range) ??
+    (HkHighlightDom?.shouldUseTextNodeWrapping?.(document, range)
+      ? "overlay"
+      : "inline");
+  if (highlightMode === "overlay") {
+    return createTranslatedHighlightOverlay(range, color, id);
+  }
   // If range start and end are in the SAME block, use extractContents — one mark,
   // handles <em>/<strong>/injected spans correctly without breaking anything.
   const startBlock = nearestBlockAncestor(range.startContainer);
@@ -7140,10 +7264,32 @@ const handleSelectionIntent = () => {
   }, 60);
 };
 
+const findTranslatedHighlightAtPoint = (event) => {
+  const x = event.clientX;
+  const y = event.clientY;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  for (const overlay of document.querySelectorAll(
+    `.${TRANSLATED_OVERLAY_CLASS}`
+  )) {
+    const rect = overlay.getBoundingClientRect();
+    if (
+      x >= rect.left &&
+      x <= rect.right &&
+      y >= rect.top &&
+      y <= rect.bottom
+    ) {
+      return overlay.closest(`.${TRANSLATED_OVERLAY_GROUP_CLASS}`) || overlay;
+    }
+  }
+  return null;
+};
+
 const handleHighlightClick = (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
-  const highlightEl = target.closest(`.${HIGHLIGHT_CLASS}`);
+  const highlightEl =
+    target.closest(`.${HIGHLIGHT_CLASS}`) ||
+    findTranslatedHighlightAtPoint(event);
   if (!highlightEl) return;
   event.preventDefault();
   event.stopPropagation();
@@ -7943,6 +8089,7 @@ document.addEventListener(
 window.addEventListener(
   "scroll",
   (event) => {
+    updateTranslatedHighlightOverlays();
     // Ignore internal scrolling inside the highlight menu (e.g. scrolling the
     // note textarea after pasting a long note), otherwise the menu would close
     // the moment the textarea overflows.
@@ -7963,6 +8110,7 @@ window.addEventListener(
 window.addEventListener(
   "resize",
   () => {
+    updateTranslatedHighlightOverlays();
     closeHighlightMenu();
     // No data changed on resize — just keep the floating panel inside the
     // viewport. (A full re-render here re-read all of storage and caused
