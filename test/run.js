@@ -100,6 +100,16 @@ eq(
   translatedFont,
   "translated text nodes expose their translation layer"
 );
+eq(
+  HkHighlightDom.getDominantTextScript("Tinker, a service for fine-tuning"),
+  "latin",
+  "Latin selection text is classified correctly"
+);
+eq(
+  HkHighlightDom.getDominantTextScript("一項用於微調開放模式的服務"),
+  "cjk",
+  "CJK selection text is classified correctly"
+);
 
 const npk = U.normalizePageKey;
 eq(

@@ -6555,15 +6555,29 @@ let translatedCssHighlightStyle = null;
 
 const getTranslatedVisualRanges = (range) => {
   const getLayer = HkHighlightDom?.getTranslationLayer;
+  const getScript = HkHighlightDom?.getDominantTextScript;
   if (typeof getLayer !== "function") return [range.cloneRange()];
   const textNodes = getTextNodesInRange(range);
   const layeredNodes = textNodes.filter((node) => getLayer(node));
-  if (!layeredNodes.length) return [range.cloneRange()];
+  const translatedDocument = Boolean(
+    HkHighlightDom?.isGoogleTranslatedDocument?.(document)
+  );
+  if (!layeredNodes.length && !translatedDocument) return [range.cloneRange()];
 
   const targetLayer = getLayer(range.startContainer);
+  const startText =
+    range.startContainer?.nodeType === Node.TEXT_NODE
+      ? range.startContainer.nodeValue?.slice(range.startOffset)
+      : textNodes[0]?.nodeValue || "";
+  const targetScript =
+    typeof getScript === "function" ? getScript(startText) : "other";
   const ranges = [];
   textNodes.forEach((node) => {
     if ((getLayer(node) || null) !== (targetLayer || null)) return;
+    if (translatedDocument && targetScript !== "other" && typeof getScript === "function") {
+      const nodeScript = getScript(node.nodeValue || "");
+      if (nodeScript !== "other" && nodeScript !== targetScript) return;
+    }
     let start = 0;
     let end = node.length;
     if (node === range.startContainer && range.startContainer.nodeType === Node.TEXT_NODE) {

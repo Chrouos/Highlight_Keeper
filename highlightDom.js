@@ -69,6 +69,16 @@
     return null;
   };
 
+  const getDominantTextScript = (text) => {
+    const value = typeof text === "string" ? text : "";
+    const cjkCount = (value.match(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g) || [])
+      .length;
+    const latinCount = (value.match(/[A-Za-z]/g) || []).length;
+    if (cjkCount > latinCount && cjkCount > 0) return "cjk";
+    if (latinCount > 0) return "latin";
+    return "other";
+  };
+
   const shouldUseTextNodeWrapping = (doc, range) => {
     if (isGoogleTranslatedDocument(doc)) return true;
     return [range?.startContainer, range?.endContainer].some(
@@ -81,6 +91,7 @@
 
   const api = {
     getHighlightMode,
+    getDominantTextScript,
     getTranslationLayer,
     isGoogleTranslatedDocument,
     shouldUseTextNodeWrapping,
