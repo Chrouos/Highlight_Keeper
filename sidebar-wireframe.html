@@ -18,8 +18,9 @@
     .page { margin: 4px 0 0; overflow-wrap: anywhere; }
     button { border: 1px solid #ddd; border-radius: 7px; padding: 7px 10px; background: white; color: inherit; cursor: pointer; }
     nav { display: flex; gap: 6px; margin: 14px 0; }
-    nav button { flex: 1; padding-inline: 5px; font-size: 12px; }
+    nav button { flex: 1; padding-inline: 3px; font-size: 11px; white-space: nowrap; }
     nav button[aria-selected="true"] { background: #f0f5ff; border-color: #b8cdf5; color: #234b88; }
+    .count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 3px; padding: 0 4px; border-radius: 999px; background: #f1f1ef; color: #777; font-size: 10px; line-height: 1; }
     section { margin: 14px 0; padding: 14px; border: 1px solid #e9e9e6; border-radius: 9px; }
     [role="tabpanel"][hidden] { display: none; }
     .term { display: inline-block; padding: 0 4px; border-radius: 3px; background: #fff1b5; }
@@ -38,8 +39,9 @@
     </header>
     <nav role="tablist" aria-label="側邊欄分頁">
       <button type="button" role="tab" id="tab-context" aria-controls="pane-context" aria-selected="true">脈絡</button>
-      <button type="button" role="tab" id="tab-terms" aria-controls="pane-terms" aria-selected="false">名詞 3</button>
-      <button type="button" role="tab" id="tab-highlights" aria-controls="pane-highlights" aria-selected="false">標註 4</button>
+      <button type="button" role="tab" id="tab-terms" aria-controls="pane-terms" aria-selected="false">專有名詞 <span class="count">3</span></button>
+      <button type="button" role="tab" id="tab-highlights" aria-controls="pane-highlights" aria-selected="false">重點標註 <span class="count">4</span></button>
+      <button type="button" role="tab" id="tab-notes" aria-controls="pane-notes" aria-selected="false">我的筆記</button>
     </nav>
     <div role="tabpanel" id="pane-context" aria-labelledby="tab-context">
       <section>
@@ -78,7 +80,14 @@
         </article>
       </section>
     </div>
-    <p class="muted">三種內容分開顯示；切換分頁時仍保留目前頁面的筆記。</p>
+    <div role="tabpanel" id="pane-notes" aria-labelledby="tab-notes" hidden>
+      <section>
+        <h2>我的筆記</h2>
+        <textarea aria-label="我的文章筆記" rows="14" placeholder="記下自己的想法、問題或待查資料……" style="width:100%;resize:vertical;border:0;outline:0;font:inherit;line-height:1.7"></textarea>
+        <p class="muted">自動儲存到本機，只屬於這篇文章；不會併入 AI 摘要。</p>
+      </section>
+    </div>
+    <p class="muted">切換分頁時仍保留目前文章的內容。</p>
   </main>
   <script>
     document.querySelectorAll('[role="tab"]').forEach((tab) => {
