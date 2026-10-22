@@ -105,6 +105,8 @@ const aiModeLabel = (provider) => {
   switch (provider) {
     case "gemini":
       return t("popup.aiModeGemini");
+    case "gemini-web":
+      return t("popup.aiModeGeminiWeb");
     case "chatgpt":
       return t("popup.aiModeCopy");
     case "openai":
@@ -134,7 +136,7 @@ const resolveCurrentPageKey = async () => {
 const loadPageInfo = async () => {
   try {
     const stored = await chrome.storage?.local.get("hkAISettings");
-    const provider = stored?.hkAISettings?.provider || "openai";
+    const provider = stored?.hkAISettings?.provider || "chatgpt";
     if (els.aiMode) els.aiMode.textContent = aiModeLabel(provider);
   } catch (_e) {
     if (els.aiMode) els.aiMode.textContent = "—";

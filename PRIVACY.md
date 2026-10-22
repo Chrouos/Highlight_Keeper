@@ -12,7 +12,8 @@ Highlight Keeper 由使用者自行管理資料，預設不會收集、傳輸或
 - 若使用者手動設定 GitHub Token 與儲存庫並執行「上傳/下載」，備份檔才會透過 GitHub API 傳輸，僅用於備份／還原，不與其他第三方分享。
 
 ## 選用的 AI 功能
-- 使用者啟動 AI 導覽時，當前頁面全文與既有標註會傳送到所選的 OpenAI 或 Gemini API。ChatGPT 流程由使用者自行複製 Prompt、貼上並送出。
+- AI 預設使用 ChatGPT 網頁版，也可選 Gemini 網頁版。只有使用者點擊並自行貼上、送出 Prompt 時，當前頁面全文與既有標註才會交給所選網頁服務處理。
+- 若使用者選擇直接 API 模式，當前頁面全文與既有標註會傳送到所選的 OpenAI 或 Gemini API。
 - 個人筆記留在 `chrome.storage.local`，預設不會加入任何 AI 請求。使用者手動匯出或分享時，內容會依其選擇包含在檔案或連結中。
 - API Key 僅存於本機。
 

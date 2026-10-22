@@ -62,7 +62,7 @@
     Object.entries(AI_SECTION_ALIASES).forEach(([key, names]) => {
       names.forEach((name) => aliasToKey.set(name.toLowerCase(), key));
     });
-    const headRe = /^\s*(?:[=＝—-]{2,}|[【\[]|#{2,4})\s*([^=＝【】\[\]#\s]{1,14})\s*(?:[=＝—-]{2,}|[】\]])?\s*$/;
+    const headRe = /^\s*(?:[=＝—-]{2,}|[【\[]|#{1,6})\s*([^=＝【】\[\]#\s]{1,14})\s*(?:[=＝—-]{2,}|[】\]])?\s*$/;
     const sections = {};
     let currentKey = null;
     let buffer = [];
@@ -73,7 +73,8 @@
       if (body) sections[currentKey] = body;
     };
     for (const line of rawText.split(/\r?\n/)) {
-      const match = line.match(headRe);
+      if (/^\s*(?:```|~~~)/.test(line)) continue;
+      const match = line.replace(/\*\*|__/g, "").match(headRe);
       const key = match ? aliasToKey.get(match[1].trim().toLowerCase()) : undefined;
       if (key) {
         flush();
@@ -136,6 +137,17 @@
 
   // 解析「原文：／#分類／重點：」三行式區塊（中英雙語前綴皆認）。
   // deps: { categories[], toHexColor(fn), defaultColor }
+  const normalizeAiFieldLine = (line) => String(line || "")
+    .trim()
+    .replace(/^[-*+•]\s+/, "")
+    .replace(/^\d+[.)、]\s*/, "")
+    .replace(/\*\*|__/g, "")
+    .replace(/`([^`]+)`/g, "$1");
+
+  const cleanAiQuote = (value) => String(value || "").trim()
+    .replace(/^(?:「([\s\S]*)」|“([\s\S]*)”|"([\s\S]*)")$/, (_all, a, b, c) => a ?? b ?? c)
+    .trim();
+
   const parseHighlightBlocks = (rawText, deps = {}) => {
     if (typeof rawText !== "string" || !rawText.trim()) return [];
     const toHexColor =
@@ -167,33 +179,40 @@
     };
 
     const items = [];
-    const blocks = rawText.split(/\n\s*\n/);
-    for (const block of blocks) {
-      const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
-      let text = "";
-      let tag = "";
-      let reason = "";
-      let extra = "";
-      let source = "";
+    // A new quote starts a record. Blank lines inside an AI reply are formatting,
+    // not record boundaries: ChatGPT often inserts one between every field.
+    let text = "", tag = "", reason = "", extra = "", source = "", lastField = "";
+    const flush = () => {
+      if (!text) return;
+      const cleanSource = /^(無|沒有|none|n\/a|-|—)$/i.test(source.trim()) ? "" : source.trim();
+      items.push({ text, color: resolveColor(tag), reason, extra, source: extra ? cleanSource : "" });
+    };
+    const lines = rawText.split(/\r?\n/).map(normalizeAiFieldLine).filter(Boolean);
       for (const line of lines) {
         const asText = stripPrefix(line, [
           "原文", "原句", "片段", "source", "quote", "excerpt", "text",
         ]);
-        if (asText !== null) { text = asText; continue; }
+        if (asText !== null) {
+          flush();
+          text = cleanAiQuote(asText);
+          tag = reason = extra = source = "";
+          lastField = "";
+          continue;
+        }
         // 「延伸／來源」都要先於「重點」比對：同一個區塊裡三者可能並存。
         // 注意不要把 "source" 放進來源別名 —— 它已經是「原文」的英文別名。
         const asSource = stripPrefix(line, [
           "來源", "出處", "參考來源", "參考", "ref", "reference", "citation",
         ]);
-        if (asSource !== null) { source = asSource; continue; }
+        if (asSource !== null) { source = asSource; lastField = ""; continue; }
         const asExtra = stripPrefix(line, [
           "延伸", "延伸補充", "補充", "背景", "extra", "background", "context",
         ]);
-        if (asExtra !== null) { extra = asExtra; continue; }
+        if (asExtra !== null) { extra = asExtra; lastField = ""; continue; }
         const asReason = stripPrefix(line, [
-          "重點", "摘要", "說明", "理由", "point", "summary", "note", "reason", "insight",
+          "重點", "摘要", "說明", "理由", "備註", "註解", "解釋", "point", "summary", "note", "reason", "insight",
         ]);
-        if (asReason !== null) { reason = asReason; continue; }
+        if (asReason !== null) { reason = asReason; lastField = "reason"; continue; }
         const tagMatch = line.match(/#\s*([^\s#:：]+)/);
         if (
           tagMatch &&
@@ -201,22 +220,12 @@
             /^(分類|顏色|標籤|category|color|colour|tag)\s*[:：]/i.test(line))
         ) {
           tag = tagMatch[1].trim();
+          lastField = "";
+        } else if (lastField === "reason" && !/^(?:#|```|~~~)/.test(line)) {
+          reason += `\n${line}`;
         }
       }
-      if (!text) continue;
-      // 「來源」只有在有延伸時才有意義（是延伸那句話的出處）。
-      // 明確寫「無／none」的一律當成沒有，不要把佔位字當來源存下去。
-      const cleanSource = /^(無|沒有|none|n\/a|-|—)$/i.test(source.trim())
-        ? ""
-        : source.trim();
-      items.push({
-        text,
-        color: resolveColor(tag),
-        reason,
-        extra,
-        source: extra ? cleanSource : "",
-      });
-    }
+    flush();
     return items;
   };
 
@@ -225,27 +234,38 @@
   const parseReadingGuideResponse = (rawText, deps = {}) => {
     const sections = splitAiSections(rawText) || {};
     const context = Array.from(String(sections.context || sections.note || "").trim())
-      .slice(0, 350)
+      .slice(0, 1200)
       .join("");
     const termsText = sections.terms || "";
     const parsedTerms = [];
-    const termBlocks = termsText.split(/\n\s*\n/);
-    termBlocks.forEach((block) => {
-      let text = "";
-      let explanation = "";
-      block.split(/\r?\n/).forEach((rawLine) => {
-        const line = rawLine.trim();
-        const term = line.match(/^(?:名詞|專有名詞|詞條|term)\s*[:：]\s*(.+)$/i);
-        const definition = line.match(/^(?:解釋|說明|定義|explanation|definition)\s*[:：]\s*(.*)$/i);
-        if (term) text = term[1].trim();
-        else if (definition) explanation = definition[1].trim();
-      });
-      if (text && explanation) parsedTerms.push({ text, explanation: Array.from(explanation).slice(0, 120).join("") });
+    let currentTerm = null;
+    const saveCurrentTerm = () => {
+      if (currentTerm?.text && currentTerm?.explanation) {
+        parsedTerms.push({
+          text: currentTerm.text,
+          explanation: Array.from(currentTerm.explanation).slice(0, 600).join(""),
+        });
+      }
+      currentTerm = null;
+    };
+    termsText.split(/\r?\n/).forEach((rawLine) => {
+      const line = normalizeAiFieldLine(rawLine);
+      const term = line.match(/^(?:名詞|專有名詞|詞條|term)\s*[:：]\s*(.+)$/i);
+      const definition = line.match(/^(?:解釋|說明|定義|備註|註解|explanation|definition|note)\s*[:：]\s*(.*)$/i);
+      if (term) {
+        saveCurrentTerm();
+        currentTerm = { text: cleanAiQuote(term[1]), explanation: "" };
+      } else if (definition && currentTerm) {
+        currentTerm.explanation = definition[1].trim();
+      } else if (line && currentTerm?.explanation && !/^\s*(?:\d+[.)]|#|```|~~~)/.test(rawLine)) {
+        currentTerm.explanation += `\n${line}`;
+      }
     });
+    saveCurrentTerm();
     if (!parsedTerms.length && termsText) {
       parseHighlightBlocks(termsText, deps).forEach((item) => {
         if (item.text && item.reason) {
-          parsedTerms.push({ text: item.text, explanation: Array.from(item.reason).slice(0, 120).join("") });
+          parsedTerms.push({ text: item.text, explanation: Array.from(item.reason).slice(0, 600).join("") });
         }
       });
     }
@@ -253,7 +273,7 @@
     const highlights = parseHighlightBlocks(sections.highlights || "", deps)
       .map((item) => ({
         ...item,
-        reason: String(item.reason || "").slice(0, 180),
+        reason: String(item.reason || "").slice(0, 600),
         kind: "passage",
       }));
     const seen = new Set();
@@ -264,9 +284,40 @@
         seen.add(key);
         return true;
       })
-      .slice(0, 7)
+      .slice(0, 5)
       .map((item) => ({ text: item.text, explanation: item.explanation }));
-    return { context, terms, highlights: highlights.slice(0, 7) };
+    const sourceLine = String(rawText || "").split(/\r?\n/)
+      .map(normalizeAiFieldLine)
+      .find((line) => /^(?:來源文章|文章網址|source url)\s*[:：]/i.test(line));
+    const sourceUrl = sourceLine?.match(/https?:\/\/[^\s<>)\]]+/i)?.[0] || "";
+    return { context, terms, highlights: highlights.slice(0, 12), sourceUrl };
+  };
+
+  // Count CJK characters and Latin words separately so English articles are not
+  // treated as longer merely because their words use more characters.
+  const getReadingGuideLimits = (pageText) => {
+    const text = String(pageText || "");
+    const cjk = (text.match(/[\u3400-\u9fff]/g) || []).length;
+    const words = (text.replace(/[\u3400-\u9fff]/g, " ").match(/[a-z0-9]+(?:[-'][a-z0-9]+)*/gi) || []).length;
+    const length = cjk + words * 2.5;
+    if (length >= 4500) return { termsMax: 5, highlightsMin: 8, highlightsMax: 12 };
+    if (length >= 1800) return { termsMax: 4, highlightsMin: 5, highlightsMax: 7 };
+    return { termsMax: 3, highlightsMin: 3, highlightsMax: 4 };
+  };
+
+  const matchesReadingGuideSource = (guide, pageUrl, pageText) => {
+    if (guide.sourceUrl) {
+      const normalize = root.HkUrlKey?.normalizePageKey || ((url) => url);
+      return normalize(guide.sourceUrl) === normalize(pageUrl);
+    }
+    // Legacy replies have no URL. Require at least one quote/term from this page
+    // before any notes or highlights are saved to it.
+    const normalizeText = (text) => String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const article = normalizeText(pageText);
+    return [...guide.terms, ...guide.highlights].some((item) => {
+      const quote = normalizeText(item.text);
+      return quote && article.includes(quote);
+    });
   };
 
   // 解析「延伸」區塊：每組兩行「原文：…／延伸：…」，回傳 [{text, extra}]。
@@ -549,6 +600,8 @@
     looksLikeMindmapOutline,
     parseHighlightBlocks,
     parseReadingGuideResponse,
+    getReadingGuideLimits,
+    matchesReadingGuideSource,
     parseExtraBlocks,
     looseKey,
     normalizeBulkPages,

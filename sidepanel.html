@@ -19,18 +19,19 @@
 
       <div id="status" class="status" role="status" aria-live="polite" hidden></div>
 
-      <section id="aiControls" class="ai-controls" aria-label="AI controls">
+      <details id="aiControls" class="ai-controls" open>
+        <summary data-i18n="sidebar.aiTools">AI 整理工具</summary>
         <div class="action-row">
           <button id="generateBtn" class="primary-button" type="button" data-i18n="sidebar.generate">整理本文</button>
           <button id="copyPromptBtn" class="quiet-button" type="button" data-i18n="sidebar.copyPrompt" hidden>複製指令</button>
-          <button id="openChatgptBtn" class="quiet-button" type="button" data-i18n="sidebar.openChatgpt" hidden>開啟 ChatGPT</button>
+          <button id="openWebAiBtn" class="quiet-button" type="button" data-i18n="sidebar.openChatgpt" hidden>開啟 ChatGPT</button>
         </div>
         <button id="settingsBtn" class="text-button" type="button" data-i18n="sidebar.openSettings" hidden>設定 AI</button>
         <div id="manualPaste" class="manual-paste" hidden>
           <textarea id="aiResponse" rows="5" data-i18n-aria-label="sidebar.responseLabel" data-i18n-placeholder="sidebar.pastePlaceholder" placeholder="貼上 AI 回覆"></textarea>
           <button id="applyResponseBtn" class="quiet-button" type="button" data-i18n="sidebar.applyResponse">套用回覆</button>
         </div>
-      </section>
+      </details>
 
       <nav class="tabs" role="tablist" data-i18n-aria-label="sidebar.tabsLabel" aria-label="閱讀導覽分頁">
         <button id="tab-context" class="tab" role="tab" aria-selected="true" aria-controls="pane-context" data-tab="context" data-i18n="sidebar.tab.context">脈絡</button>

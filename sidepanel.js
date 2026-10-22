@@ -19,7 +19,7 @@ const els = {
   noteStatus: document.getElementById("noteSaveStatus"),
   generate: document.getElementById("generateBtn"),
   copyPrompt: document.getElementById("copyPromptBtn"),
-  openChatgpt: document.getElementById("openChatgptBtn"),
+  openWebAI: document.getElementById("openWebAiBtn"),
   manualPaste: document.getElementById("manualPaste"),
   response: document.getElementById("aiResponse"),
   applyResponse: document.getElementById("applyResponseBtn"),
@@ -44,6 +44,21 @@ const state = {
   noteTimer: 0,
   loadToken: 0,
   activeTab: "context",
+  applying: false,
+};
+
+const isAIWebsite = (url) => {
+  try { return ["chatgpt.com", "gemini.google.com"].includes(new URL(url).hostname); }
+  catch (_error) { return false; }
+};
+
+const guideStatus = (result) => {
+  const summary = t(result.previewing ? "sidebar.guidePreview" : "sidebar.guideSummary", {
+    terms: result.terms?.length || 0,
+    highlights: result.highlights?.length || 0,
+    count: result.previewing ? (result.previewCount ?? result.appliedCount ?? 0) : (result.appliedCount || 0),
+  });
+  return summary + (result.unmatchedCount ? t("sidebar.guideUnmatched", { count: result.unmatchedCount }) : "");
 };
 
 const setStatus = (message = "", isError = false) => {
@@ -153,20 +168,24 @@ const render = () => {
   els.emptyContext.hidden = Boolean(state.context);
 
   const storedHighlights = Array.isArray(page?.highlights) ? page.highlights : [];
+  const visibleHighlights = [...storedHighlights, ...(page?.previewHighlights || [])];
   const mergeItems = (stored, extra) => {
-    const items = stored.map((item) => ({ text: item.text, reason: item.note }));
-    const seen = new Set(items.map((item) => (item.text || "").trim().toLowerCase()));
+    const items = stored.map((item) => ({ ...item, reason: item.note }));
+    const indexes = new Map(items.map((item, index) => [(item.text || "").trim().toLowerCase(), index]));
     extra.forEach((item) => {
       const key = (item.text || "").trim().toLowerCase();
-      if (key && !seen.has(key)) {
-        seen.add(key);
-        items.push(item);
+      if (key && indexes.has(key)) {
+        const index = indexes.get(key);
+        items[index] = { ...items[index], ...item, unavailable: false };
+      } else if (key) {
+        indexes.set(key, items.length);
+        items.push({ ...item, unavailable: true });
       }
     });
     return items;
   };
-  const terms = mergeItems(storedHighlights.filter((item) => item.kind === "term"), state.guideTerms);
-  const highlights = mergeItems(storedHighlights.filter((item) => item.kind !== "term"), state.guideHighlights);
+  const terms = mergeItems(visibleHighlights.filter((item) => item.kind === "term"), state.guideTerms);
+  const highlights = mergeItems(visibleHighlights.filter((item) => item.kind !== "term"), state.guideHighlights);
   renderItems(els.terms, els.emptyTerms, terms, "term");
   renderItems(els.highlights, els.emptyHighlights, highlights, "passage");
   els.termsCount.textContent = String(terms.length);
@@ -174,12 +193,15 @@ const render = () => {
   els.highlightsCount.textContent = String(highlights.length);
   els.highlightsCount.hidden = highlights.length === 0;
 
-  const isChatgpt = state.provider === "chatgpt";
-  els.generate.hidden = isChatgpt;
-  els.copyPrompt.hidden = !isChatgpt;
-  els.openChatgpt.hidden = !isChatgpt;
-  els.manualPaste.hidden = !isChatgpt;
-  els.settings.hidden = state.configured || isChatgpt || !state.pageKey;
+  const isWebProvider = ["chatgpt", "gemini-web"].includes(state.provider);
+  els.generate.hidden = isWebProvider;
+  els.copyPrompt.hidden = !isWebProvider;
+  els.openWebAI.hidden = !isWebProvider;
+  els.openWebAI.textContent = t(state.provider === "gemini-web" ? "sidebar.openGemini" : "sidebar.openChatgpt");
+  els.applyResponse.disabled = state.applying;
+  els.generate.disabled = state.applying;
+  els.manualPaste.hidden = !isWebProvider;
+  els.settings.hidden = !state.pageKey;
   els.noPage.hidden = Boolean(page);
   els.aiControls.hidden = !page;
   els.tabs.hidden = !page;
@@ -200,11 +222,20 @@ const activateTab = (name) => {
 };
 
 const loadActiveTab = async () => {
+  const previousPageKey = state.pageKey;
+  let [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (isAIWebsite(tab?.url)) {
+    // Keep the source article while the user chats with an AI in another tab.
+    if (state.page) return;
+    const saved = await chrome.storage.session.get("hkReadingGuideSourceTabId");
+    tab = Number.isInteger(saved.hkReadingGuideSourceTabId)
+      ? await chrome.tabs.get(saved.hkReadingGuideSourceTabId).catch(() => null) : null;
+  }
   const token = ++state.loadToken;
   await flushNote();
   if (token !== state.loadToken) return;
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (token !== state.loadToken) return;
+  if (state.tabId !== tab?.id) els.response.value = "";
   state.tabId = tab?.id ?? null;
   state.pageKey = "";
   state.page = null;
@@ -227,6 +258,7 @@ const loadActiveTab = async () => {
     const response = await sendToTab(tab.id, { type: "GET_PAGE_HIGHLIGHTS" });
     if (token !== state.loadToken) return;
     if (!response?.success || !response.data?.url) throw new Error(response?.error || t("sidebar.extractError"));
+    if (previousPageKey && previousPageKey !== response.data.url) els.response.value = "";
     state.page = response.data;
     state.pageKey = response.data.url;
     const [stored, promptInfo] = await Promise.all([
@@ -237,8 +269,8 @@ const loadActiveTab = async () => {
     const generated = stored[GENERATED_NOTES_KEY]?.[state.pageKey] || {};
     const personal = stored[PERSONAL_NOTES_KEY]?.[state.pageKey] || {};
     state.context = generated.context || generated.note || "";
-    state.guideTerms = Array.isArray(generated.unlocatedTerms) ? generated.unlocatedTerms : [];
-    state.guideHighlights = Array.isArray(generated.unlocatedHighlights) ? generated.unlocatedHighlights : [];
+    state.guideTerms = generated.guideTerms || generated.unlocatedTerms || [];
+    state.guideHighlights = generated.guideHighlights || generated.unlocatedHighlights || [];
     state.noteText = personal.text || "";
     els.personalNote.value = state.noteText;
     state.provider = promptInfo?.provider || "chatgpt";
@@ -257,53 +289,71 @@ const loadActiveTab = async () => {
 };
 
 const applyGuideResponse = async (text) => {
-  if (!state.tabId) return;
-  const request = { tabId: state.tabId, pageKey: state.pageKey, loadToken: state.loadToken };
+  if (!state.tabId || !text || state.applying) return;
+  const request = { tabId: state.tabId, pageKey: state.pageKey, loadToken: state.loadToken, provider: state.provider };
   const isCurrent = () => request.tabId === state.tabId && request.pageKey === state.pageKey && request.loadToken === state.loadToken;
+  state.applying = true;
+  render();
   setStatus(t("sidebar.generating"));
   try {
     const result = await sendToTab(request.tabId, {
       type: "APPLY_READING_GUIDE_RESPONSE",
       text,
       prompt: state.prompt,
+      provider: request.provider,
+      pageKey: request.pageKey,
     });
     if (!isCurrent()) return;
     if (!result?.success) throw new Error(result?.error || t("sidebar.parseError"));
+    const refreshed = await sendToTab(request.tabId, { type: "GET_PAGE_HIGHLIGHTS" }).catch(() => null);
+    if (!isCurrent()) return;
+    if (refreshed?.success) state.page = refreshed.data;
     state.context = result.context || state.context;
     state.guideTerms = result.terms || [];
     state.guideHighlights = result.highlights || [];
-    els.response.value = "";
+    if (els.response.value.trim() === text.trim()) els.response.value = "";
     render();
-    setStatus(t("sidebar.guideApplied", { count: result.appliedCount || 0 }));
+    setStatus(guideStatus(result));
   } catch (error) {
     if (!isCurrent()) return;
     setStatus(error?.message || t("sidebar.parseError"), true);
+  } finally {
+    state.applying = false;
+    render();
   }
 };
 
 const generateGuide = async () => {
-  if (!state.tabId) return;
-  const request = { tabId: state.tabId, pageKey: state.pageKey, loadToken: state.loadToken };
+  if (!state.tabId || state.applying) return;
+  const request = { tabId: state.tabId, pageKey: state.pageKey, loadToken: state.loadToken, provider: state.provider };
   const isCurrent = () => request.tabId === state.tabId && request.pageKey === state.pageKey && request.loadToken === state.loadToken;
+  state.applying = true;
+  render();
   setStatus(t("sidebar.generating"));
   try {
-    const result = await sendToTab(request.tabId, { type: "GENERATE_READING_GUIDE" });
+    const result = await sendToTab(request.tabId, { type: "GENERATE_READING_GUIDE", pageKey: request.pageKey });
     if (!isCurrent()) return;
     if (result?.manual) {
-      state.provider = "chatgpt";
+      state.provider = result.provider || "chatgpt";
       render();
       setStatus(t("sidebar.manualPasteHint"));
       return;
     }
     if (!result?.success) throw new Error(result?.error || t("sidebar.generateError"));
+    const refreshed = await sendToTab(request.tabId, { type: "GET_PAGE_HIGHLIGHTS" }).catch(() => null);
+    if (!isCurrent()) return;
+    if (refreshed?.success) state.page = refreshed.data;
     state.context = result.context || state.context;
     state.guideTerms = result.terms || [];
     state.guideHighlights = result.highlights || [];
     render();
-    setStatus(t("sidebar.guideApplied", { count: result.appliedCount || 0 }));
+    setStatus(guideStatus(result));
   } catch (error) {
     if (!isCurrent()) return;
     setStatus(error?.message || t("sidebar.generateError"), true);
+  } finally {
+    state.applying = false;
+    render();
   }
 };
 
@@ -325,15 +375,19 @@ els.generate.addEventListener("click", generateGuide);
 els.copyPrompt.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(state.prompt);
+    await chrome.storage.session.set({ hkReadingGuideSourceTabId: state.tabId });
     setStatus(t("sidebar.promptCopied"));
   } catch (_error) {
     setStatus(t("sidebar.promptCopyError"), true);
   }
 });
-els.openChatgpt.addEventListener("click", async () => {
+els.openWebAI.addEventListener("click", async () => {
   try {
+    if (!state.pageKey || !state.prompt) return;
     await navigator.clipboard.writeText(state.prompt);
-    await chrome.tabs.create({ url: "https://chatgpt.com/" });
+    await chrome.storage.session.set({ hkReadingGuideSourceTabId: state.tabId });
+    const url = state.provider === "gemini-web" ? "https://gemini.google.com/app" : "https://chatgpt.com/";
+    await chrome.tabs.create({ url });
     setStatus(t("sidebar.promptCopied"));
   } catch (_error) {
     setStatus(t("sidebar.promptCopyError"), true);
@@ -364,11 +418,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !state.pageKey) return;
+  if (state.applying && (changes[GENERATED_NOTES_KEY] || changes[state.pageKey])) return;
   if (changes[GENERATED_NOTES_KEY]) {
     const next = changes[GENERATED_NOTES_KEY].newValue || {};
     state.context = next[state.pageKey]?.context || next[state.pageKey]?.note || "";
-    state.guideTerms = Array.isArray(next[state.pageKey]?.unlocatedTerms) ? next[state.pageKey].unlocatedTerms : [];
-    state.guideHighlights = Array.isArray(next[state.pageKey]?.unlocatedHighlights) ? next[state.pageKey].unlocatedHighlights : [];
+    state.guideTerms = next[state.pageKey]?.guideTerms || next[state.pageKey]?.unlocatedTerms || [];
+    state.guideHighlights = next[state.pageKey]?.guideHighlights || next[state.pageKey]?.unlocatedHighlights || [];
     render();
   }
   if (changes[PERSONAL_NOTES_KEY] && !state.noteDirty) {

@@ -100,6 +100,11 @@
   transform-origin: center;
 }
 
+.hk-highlight[data-hk-kind="term"] {
+  text-decoration: underline dotted #52677a 1.5px;
+  text-underline-offset: 2px;
+}
+
 /* Inline children (<em>, <a>, <span>) on some sites (e.g. ar5iv cross-refs)
    set their own background / pill / outline; neutralise them so the highlight
    reads as one continuous mark instead of looking split at links & punctuation. */
@@ -3319,6 +3324,7 @@
 
 /* ── 點擊標註的細節選單 ───────────────────────────────── */
 .hk-highlight-menu {
+  width: min(340px, calc(100vw - 24px));
   border-radius: 8px;
   border: 1px solid var(--hkn-line-strong);
   background: var(--hkn-bg);
@@ -3348,7 +3354,9 @@
   border-radius: 6px;
   background: var(--hkn-bg);
   font-family: var(--hkn-font);
-  font-size: 12.5px;
+  font-size: 17px;
+  line-height: 1.75;
+  min-height: 140px;
   color: var(--hkn-ink);
 }
 
@@ -3366,7 +3374,7 @@
   background: var(--hkn-bg);
   color: var(--hkn-ink);
   font-family: var(--hkn-font);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
 }

@@ -67,26 +67,30 @@ const LEGACY_COLOR_MAP = {
 };
 const PAGE_META_KEY = "__hk_page_meta__";
 const PREVIOUS_DEFAULT_AI_PROMPT = `你是一位筆記整理助手，根據提供的網頁全文與標註內容，整理出淺顯易懂的筆記。優先考慮使用者標注段落，將重點控制在五百字以內，輸出內容需要像說故事一樣有脈絡的說明。`;
+const PREVIOUS_CONCISE_AI_PROMPT = `整理文章主線，說明前因、結果、轉折與結論，像講清楚一段故事。只寫 3～5 句，最多 350 個中文字；保留必要細節，不重複文章內容，不補沒有根據的推論。`;
 const PREVIOUS_DEFAULT_AUTO_HIGHLIGHT_PROMPT = `你是一位文章結構分析助手。請全面標註文章中各個關鍵面向的重要片段，確保覆蓋文章的完整論述架構，不要只挑少數幾句。`;
-const DEFAULT_AI_PROMPT = `整理文章主線，說明前因、結果、轉折與結論，像講清楚一段故事。只寫 3～5 句，最多 350 個中文字；保留必要細節，不重複文章內容，不補沒有根據的推論。`;
-const DEFAULT_AUTO_HIGHLIGHT_PROMPT = `只標出文章最值得回看的專有名詞與關鍵段落，附一行簡短解釋。少而準，不要把每個論點都標出。`;
-const DEFAULT_READING_GUIDE_PROMPT = `請依文章全文整理一份精簡閱讀導覽。輸出三個區塊：
+const PREVIOUS_CONCISE_AUTO_HIGHLIGHT_PROMPT = `只標出文章最值得回看的專有名詞與關鍵段落，附一行簡短解釋。少而準，不要把每個論點都標出。`;
+const PREVIOUS_BRIEF_AUTO_HIGHLIGHT_PROMPT = `只挑最重要的專有名詞與關鍵段落，合計最多 5 個。每項附 20 字內的簡短說明；不重複標註，也不補原文沒有的背景。`;
+const PREVIOUS_COMBINED_AUTO_HIGHLIGHT_PROMPT = `只挑最重要的專有名詞與關鍵段落，合計最多 5 個。名詞要說明「它是什麼、在本文扮演什麼角色」，不要只改寫原句；每項最多 35 字。`;
+const DEFAULT_AI_PROMPT = `用 3～5 句講清楚文章主線，串起前因、結果、轉折與結論。不要逐段改寫；說明各段之間為何有關、這件事為何重要。最多 300 個中文字，只寫原文支持的內容。`;
+const DEFAULT_AUTO_HIGHLIGHT_PROMPT = `依文章篇幅挑選重要段落，涵蓋主要章節、方法、證據與限制，不重複同一論點。專有名詞另外計算，不占段落名額；名詞要說明「它是什麼、在本文扮演什麼角色」，不要只改寫原句。`;
+const DEFAULT_READING_GUIDE_PROMPT = `你是一位會講清楚觀念的閱讀老師。標註要少，解釋要足以讓初學者理解。整份回覆放在單一標記為 markdown 的程式碼區塊，方便直接複製；區塊外不加文字。保留來源文章網址與以下三個標題：
 
-===脈絡===
-用 3～5 句說清楚文章主線，交代「因為…所以…但是…因此…」的前因、結果、轉折與結論；最多 350 個中文字。
+## 論述脈絡
+用 1～2 段說清楚問題從哪裡來、作者怎麼處理、證據支持什麼、限制或取捨在哪裡。自然串起前因、結果與轉折，不逐段翻述；約 250～500 個中文字，短文可以更短。
 
-===專有名詞===
-只挑理解本文必要的專有名詞，最多 7 個，格式如下：
-名詞：文章中的原詞
-解釋：一句白話說明它在本文的意思
+## 專有名詞
+只挑理解本文必要的專有名詞，依下方篇幅建議數量，與重點段落分開計算。每個名詞用 2～3 句白話解釋「它是什麼、解決什麼問題、在本文的作用」，必要時加一個小例子。不可只改寫相鄰原句。使用以下 Markdown 格式：
+- **名詞：** 文章中的原詞
+  - **解釋：** 完整的白話說明；一般背景知識須標明「補充」，不要捏造本文沒有的結果
 
-===重點標註===
-挑 3～5 個最值得回看的關鍵段落，硬上限 7 個（含專有名詞）；每段引用原文中連續文字，並用一句話說明其作用或重點。名詞與段落不可重複。
-原文：文章中的連續原句
-#分類或色碼
-重點：一句簡短說明
+## 重點標註
+依下方篇幅建議數量挑選關鍵段落，涵蓋全文主要章節，不要只挑開頭或結論。同一個論點不重複標；方法、重要實驗結果、數據的意義、部署取捨與限制都應納入考量。名詞不占段落名額。原文保留文章的語言，逐字引用連續文字，不翻譯、不加省略號。用 1～2 句說明「為何這段重要、它和主線的關係」，不能只是重述數字或原句。使用以下 Markdown 格式：
+- **原文：** 文章中的連續原句
+  - **分類：** #分類或色碼
+  - **重點：** 對讀者有幫助的說明
 
-只根據文章內容，不要寫開場、結語或泛泛而談。`;
+本文主張與背景補充必須分清楚，不要寫無關段落或泛泛而談。`;
 // 分類預設名依 UI 語言產生（使用者自訂後會覆蓋這些預設）。
 const getDefaultCategories = () => [
   { name: t("cat.motivation"), color: "#ece3fa" },
@@ -170,7 +174,7 @@ let archiveStatusTimer = null;
 let panelPreferencesPromise;
 let panelDragState = null;
 let aiSettings = {
-  provider: "openai",
+  provider: "chatgpt",
   openaiKey: "",
   openaiModel: "gpt-4o-mini",
   geminiKey: "",
@@ -186,6 +190,7 @@ let aiSettings = {
 let isGeneratingNote = false;
 let isAutoHighlighting = false;
 let isChatGPTBridgeWaiting = false;
+let isManualWebAIWaiting = false;
 let previewData = [];
 const CHATGPT_REQUEST_KEY = "hkChatGPTRequest";
 const CHATGPT_RESPONSE_KEY = "hkChatGPTResponse";
@@ -688,11 +693,19 @@ const schedulePersistAISettings = () => {
   }, 400);
 };
 
+const isLikelyProviderApiKey = (provider, value) => {
+  const key = typeof value === "string" ? value.trim() : "";
+  if (provider === "openai") return /^sk-/i.test(key);
+  if (provider === "gemini") return /^AIza/i.test(key);
+  return false;
+};
+
 const updateAiKeyVisibility = () => {
   const groups = highlightPanelEls?.aiKeyGroups ?? [];
+  const isWebProvider = ["chatgpt", "gemini-web"].includes(aiSettings.provider);
   groups.forEach((group) => {
     const provider = group.dataset.provider;
-    const isVisible = provider === aiSettings.provider;
+    const isVisible = provider === "web" ? isWebProvider : provider === aiSettings.provider;
     group.classList.toggle("is-visible", isVisible);
     group.hidden = !isVisible;
     if (!isVisible) {
@@ -704,17 +717,18 @@ const updateAiKeyVisibility = () => {
   });
   const modelField = highlightPanelEls?.aiModelSelect?.closest(".hk-panel-ai-field");
   if (modelField) {
-    modelField.hidden = aiSettings.provider === "chatgpt";
+    modelField.hidden = ["chatgpt", "gemini-web"].includes(aiSettings.provider);
   }
-  const isChatGPT = aiSettings.provider === "chatgpt";
+  const webInfo = highlightPanelEls?.aiWebInfo;
+  if (webInfo) webInfo.textContent = t(aiSettings.provider === "gemini-web" ? "panel.geminiWebInfo" : "panel.chatgptInfo");
   const hlPaste = highlightPanelEls?.aiChatGPTHlPasteArea;
   const hlApply = highlightPanelEls?.aiChatGPTHlApplyBtn;
   const notePaste = highlightPanelEls?.aiChatGPTNotePasteArea;
   const noteApply = highlightPanelEls?.aiChatGPTNoteApplyBtn;
-  if (hlPaste) hlPaste.hidden = !isChatGPT;
-  if (hlApply) hlApply.hidden = !isChatGPT;
-  if (notePaste) notePaste.hidden = !isChatGPT;
-  if (noteApply) noteApply.hidden = !isChatGPT;
+  if (hlPaste) hlPaste.hidden = !isWebProvider;
+  if (hlApply) hlApply.hidden = !isWebProvider;
+  if (notePaste) notePaste.hidden = !isWebProvider;
+  if (noteApply) noteApply.hidden = !isWebProvider;
 };
 
 const populateAiModelSelect = () => {
@@ -730,8 +744,7 @@ const populateAiModelSelect = () => {
       option.value === "chatgpt-web" ? t("provider.chatgptWeb") : option.label;
     select.appendChild(opt);
   });
-  const currentValue =
-    provider === "openai" ? aiSettings.openaiModel : aiSettings.geminiModel;
+  const currentValue = provider === "openai" ? aiSettings.openaiModel : aiSettings.geminiModel;
   if (options.some((option) => option.value === currentValue)) {
     select.value = currentValue;
   } else if (options.length) {
@@ -757,8 +770,8 @@ const updateGenerateAvailability = () => {
   const autoHighlightBtn = highlightPanelEls?.aiAutoHighlightBtn;
   const provider = aiSettings.provider;
   const key = provider === "openai" ? aiSettings.openaiKey : aiSettings.geminiKey;
-  const hasKey = provider === "chatgpt" || Boolean(key?.trim());
-  const hasRunningTask = isGeneratingNote || isAutoHighlighting || isChatGPTBridgeWaiting || previewData.length > 0;
+  const hasKey = ["chatgpt", "gemini-web"].includes(provider) || isLikelyProviderApiKey(provider, key);
+  const hasRunningTask = isGeneratingNote || isAutoHighlighting || isChatGPTBridgeWaiting || isManualWebAIWaiting || previewData.length > 0;
   if (generateBtn) {
     generateBtn.disabled = hasRunningTask || !hasKey;
     generateBtn.textContent = isGeneratingNote ? t("panel.generating") : t("panel.generateNote");
@@ -771,7 +784,7 @@ const updateGenerateAvailability = () => {
   // （心智圖模式走複製貼上流程，不提供 direct）
   const directBtn = highlightPanelEls?.aiDirectBtn;
   if (directBtn) {
-    const canDirect = provider !== "chatgpt" && Boolean(key?.trim());
+    const canDirect = !["chatgpt", "gemini-web"].includes(provider) && isLikelyProviderApiKey(provider, key);
     directBtn.dataset.canDirect = canDirect ? "1" : "0";
     directBtn.hidden = !canDirect || highlightPanelEls?.getAiMode?.() === "mindmap";
     directBtn.disabled = hasRunningTask;
@@ -888,17 +901,28 @@ const loadAISettings = async () => {
       };
     }
     let promptMigrated = false;
-    if (savedSettings?.prompt === PREVIOUS_DEFAULT_AI_PROMPT) {
+    if (
+      (aiSettings.provider === "openai" && !isLikelyProviderApiKey("openai", aiSettings.openaiKey)) ||
+      (aiSettings.provider === "gemini" && !isLikelyProviderApiKey("gemini", aiSettings.geminiKey))
+    ) {
+      aiSettings.provider = "chatgpt";
+      promptMigrated = true;
+    }
+    if ([PREVIOUS_DEFAULT_AI_PROMPT, PREVIOUS_CONCISE_AI_PROMPT].includes(savedSettings?.prompt)) {
       aiSettings.prompt = DEFAULT_AI_PROMPT;
       promptMigrated = true;
     }
-    if (savedSettings?.autoHighlightPrompt === PREVIOUS_DEFAULT_AUTO_HIGHLIGHT_PROMPT) {
+    if (
+      [PREVIOUS_DEFAULT_AUTO_HIGHLIGHT_PROMPT, PREVIOUS_CONCISE_AUTO_HIGHLIGHT_PROMPT, PREVIOUS_BRIEF_AUTO_HIGHLIGHT_PROMPT, PREVIOUS_COMBINED_AUTO_HIGHLIGHT_PROMPT]
+        .includes(savedSettings?.autoHighlightPrompt)
+    ) {
       aiSettings.autoHighlightPrompt = DEFAULT_AUTO_HIGHLIGHT_PROMPT;
       promptMigrated = true;
     }
     if (
-      savedSettings?.prompt === PREVIOUS_DEFAULT_AI_PROMPT &&
-      savedSettings?.autoHighlightPrompt === PREVIOUS_DEFAULT_AUTO_HIGHLIGHT_PROMPT
+      [PREVIOUS_DEFAULT_AI_PROMPT, PREVIOUS_CONCISE_AI_PROMPT].includes(savedSettings?.prompt) &&
+      [PREVIOUS_DEFAULT_AUTO_HIGHLIGHT_PROMPT, PREVIOUS_CONCISE_AUTO_HIGHLIGHT_PROMPT, PREVIOUS_BRIEF_AUTO_HIGHLIGHT_PROMPT, PREVIOUS_COMBINED_AUTO_HIGHLIGHT_PROMPT]
+        .includes(savedSettings?.autoHighlightPrompt)
     ) {
       aiSettings.deepResearch = false;
       promptMigrated = true;
@@ -991,6 +1015,7 @@ const sortPaletteByUsage = (palette, counts = {}) => {
 };
 
 const buildAutoHighlightBody = (pageData, palette, usageCounts) => {
+  const limits = HkParsers.getReadingGuideLimits(pageData.pageText);
   const basePrompt =
     aiSettings.autoHighlightPrompt?.trim() || DEFAULT_AUTO_HIGHLIGHT_PROMPT;
   const highlightLines = (pageData.highlights || [])
@@ -1013,7 +1038,7 @@ const buildAutoHighlightBody = (pageData, palette, usageCounts) => {
     colorSection = `### 標記分類（請依語義從中選一個，用「#分類名稱」標示）
 ${catLines}`;
     tagInstruction = "從上方分類選一個最貼切的，寫成「#分類名稱」";
-    taskExtra = `- 從分類中挑最重要的片段，標註 3～5 個，最多 7 個；不必每個分類都用。`;
+    taskExtra = `- 從分類中挑最重要的片段；不必每個分類都用，長文應涵蓋主要章節。`;
   } else {
     const colorLines = palette
       .map((color, index) => {
@@ -1024,7 +1049,7 @@ ${catLines}`;
     colorSection = `### 可用顏色（依使用習慣排序，用「#色碼」標示）
 ${colorLines || "- #fff5b8（歷史使用次數：0）"}`;
     tagInstruction = "從上方色碼選一個，寫成「#色碼」（例如 #fff5b8）";
-    taskExtra = `- 標註 3～5 個，最多 7 個；優先選專有名詞與能代表主線的段落。`;
+    taskExtra = `- 優先選能代表主線的段落與必要名詞，避免重複相同論點。`;
   }
 
   // 延伸掛在「每個重點」裡面，而不是另開一段：這樣讀的時候補充就在那句話旁邊。
@@ -1043,12 +1068,12 @@ ${colorLines || "- #fff5b8（歷史使用次數：0）"}`;
   return `${basePrompt}
 
 ### 任務要求
-- 僅回傳最重要的 3～5 個標註，硬上限 7 個（專有名詞與段落合計）。
+- 依篇幅挑選 ${limits.highlightsMin}～${limits.highlightsMax} 段重點，另可選最多 ${limits.termsMax} 個必要名詞，名詞不占段落名額。短文可少選，不要湊數。
 - 每個重點必須是「原文中可直接找到」的連續文字。
 - 不要回傳與「已有標註」重複的內容。
 - 專有名詞只挑理解本文必要的詞；段落只挑推進主線、轉折或結論的句子，兩類不可重疊。
 - 必須只使用下方提供的分類 / 顏色。
-- 「重點」用一句話直接摘要「這段原文的核心觀點或資訊」，不加任何前綴（不說「這段在說」「這裡提到」「作者指出」等），直接陳述內容本身。${deepRule}
+- 「重點」用 20 字內直接說明核心，不加前綴或背景；${deepRule}
 ${taskExtra}
 
 ${colorSection}
@@ -1079,6 +1104,7 @@ const buildAutoHighlightPrompt = (pageData, palette, usageCounts) =>
   wrapDirectExec(buildAutoHighlightBody(pageData, palette, usageCounts));
 
 const buildReadingGuidePrompt = (pageData, palette) => {
+  const limits = HkParsers.getReadingGuideLimits(pageData.pageText);
   const customInstructions = [
     aiSettings.prompt?.trim() && aiSettings.prompt.trim() !== DEFAULT_AI_PROMPT
       ? `文章脈絡補充要求：\n${aiSettings.prompt.trim()}`
@@ -1094,7 +1120,10 @@ const buildReadingGuidePrompt = (pageData, palette) => {
     .map((item) => `- ${normalizeWhitespace(item.text)}`)
     .filter((line) => line.length > 2)
     .join("\n");
-  return `${DEFAULT_READING_GUIDE_PROMPT}${customInstructions ? `\n\n使用者自訂要求：\n${customInstructions}` : ""}
+  return `${DEFAULT_READING_GUIDE_PROMPT}
+回覆的 Markdown 區塊第一行必須原樣保留：來源文章：${pageData.url}
+篇幅建議：重點段落 ${limits.highlightsMin}～${limits.highlightsMax} 段；專有名詞最多 ${limits.termsMax} 個，另外計算。若短文沒有足夠的獨立重點，可少選，不要湊數；長文需覆蓋分散在全文的重要章節。
+${customInstructions ? `\n\n使用者自訂要求：\n${customInstructions}` : ""}
 
 可用分類與顏色（重點標註區使用）：
 ${categoryLines || "- #fff5b8"}
@@ -1109,7 +1138,7 @@ ${existing || "（無）"}
 ${pageData.pageText}`;
 };
 
-const saveReadingGuideContext = async (context, provider, model, prompt, targetPageKey, unmatchedTerms = [], unmatchedHighlights = []) => {
+const saveReadingGuideContext = async (context, provider, model, prompt, targetPageKey, unmatchedTerms = [], unmatchedHighlights = [], guideItems = []) => {
   if (!targetPageKey) return;
   const stored = await chrome.storage.local.get("hkGeneratedNotes");
   const previous = stored?.hkGeneratedNotes?.[targetPageKey] || {};
@@ -1118,6 +1147,8 @@ const saveReadingGuideContext = async (context, provider, model, prompt, targetP
     ...(context?.trim() ? { context: context.trim() } : {}),
     unlocatedTerms: unmatchedTerms.map((item) => ({ text: item.text, explanation: item.reason, unavailable: true })),
     unlocatedHighlights: unmatchedHighlights.map((item) => ({ text: item.text, reason: item.reason, unavailable: true })),
+    guideTerms: guideItems.filter((item) => item.kind === "term").map((item) => ({ ...item, explanation: item.reason })),
+    guideHighlights: guideItems.filter((item) => item.kind !== "term"),
     formatVersion: 2,
     provider,
     model,
@@ -1142,31 +1173,55 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
   if (!parsed.context && !parsed.terms.length && !parsed.highlights.length) {
     throw new Error(t("sidebar.parseError"));
   }
+  if (!HkParsers.matchesReadingGuideSource(parsed, targetPageKey, getPagePlainText())) {
+    throw new Error(t("sidebar.sourceMismatch"));
+  }
   const latestPalette = await refreshPaletteFromStorage();
   if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
   const usageCounts = await collectColorUsageCounts();
   const palette = sortPaletteByUsage(latestPalette, usageCounts);
-  const existing = await collectPageHighlights();
+  const existing = [
+    ...await collectPageHighlights(),
+    ...previewData.map((item) => item.data).filter((item) => item.url === targetPageKey),
+  ];
   if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
   const seen = new Set(existing.map((item) => HkParsers.looseKey(item.text)));
-  const tasks = [];
-  parsed.terms.forEach((term) => {
-    const text = normalizeWhitespace(term.text);
-    const key = HkParsers.looseKey(text);
-    if (!text || seen.has(key) || tasks.length >= 7) return;
+  const limits = HkParsers.getReadingGuideLimits(getPagePlainText());
+  const guideItems = [
+    ...parsed.terms.slice(0, limits.termsMax).map((term) => ({ text: normalizeWhitespace(term.text), kind: "term", reason: term.explanation, color: palette[1] || palette[0] || DEFAULT_COLOR })),
+    ...parsed.highlights.slice(0, limits.highlightsMax).map((item) => ({ ...item, text: normalizeWhitespace(item.text), kind: "passage" })),
+  ].filter((item) => item.text);
+  const tasks = guideItems.filter((item) => {
+    const key = HkParsers.looseKey(item.text);
+    if (seen.has(key)) return false;
     seen.add(key);
-    tasks.push({ text, kind: "term", reason: term.explanation, color: palette[1] || palette[0] || DEFAULT_COLOR });
+    return true;
   });
-  parsed.highlights.forEach((item) => {
-    const text = normalizeWhitespace(item.text);
-    const key = HkParsers.looseKey(text);
-    if (!text || seen.has(key) || tasks.length >= 7) return;
-    seen.add(key);
-    tasks.push({ ...item, text, kind: "passage" });
+  // Reapplying a reply should refresh explanations on existing marks too.
+  const entries = await getStoredHighlights(targetPageKey);
+  if (targetPageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
+  let updatedExisting = false;
+  const revisedEntries = entries.map((entry) => {
+    const item = guideItems.find((candidate) => HkParsers.looseKey(candidate.text) === HkParsers.looseKey(entry.text));
+    if (!item) return entry;
+    const note = formatAiNote(item.reason, item.extra, item.source);
+    if (entry.note === note && entry.kind === item.kind) return entry;
+    updatedExisting = true;
+    setAllMarksMetadata(entry.id, { note, kind: item.kind });
+    return { ...entry, note, kind: item.kind };
+  });
+  if (updatedExisting) await setStoredHighlights(revisedEntries, targetPageKey);
+  previewData.forEach((preview) => {
+    if (preview.data.url !== targetPageKey) return;
+    const item = guideItems.find((candidate) => HkParsers.looseKey(candidate.text) === HkParsers.looseKey(preview.data.text));
+    if (!item) return;
+    preview.data.note = formatAiNote(item.reason, item.extra, item.source);
+    preview.data.kind = item.kind;
+    setAllMarksMetadata(preview.data.id, { note: preview.data.note, kind: item.kind });
   });
 
   let appliedCount = 0;
-  let previewing = false;
+  let previewing = previewData.some((item) => item.data.url === targetPageKey);
   let unmatchedTasks = [];
   if (tasks.length) {
     const result = await applyAutoHighlightTasksBatch(tasks, aiSettings.usePreview);
@@ -1176,32 +1231,27 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
     previewing = aiSettings.usePreview && previewData.length > 0;
     if (previewing) showPreviewConfirmBar(previewData.length);
     else await ensurePageMetaTitle(pageKey, document.title);
-    await saveReadingGuideContext(
-      parsed.context,
-      provider,
-      model,
-      prompt,
-      targetPageKey,
-      result.unmatched.filter((item) => item.kind === "term"),
-      result.unmatched.filter((item) => item.kind !== "term")
-    );
-  } else {
-    await saveReadingGuideContext(parsed.context, provider, model, prompt, targetPageKey);
   }
   const unmatchedKeys = new Set(unmatchedTasks.map((item) => HkParsers.looseKey(item.text)));
+  const savedGuideItems = guideItems.map((item) => ({ ...item, unavailable: unmatchedKeys.has(HkParsers.looseKey(item.text)) }));
+  await saveReadingGuideContext(parsed.context, provider, model, prompt, targetPageKey,
+    unmatchedTasks.filter((item) => item.kind === "term"),
+    unmatchedTasks.filter((item) => item.kind !== "term"), savedGuideItems);
   return {
     success: true,
     context: parsed.context,
-    terms: tasks.filter((item) => item.kind === "term").map((item) => ({
+    terms: savedGuideItems.filter((item) => item.kind === "term").map((item) => ({
       text: item.text,
       explanation: item.reason,
       ...(unmatchedKeys.has(HkParsers.looseKey(item.text)) ? { unavailable: true } : {}),
     })),
-    highlights: tasks.filter((item) => item.kind !== "term").map((item) => ({
+    highlights: savedGuideItems.filter((item) => item.kind !== "term").map((item) => ({
       ...item,
       ...(unmatchedKeys.has(HkParsers.looseKey(item.text)) ? { unavailable: true } : {}),
     })),
     appliedCount,
+    unmatchedCount: unmatchedTasks.length,
+    previewCount: previewData.filter((item) => item.data.url === targetPageKey).length,
     previewing,
   };
 };
@@ -1986,7 +2036,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
       const normalizedColor = toHexColor(task.color || DEFAULT_COLOR);
       const note = formatAiNote(task.reason, task.extra, task.source);
       wrapRangeWithHighlight(range, normalizedColor, highlightId);
-      setAllMarksMetadata(highlightId, { color: normalizedColor, note });
+      setAllMarksMetadata(highlightId, { color: normalizedColor, note, kind: task.kind });
       newEntries.push({
         id: highlightId,
         color: normalizedColor,
@@ -2007,8 +2057,8 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
   if (newEntries.length) {
     panelRefreshSuppressed = true;
     try {
-      const existing = await getStoredHighlights();
-      await setStoredHighlights([...existing, ...newEntries]);
+      const existing = await getStoredHighlights(targetPageKey);
+      await setStoredHighlights([...existing, ...newEntries], targetPageKey);
     } finally {
       panelRefreshSuppressed = false;
     }
@@ -2140,7 +2190,7 @@ const applyPreviewHighlight = (range, color, reason, extra = "", source = "", ki
   const note = formatAiNote(reason, extra, source);
   const highlightEl = wrapRangeWithHighlight(range, normalizedColor, highlightId);
   if (highlightEl) highlightEl.classList.add("hk-highlight-preview");
-  setAllMarksMetadata(highlightId, { color: normalizedColor, note });
+  setAllMarksMetadata(highlightId, { color: normalizedColor, note, kind });
   document.querySelectorAll(`[${HIGHLIGHT_ATTR}="${highlightId}"]`).forEach(el => el.classList.add("hk-highlight-preview"));
   return {
     el: highlightEl,
@@ -2274,6 +2324,41 @@ const launchChatGPTBridge = async (type) => {
   }
 };
 
+const launchGeminiWeb = async (type) => {
+  if (isManualWebAIWaiting) return;
+  const geminiTab = window.open("about:blank", "_blank");
+  isManualWebAIWaiting = true;
+  updateGenerateAvailability();
+  setAiPanelStatus(t("ai.statusPreparing"));
+  try {
+    const pageData = {
+      title: document.title,
+      url: pageKey,
+      pageText: getPagePlainText(),
+      highlights: await collectPageHighlights(),
+    };
+    let prompt;
+    if (type === "note") {
+      prompt = buildNotePrompt(pageData);
+    } else {
+      const latestPalette = await refreshPaletteFromStorage();
+      const usageCounts = await collectColorUsageCounts();
+      const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
+      const existingTags = await collectExistingTagsByUsage();
+      prompt = buildCombinedPrompt(pageData, preferredPalette, usageCounts, existingTags);
+    }
+    await navigator.clipboard.writeText(prompt);
+    if (geminiTab) geminiTab.location.href = "https://gemini.google.com/app";
+    setAiPanelStatus(t("ai.statusGeminiOpened"));
+  } catch (error) {
+    geminiTab?.close();
+    setAiPanelStatus(error?.message || t("ai.errChatgptBridge"), true);
+  } finally {
+    isManualWebAIWaiting = false;
+    updateGenerateAvailability();
+  }
+};
+
 // AI 回傳的「標籤」區塊：解析後併入目前頁面既有標籤（聯集，不覆蓋手動加的），
 // 並同步面板狀態讓標籤即時顯示。回傳實際新增的標籤數。
 const applyAiPageTags = async (rawTagsSection) => {
@@ -2296,8 +2381,8 @@ const applyNotePayload = async (noteText, { context } = {}) => {
     ...previous,
     ...(typeof noteText === "string" && noteText.trim() ? { note: noteText } : {}),
     ...(typeof context === "string" && context.trim() ? { context: context.trim() } : {}),
-    provider: "chatgpt",
-    model: "chatgpt-web",
+    provider: aiSettings.provider === "gemini-web" ? "gemini-web" : "chatgpt",
+    model: aiSettings.provider === "gemini-web" ? "gemini-web" : "chatgpt-web",
     generatedAt: Date.now(),
     url: pageKey,
   };
@@ -2632,13 +2717,14 @@ const handleGenerateAiNote = async () => {
   if (aiSettings.provider === "chatgpt") {
     return launchChatGPTBridge("note");
   }
+  if (aiSettings.provider === "gemini-web") return launchGeminiWeb("note");
   const provider = aiSettings.provider;
   const apiKey =
     provider === "openai"
       ? aiSettings.openaiKey?.trim()
       : aiSettings.geminiKey?.trim();
 
-  if (!apiKey) {
+  if (!isLikelyProviderApiKey(provider, apiKey)) {
     setAiPanelStatus(t("ai.errNoApiKey"), true);
     updateGenerateAvailability();
     return;
@@ -2697,13 +2783,14 @@ const handleGenerateAiHighlights = async () => {
   if (aiSettings.provider === "chatgpt") {
     return launchChatGPTBridge("highlight");
   }
+  if (aiSettings.provider === "gemini-web") return launchGeminiWeb("highlight");
   const provider = aiSettings.provider;
   const apiKey =
     provider === "openai"
       ? aiSettings.openaiKey?.trim()
       : aiSettings.geminiKey?.trim();
 
-  if (!apiKey) {
+  if (!isLikelyProviderApiKey(provider, apiKey)) {
     setAiPanelStatus(t("ai.errNoApiKey"), true);
     updateGenerateAvailability();
     return;
@@ -3393,9 +3480,11 @@ const updateAiNoteSection = (noteData) => {
         ? "OpenAI"
         : noteData.provider === "chatgpt"
         ? "ChatGPT"
-        : "Gemini";
+        : noteData.provider === "gemini-web"
+        ? "Gemini 網頁版"
+        : "Gemini API";
     const modelLabel =
-      noteData.model && noteData.model !== "chatgpt-web"
+      noteData.model && !["chatgpt-web", "gemini-web"].includes(noteData.model)
         ? `${providerLabel} · ${noteData.model}`
         : providerLabel;
     const generatedLabel = noteData.generatedAt
@@ -4661,9 +4750,10 @@ const ensureHighlightPanel = () => {
   aiProviderSelect.id = providerSelectId;
   aiProviderSelect.className = "hk-panel-ai-select";
   [
-    ["openai", "OpenAI"],
-    ["gemini", "Google Gemini"],
-    ["chatgpt", "ChatGPT 網頁版"],
+    ["chatgpt", t("provider.chatgptWeb")],
+    ["gemini-web", t("provider.geminiWeb")],
+    ["openai", "OpenAI API"],
+    ["gemini", "Google Gemini API"],
   ].forEach(([value, label]) => {
     const option = document.createElement("option");
     option.value = value;
@@ -4727,7 +4817,7 @@ const ensureHighlightPanel = () => {
 
   const chatgptGroup = document.createElement("div");
   chatgptGroup.className = "hk-panel-ai-key-group";
-  chatgptGroup.dataset.provider = "chatgpt";
+  chatgptGroup.dataset.provider = "web";
   const chatgptInfo = document.createElement("p");
   chatgptInfo.className = "hk-panel-ai-chatgpt-info";
   chatgptInfo.textContent = t("panel.chatgptInfo");
@@ -5386,6 +5476,7 @@ const ensureHighlightPanel = () => {
     aiOpenaiKeyInput: openaiInput,
     aiGeminiKeyInput: geminiInput,
     aiKeyGroups: [openaiGroup, geminiGroup, chatgptGroup],
+    aiWebInfo: chatgptInfo,
     aiChatGPTCancelBtn: chatgptCancelBtn,
     aiGenerateBtn,
     aiAutoHighlightBtn,
@@ -5418,7 +5509,7 @@ const ensureHighlightPanel = () => {
 
   aiProviderSelect.addEventListener("change", (event) => {
     const v = event.target.value;
-    const value = ["gemini", "chatgpt"].includes(v) ? v : "openai";
+    const value = ["gemini", "chatgpt", "gemini-web"].includes(v) ? v : "openai";
     if (isChatGPTBridgeWaiting) cancelChatGPTBridge();
     aiSettings.provider = value;
     populateAiModelSelect();
@@ -6981,7 +7072,7 @@ const createHighlightElement = (color, id) => {
   return mark;
 };
 
-const setHighlightMetadata = (element, { color, note }) => {
+const setHighlightMetadata = (element, { color, note, kind }) => {
   if (!element) return;
   const overlayId = element.getAttribute?.(HIGHLIGHT_ATTR);
   const overlayEntry = overlayId
@@ -7006,6 +7097,10 @@ const setHighlightMetadata = (element, { color, note }) => {
       element.removeAttribute("data-highlight-note");
     }
     if (overlayEntry) overlayEntry.note = trimmed;
+  }
+  if (kind === "term" || kind === "passage") {
+    element.dataset.hkKind = kind;
+    element.setAttribute("data-hk-kind", kind);
   }
   if (overlayEntry && element === overlayEntry.group) {
     renderTranslatedHighlightOverlay(overlayEntry);
@@ -7336,6 +7431,7 @@ const restoreHighlights = async () => {
         setAllMarksMetadata(highlight.id, {
           color: highlight.color,
           note: highlight.note ?? "",
+          kind: highlight.kind,
         });
         visibleCount += 1;
         if (resolved.updated && resolved.snapshot) {
@@ -7657,8 +7753,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           prompt: buildReadingGuidePrompt(pageData, palette),
           pageKey: requestPageKey,
           provider: aiSettings.provider,
-          configured: aiSettings.provider === "chatgpt" || Boolean(
-            (aiSettings.provider === "openai" ? aiSettings.openaiKey : aiSettings.geminiKey)?.trim()
+          configured: ["chatgpt", "gemini-web"].includes(aiSettings.provider) || Boolean(
+            isLikelyProviderApiKey(
+              aiSettings.provider,
+              aiSettings.provider === "openai" ? aiSettings.openaiKey : aiSettings.geminiKey
+            )
           ),
         });
       } catch (error) {
@@ -7670,13 +7769,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "GENERATE_READING_GUIDE") {
     (async () => {
       try {
+        if (message.pageKey && message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
         const provider = aiSettings.provider;
-        if (provider === "chatgpt") {
-          sendResponse({ success: false, manual: true, error: t("sidebar.manualPaste") });
+        if (["chatgpt", "gemini-web"].includes(provider)) {
+          sendResponse({ success: false, manual: true, provider, error: t("sidebar.manualPaste") });
           return;
         }
         const apiKey = provider === "openai" ? aiSettings.openaiKey?.trim() : aiSettings.geminiKey?.trim();
-        if (!apiKey) throw new Error(t("ai.errNoApiKey"));
+        if (!isLikelyProviderApiKey(provider, apiKey)) throw new Error(t("ai.errNoApiKey"));
         const requestPageKey = pageKey;
         const pageData = {
           title: document.title,
@@ -7703,10 +7803,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "APPLY_READING_GUIDE_RESPONSE") {
     (async () => {
       try {
+        if (message.pageKey && message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
         const text = typeof message.text === "string" ? message.text.trim() : "";
         if (!text) throw new Error(t("sidebar.parseError"));
         const requestPageKey = pageKey;
-        const result = await applyReadingGuideResponse(text, message.prompt || "", "chatgpt", "chatgpt-web", requestPageKey);
+        const provider = message.provider === "gemini-web" ? "gemini-web" : "chatgpt";
+        const model = provider === "gemini-web" ? "gemini-web" : "chatgpt-web";
+        const result = await applyReadingGuideResponse(text, message.prompt || "", provider, model, requestPageKey);
         sendResponse(result);
       } catch (error) {
         sendResponse({ success: false, error: error?.message || t("sidebar.parseError") });
@@ -7749,6 +7852,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           url: pageKey,
           pageText: getPagePlainText(),
           highlights,
+          previewHighlights: previewData.map((item) => item.data),
         };
         sendResponse({ success: true, data: payload });
       } catch (error) {
