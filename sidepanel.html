@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Highlight Keeper</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div class="heading">
+          <h1 data-i18n="sidebar.title">閱讀導覽</h1>
+          <p id="pageTitle" class="page-title">—</p>
+        </div>
+        <button id="refreshBtn" class="icon-button" type="button" data-i18n-title="sidebar.refresh" aria-label="Refresh">↻</button>
+      </header>
+      <p id="pageUrl" class="page-url"></p>
+
+      <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+
+      <section id="aiControls" class="ai-controls" aria-label="AI controls">
+        <div class="action-row">
+          <button id="generateBtn" class="primary-button" type="button" data-i18n="sidebar.generate">整理本文</button>
+          <button id="copyPromptBtn" class="quiet-button" type="button" data-i18n="sidebar.copyPrompt" hidden>複製指令</button>
+          <button id="openChatgptBtn" class="quiet-button" type="button" data-i18n="sidebar.openChatgpt" hidden>開啟 ChatGPT</button>
+        </div>
+        <button id="settingsBtn" class="text-button" type="button" data-i18n="sidebar.openSettings" hidden>設定 AI</button>
+        <div id="manualPaste" class="manual-paste" hidden>
+          <textarea id="aiResponse" rows="5" data-i18n-aria-label="sidebar.responseLabel" data-i18n-placeholder="sidebar.pastePlaceholder" placeholder="貼上 AI 回覆"></textarea>
+          <button id="applyResponseBtn" class="quiet-button" type="button" data-i18n="sidebar.applyResponse">套用回覆</button>
+        </div>
+      </section>
+
+      <nav class="tabs" role="tablist" data-i18n-aria-label="sidebar.tabsLabel" aria-label="閱讀導覽分頁">
+        <button id="tab-context" class="tab" role="tab" aria-selected="true" aria-controls="pane-context" data-tab="context" data-i18n="sidebar.tab.context">脈絡</button>
+        <button id="tab-terms" class="tab" role="tab" aria-selected="false" aria-controls="pane-terms" data-tab="terms">
+          <span data-i18n="sidebar.tab.terms">專有名詞</span><span id="termsCount" class="count" hidden></span>
+        </button>
+        <button id="tab-highlights" class="tab" role="tab" aria-selected="false" aria-controls="pane-highlights" data-tab="highlights">
+          <span data-i18n="sidebar.tab.highlights">重點標註</span><span id="highlightsCount" class="count" hidden></span>
+        </button>
+        <button id="tab-notes" class="tab" role="tab" aria-selected="false" aria-controls="pane-notes" data-tab="personal-notes" data-i18n="sidebar.tab.notes">我的筆記</button>
+      </nav>
+
+      <section id="pane-context" class="pane" role="tabpanel" aria-labelledby="tab-context">
+        <h2 data-i18n="sidebar.contextHeading">論述脈絡</h2>
+        <p id="contextText" class="context-text"></p>
+        <p id="emptyContext" class="empty" data-i18n="sidebar.empty.context">尚無文章脈絡。</p>
+      </section>
+      <section id="pane-terms" class="pane" role="tabpanel" aria-labelledby="tab-terms" hidden>
+        <h2 data-i18n="sidebar.tab.terms">專有名詞</h2>
+        <div id="termsList" class="item-list"></div>
+        <p id="emptyTerms" class="empty" data-i18n="sidebar.empty.terms">尚無專有名詞。</p>
+      </section>
+      <section id="pane-highlights" class="pane" role="tabpanel" aria-labelledby="tab-highlights" hidden>
+        <h2 data-i18n="sidebar.tab.highlights">重點標註</h2>
+        <div id="highlightsList" class="item-list"></div>
+        <p id="emptyHighlights" class="empty" data-i18n="sidebar.empty.highlights">尚無重點標註。</p>
+      </section>
+      <section id="pane-notes" class="pane notes-pane" role="tabpanel" aria-labelledby="tab-notes" hidden>
+        <h2 data-i18n="sidebar.tab.notes">我的筆記</h2>
+        <textarea id="personalNote" rows="12" data-i18n-aria-label="sidebar.noteLabel" data-i18n-placeholder="sidebar.notePlaceholder" placeholder="記下自己的想法、問題或待查資料"></textarea>
+        <p id="noteSaveStatus" class="save-status" data-i18n="sidebar.notesSaved">已儲存</p>
+      </section>
+      <p id="noPage" class="empty unsupported" data-i18n="sidebar.unsupported" hidden>此分頁無法讀取文章內容。</p>
+    </main>
+    <script src="i18n.js"></script>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>

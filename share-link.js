@@ -38,9 +38,12 @@
         text: entry?.text || "",
         note: entry?.note || "",
         color: entry?.color || "",
+        ...(entry?.kind ? { kind: entry.kind } : {}),
       }))
       .filter((item) => item.text),
     note: pageEntry.note?.note || "",
+    context: pageEntry.note?.context || "",
+    ...(pageEntry.personalNote ? { personalNote: pageEntry.personalNote } : {}),
     mindmap: pageEntry.mindmap?.outline || "",
   });
 

@@ -66,8 +66,27 @@ const LEGACY_COLOR_MAP = {
   "#e3d7f7": "#ece3fa",
 };
 const PAGE_META_KEY = "__hk_page_meta__";
-const DEFAULT_AI_PROMPT = `你是一位筆記整理助手，根據提供的網頁全文與標註內容，整理出淺顯易懂的筆記。優先考慮使用者標注段落，將重點控制在五百字以內，輸出內容需要像說故事一樣有脈絡的說明。`;
-const DEFAULT_AUTO_HIGHLIGHT_PROMPT = `你是一位文章結構分析助手。請全面標註文章中各個關鍵面向的重要片段，確保覆蓋文章的完整論述架構，不要只挑少數幾句。`;
+const PREVIOUS_DEFAULT_AI_PROMPT = `你是一位筆記整理助手，根據提供的網頁全文與標註內容，整理出淺顯易懂的筆記。優先考慮使用者標注段落，將重點控制在五百字以內，輸出內容需要像說故事一樣有脈絡的說明。`;
+const PREVIOUS_DEFAULT_AUTO_HIGHLIGHT_PROMPT = `你是一位文章結構分析助手。請全面標註文章中各個關鍵面向的重要片段，確保覆蓋文章的完整論述架構，不要只挑少數幾句。`;
+const DEFAULT_AI_PROMPT = `整理文章主線，說明前因、結果、轉折與結論，像講清楚一段故事。只寫 3～5 句，最多 350 個中文字；保留必要細節，不重複文章內容，不補沒有根據的推論。`;
+const DEFAULT_AUTO_HIGHLIGHT_PROMPT = `只標出文章最值得回看的專有名詞與關鍵段落，附一行簡短解釋。少而準，不要把每個論點都標出。`;
+const DEFAULT_READING_GUIDE_PROMPT = `請依文章全文整理一份精簡閱讀導覽。輸出三個區塊：
+
+===脈絡===
+用 3～5 句說清楚文章主線，交代「因為…所以…但是…因此…」的前因、結果、轉折與結論；最多 350 個中文字。
+
+===專有名詞===
+只挑理解本文必要的專有名詞，最多 7 個，格式如下：
+名詞：文章中的原詞
+解釋：一句白話說明它在本文的意思
+
+===重點標註===
+挑 3～5 個最值得回看的關鍵段落，硬上限 7 個（含專有名詞）；每段引用原文中連續文字，並用一句話說明其作用或重點。名詞與段落不可重複。
+原文：文章中的連續原句
+#分類或色碼
+重點：一句簡短說明
+
+只根據文章內容，不要寫開場、結語或泛泛而談。`;
 // 分類預設名依 UI 語言產生（使用者自訂後會覆蓋這些預設）。
 const getDefaultCategories = () => [
   { name: t("cat.motivation"), color: "#ece3fa" },
@@ -162,7 +181,7 @@ let aiSettings = {
   usePreview: true,
   selectionOnly: false,
   // 延伸補充：讓模型先想過一輪，再補文章「沒寫到」的背景／反面說法／延伸讀物。
-  deepResearch: true,
+  deepResearch: false,
 };
 let isGeneratingNote = false;
 let isAutoHighlighting = false;
@@ -644,6 +663,7 @@ const collectPageHighlights = async () => {
     text: item.text ?? "",
     note: item.note ?? "",
     color: item.color,
+    ...(item.kind ? { kind: item.kind } : {}),
     createdAt: item.createdAt,
     url: item.url ?? pageKey,
     range: item.range,
@@ -860,14 +880,31 @@ const migrateLegacyCategories = (categories) => {
 const loadAISettings = async () => {
   try {
     const stored = await chrome.storage?.local.get("hkAISettings");
+    const savedSettings = stored?.hkAISettings;
     if (stored?.hkAISettings) {
       aiSettings = {
         ...aiSettings,
         ...stored.hkAISettings,
       };
     }
+    let promptMigrated = false;
+    if (savedSettings?.prompt === PREVIOUS_DEFAULT_AI_PROMPT) {
+      aiSettings.prompt = DEFAULT_AI_PROMPT;
+      promptMigrated = true;
+    }
+    if (savedSettings?.autoHighlightPrompt === PREVIOUS_DEFAULT_AUTO_HIGHLIGHT_PROMPT) {
+      aiSettings.autoHighlightPrompt = DEFAULT_AUTO_HIGHLIGHT_PROMPT;
+      promptMigrated = true;
+    }
+    if (
+      savedSettings?.prompt === PREVIOUS_DEFAULT_AI_PROMPT &&
+      savedSettings?.autoHighlightPrompt === PREVIOUS_DEFAULT_AUTO_HIGHLIGHT_PROMPT
+    ) {
+      aiSettings.deepResearch = false;
+      promptMigrated = true;
+    }
     const migrated = migrateLegacyCategories(aiSettings.categories);
-    if (migrated !== aiSettings.categories) {
+    if (migrated !== aiSettings.categories || promptMigrated) {
       aiSettings.categories = migrated;
       persistAISettings();
     }
@@ -976,8 +1013,7 @@ const buildAutoHighlightBody = (pageData, palette, usageCounts) => {
     colorSection = `### 標記分類（請依語義從中選一個，用「#分類名稱」標示）
 ${catLines}`;
     tagInstruction = "從上方分類選一個最貼切的，寫成「#分類名稱」";
-    taskExtra = `- 每個分類至少找 1 個片段（文章有提及的話），確保標註覆蓋完整論述架構。
-- 共可回傳 ${Math.max(categories.length * 2, 12)} 個以上的片段，不要因為「夠了」就停止。`;
+    taskExtra = `- 從分類中挑最重要的片段，標註 3～5 個，最多 7 個；不必每個分類都用。`;
   } else {
     const colorLines = palette
       .map((color, index) => {
@@ -988,23 +1024,14 @@ ${catLines}`;
     colorSection = `### 可用顏色（依使用習慣排序，用「#色碼」標示）
 ${colorLines || "- #fff5b8（歷史使用次數：0）"}`;
     tagInstruction = "從上方色碼選一個，寫成「#色碼」（例如 #fff5b8）";
-    taskExtra = `- 盡量標註 10～20 個片段，確保覆蓋文章各個段落，不要只挑少數幾句。`;
+    taskExtra = `- 標註 3～5 個，最多 7 個；優先選專有名詞與能代表主線的段落。`;
   }
 
   // 延伸掛在「每個重點」裡面，而不是另開一段：這樣讀的時候補充就在那句話旁邊。
-  const deep = aiSettings.deepResearch !== false;
+  const deep = aiSettings.deepResearch === true;
   const deepRule = deep
     ? `
-- 每個重點再多寫一行「延伸」：**原文沒說、但讀到這句會想知道的一句話**。從下面擇一切入：
-  - 作者預設你已經知道、但沒交代的前提或背景
-  - 這個說法的適用邊界、時間點，或圈內常見的反駁／替代方案
-  - 想再往下追一層該查什麼（關鍵詞、人名、論文、專案）
-- 「延伸」必須是原文找不到的內容；只是換句話說「重點」的直接留空。
-- 40～80 字，一句講完，不要「值得注意的是」這類贅詞。
-- 真的沒東西可補的句子，「延伸」那行直接省略，不要硬湊。
-- 有「延伸」就再加一行「來源」：這句話的出處或可查證的線索，寫**查得到的名字**——論文標題、書名、規格／標準名稱、組織、人名，或最精準的搜尋關鍵詞。
-- **來源絕對不要寫網址**，我會自己搜。年份只有在你有把握時才寫，不確定就別寫。
-- 這是憑記憶回答，不是檢索：只要有一點不確定就寫「來源：無」，寧可留白也不要編出看起來像真的的論文名或數據。延伸句本身沒把握的地方在句尾標「（待查證）」。`
+每個標註可加一行延伸補充，限一句且不超過 30 字；沒有可靠補充就省略。`
     : "";
   const deepFormatLine = deep
     ? "\n延伸：原文沒說、但讀到這句會想知道的一句話（沒有就省略這兩行）\n來源：可查證的名字或搜尋關鍵詞（不確定就寫「無」，不要寫網址）"
@@ -1016,9 +1043,10 @@ ${colorLines || "- #fff5b8（歷史使用次數：0）"}`;
   return `${basePrompt}
 
 ### 任務要求
-- 標註數量不要自我設限，文章夠長就多標。
+- 僅回傳最重要的 3～5 個標註，硬上限 7 個（專有名詞與段落合計）。
 - 每個重點必須是「原文中可直接找到」的連續文字。
 - 不要回傳與「已有標註」重複的內容。
+- 專有名詞只挑理解本文必要的詞；段落只挑推進主線、轉折或結論的句子，兩類不可重疊。
 - 必須只使用下方提供的分類 / 顏色。
 - 「重點」用一句話直接摘要「這段原文的核心觀點或資訊」，不加任何前綴（不說「這段在說」「這裡提到」「作者指出」等），直接陳述內容本身。${deepRule}
 ${taskExtra}
@@ -1049,6 +1077,109 @@ ${highlightLines || "（尚未加入標註）"}
 
 const buildAutoHighlightPrompt = (pageData, palette, usageCounts) =>
   wrapDirectExec(buildAutoHighlightBody(pageData, palette, usageCounts));
+
+const buildReadingGuidePrompt = (pageData, palette) => {
+  const customInstructions = [
+    aiSettings.prompt?.trim() && aiSettings.prompt.trim() !== DEFAULT_AI_PROMPT
+      ? `文章脈絡補充要求：\n${aiSettings.prompt.trim()}`
+      : "",
+    aiSettings.autoHighlightPrompt?.trim() && aiSettings.autoHighlightPrompt.trim() !== DEFAULT_AUTO_HIGHLIGHT_PROMPT
+      ? `標註補充要求：\n${aiSettings.autoHighlightPrompt.trim()}`
+      : "",
+  ].filter(Boolean).join("\n\n");
+  const categoryLines = Array.isArray(aiSettings.categories) && aiSettings.categories.length
+    ? aiSettings.categories.map((category) => `- #${category.name} (${category.color})`).join("\n")
+    : sanitizePalette(palette).map((color) => `- #${color}`).join("\n");
+  const existing = (pageData.highlights || [])
+    .map((item) => `- ${normalizeWhitespace(item.text)}`)
+    .filter((line) => line.length > 2)
+    .join("\n");
+  return `${DEFAULT_READING_GUIDE_PROMPT}${customInstructions ? `\n\n使用者自訂要求：\n${customInstructions}` : ""}
+
+可用分類與顏色（重點標註區使用）：
+${categoryLines || "- #fff5b8"}
+
+文章標題：${pageData.title}
+文章網址：${pageData.url}
+
+已有標註（請避免重複）：
+${existing || "（無）"}
+
+文章全文：
+${pageData.pageText}`;
+};
+
+const saveReadingGuideContext = async (context, provider, model, prompt) => {
+  if (!context?.trim()) return;
+  const stored = await chrome.storage.local.get("hkGeneratedNotes");
+  const previous = stored?.hkGeneratedNotes?.[pageKey] || {};
+  const payload = {
+    ...previous,
+    context: context.trim(),
+    formatVersion: 2,
+    provider,
+    model,
+    prompt,
+    generatedAt: Date.now(),
+    url: pageKey,
+  };
+  await saveGeneratedNote(pageKey, payload);
+  highlightPanelState.notesByPage = {
+    ...highlightPanelState.notesByPage,
+    [pageKey]: payload,
+  };
+};
+
+const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatgpt", model = "chatgpt-web") => {
+  const parsed = HkParsers.parseReadingGuideResponse(rawText, {
+    categories: aiSettings.categories,
+    toHexColor,
+    defaultColor: DEFAULT_COLOR,
+  });
+  if (!parsed.context && !parsed.terms.length && !parsed.highlights.length) {
+    throw new Error(t("sidebar.parseError"));
+  }
+  await saveReadingGuideContext(parsed.context, provider, model, prompt);
+
+  const latestPalette = await refreshPaletteFromStorage();
+  const usageCounts = await collectColorUsageCounts();
+  const palette = sortPaletteByUsage(latestPalette, usageCounts);
+  const existing = await collectPageHighlights();
+  const seen = new Set(existing.map((item) => HkParsers.looseKey(item.text)));
+  const tasks = [];
+  parsed.terms.forEach((term) => {
+    const text = normalizeWhitespace(term.text);
+    const key = HkParsers.looseKey(text);
+    if (!text || seen.has(key) || tasks.length >= 7) return;
+    seen.add(key);
+    tasks.push({ text, kind: "term", reason: term.explanation, color: palette[1] || palette[0] || DEFAULT_COLOR });
+  });
+  parsed.highlights.forEach((item) => {
+    const text = normalizeWhitespace(item.text);
+    const key = HkParsers.looseKey(text);
+    if (!text || seen.has(key) || tasks.length >= 7) return;
+    seen.add(key);
+    tasks.push({ ...item, text, kind: "passage" });
+  });
+
+  let appliedCount = 0;
+  let previewing = false;
+  if (tasks.length) {
+    const result = await applyAutoHighlightTasksBatch(tasks, aiSettings.usePreview);
+    appliedCount = result.appliedCount;
+    previewing = aiSettings.usePreview && previewData.length > 0;
+    if (previewing) showPreviewConfirmBar(previewData.length);
+    else await ensurePageMetaTitle(pageKey, document.title);
+  }
+  return {
+    success: true,
+    context: parsed.context,
+    terms: tasks.filter((item) => item.kind === "term").map((item) => ({ text: item.text, explanation: item.reason })),
+    highlights: tasks.filter((item) => item.kind !== "term"),
+    appliedCount,
+    previewing,
+  };
+};
 
 // 統計所有頁面的既有標籤（依使用頁數排序），給 AI 標籤任務優先重用，
 // 避免每次都發明只用一次的新標籤、標籤越長越多。
@@ -1546,7 +1677,8 @@ const normalizeAutoHighlightItems = (payload, palette) => {
         typeof item.source === "string"
           ? normalizeWhitespace(item.source).replace(/https?:\/\/\S+/g, "").slice(0, 120).trim()
           : "";
-      return { text, color, reason, extra, source };
+      const kind = item.kind === "term" ? "term" : item.kind === "passage" ? "passage" : undefined;
+      return { text, color, reason, extra, source, ...(kind ? { kind } : {}) };
     })
     .filter(Boolean);
 };
@@ -1802,7 +1934,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
         continue;
       }
       if (usePreview) {
-        const result = applyPreviewHighlight(range, task.color, task.reason, task.extra, task.source);
+        const result = applyPreviewHighlight(range, task.color, task.reason, task.extra, task.source, task.kind);
         if (result) {
           previewData.push(result);
           appliedCount += 1;
@@ -1830,6 +1962,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
         url: pageKey,
         createdAt: Date.now(),
         note,
+        ...(task.kind ? { kind: task.kind } : {}),
       });
       appliedCount += 1;
     } catch (error) {
@@ -1947,9 +2080,10 @@ const callGemini = async (key, prompt, options = {}) => {
 const saveGeneratedNote = async (pageUrl, notePayload) => {
   try {
     const stored = await chrome.storage?.local.get("hkGeneratedNotes");
+    const previous = stored?.hkGeneratedNotes?.[pageUrl] || {};
     const nextNotes = {
       ...(stored?.hkGeneratedNotes ?? {}),
-      [pageUrl]: notePayload,
+      [pageUrl]: { ...previous, ...notePayload, formatVersion: 2 },
     };
     await chrome.storage?.local.set({ hkGeneratedNotes: nextNotes });
   } catch (error) {
@@ -1964,7 +2098,7 @@ const clearPageHighlights = async () => {
   setAiPanelStatus(t("ai.statusClearedAndReady"));
 };
 
-const applyPreviewHighlight = (range, color, reason, extra = "", source = "") => {
+const applyPreviewHighlight = (range, color, reason, extra = "", source = "", kind) => {
   const snapshot = serializeRange(range.cloneRange());
   const text = normalizeWhitespace(snapshot.text);
   if (!text) return null;
@@ -1985,6 +2119,7 @@ const applyPreviewHighlight = (range, color, reason, extra = "", source = "") =>
       url: pageKey,
       createdAt: Date.now(),
       note,
+      ...(kind ? { kind } : {}),
     },
   };
 };
@@ -2122,9 +2257,12 @@ const applyAiPageTags = async (rawTagsSection) => {
   return merged.length - existing.length;
 };
 
-const applyNotePayload = async (noteText) => {
+const applyNotePayload = async (noteText, { context } = {}) => {
+  const previous = highlightPanelState.notesByPage[pageKey] || {};
   const notePayload = {
-    note: noteText,
+    ...previous,
+    ...(typeof noteText === "string" && noteText.trim() ? { note: noteText } : {}),
+    ...(typeof context === "string" && context.trim() ? { context: context.trim() } : {}),
     provider: "chatgpt",
     model: "chatgpt-web",
     generatedAt: Date.now(),
@@ -2197,6 +2335,7 @@ const applySharedPayload = async (payload, { overwrite = false } = {}) => {
         text: item.text,
         color: item.color,
         reason: item.note,
+        kind: item.kind,
       })),
       preferredPalette
     );
@@ -2210,8 +2349,15 @@ const applySharedPayload = async (payload, { overwrite = false } = {}) => {
     }
   }
   const noteText = (payload.note || "").trim();
-  if (noteText) {
-    await applyNotePayload(noteText);
+  const context = typeof payload.context === "string" ? payload.context.trim() : "";
+  if (noteText || context) {
+    await applyNotePayload(noteText, { context });
+  }
+  if (typeof payload.personalNote === "string") {
+    const stored = await chrome.storage.local.get("hkPersonalNotes");
+    const personalNotes = { ...(stored?.hkPersonalNotes || {}) };
+    personalNotes[pageKey] = { text: payload.personalNote, updatedAt: Date.now() };
+    await chrome.storage.local.set({ hkPersonalNotes: personalNotes });
   }
   const outline = (payload.mindmap || "").trim();
   if (outline) {
@@ -2235,7 +2381,7 @@ const applySharedPayload = async (payload, { overwrite = false } = {}) => {
     }
   }
   await ensurePageMetaTitle(pageKey, payload.title || document.title);
-  if (!highlight && !noteText) {
+  if (!highlight && !noteText && !context && typeof payload.personalNote !== "string") {
     throw new Error(t("ai.errUnrecognized"));
   }
   return { highlight, noteImported: Boolean(noteText), tagsAdded };
@@ -2301,8 +2447,10 @@ const applyAiResponseSections = async (text, { type } = {}) => {
     const applied = await applySharedPayload({
       title: sharedMd.title,
       tags: sharedMd.tags,
-      hl: sharedMd.items.map((item) => ({ text: item.text, note: item.note })),
+      hl: sharedMd.items.map((item) => ({ text: item.text, note: item.note, kind: item.kind })),
       note: sharedMd.summary,
+      context: sharedMd.context,
+      personalNote: sharedMd.personalNote,
       mindmap: sharedMd.outline,
     });
     // 貼的是別頁的筆記 → 照套但提醒（文字定位可能找不到原文）。
@@ -3269,6 +3417,7 @@ const buildHighlightExportEntry = (entry) => {
     color: toHexColor(entry.color || DEFAULT_COLOR),
     text: entry.text ?? "",
     note: entry.note ?? "",
+    ...(entry.kind ? { kind: entry.kind } : {}),
     range,
     createdAt: entry.createdAt ?? Date.now(),
   };
@@ -3439,6 +3588,7 @@ const normalizeImportedHighlightEntry = (entry, index) => {
       typeof entry.title === "string" && entry.title.trim()
         ? entry.title.trim()
         : undefined,
+    ...(entry.kind === "term" || entry.kind === "passage" ? { kind: entry.kind } : {}),
   };
   return normalized;
 };
@@ -7457,6 +7607,100 @@ const handleHighlightClick = (event) => {
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "BUILD_READING_GUIDE_PROMPT") {
+    (async () => {
+      try {
+        const pageData = {
+          title: document.title,
+          url: pageKey,
+          pageText: getPagePlainText(),
+          highlights: await collectPageHighlights(),
+        };
+        const palette = await refreshPaletteFromStorage();
+        sendResponse({
+          success: true,
+          prompt: buildReadingGuidePrompt(pageData, palette),
+          pageKey,
+          provider: aiSettings.provider,
+          configured: aiSettings.provider === "chatgpt" || Boolean(
+            (aiSettings.provider === "openai" ? aiSettings.openaiKey : aiSettings.geminiKey)?.trim()
+          ),
+        });
+      } catch (error) {
+        sendResponse({ success: false, error: error?.message || t("sidebar.extractError") });
+      }
+    })();
+    return true;
+  }
+  if (message?.type === "GENERATE_READING_GUIDE") {
+    (async () => {
+      try {
+        const provider = aiSettings.provider;
+        if (provider === "chatgpt") {
+          sendResponse({ success: false, manual: true, error: t("sidebar.manualPaste") });
+          return;
+        }
+        const apiKey = provider === "openai" ? aiSettings.openaiKey?.trim() : aiSettings.geminiKey?.trim();
+        if (!apiKey) throw new Error(t("ai.errNoApiKey"));
+        const pageData = {
+          title: document.title,
+          url: pageKey,
+          pageText: getPagePlainText(),
+          highlights: await collectPageHighlights(),
+        };
+        const palette = await refreshPaletteFromStorage();
+        const prompt = buildReadingGuidePrompt(pageData, palette);
+        const model = provider === "openai" ? aiSettings.openaiModel : aiSettings.geminiModel;
+        const response = provider === "openai"
+          ? await callOpenAI(apiKey, prompt)
+          : await callGemini(apiKey, prompt);
+        sendResponse(await applyReadingGuideResponse(response, prompt, provider, model));
+      } catch (error) {
+        console.debug("產生閱讀導覽失敗", error);
+        sendResponse({ success: false, error: error?.message || t("sidebar.generateError") });
+      }
+    })();
+    return true;
+  }
+  if (message?.type === "APPLY_READING_GUIDE_RESPONSE") {
+    (async () => {
+      try {
+        const text = typeof message.text === "string" ? message.text.trim() : "";
+        if (!text) throw new Error(t("sidebar.parseError"));
+        const result = await applyReadingGuideResponse(text, message.prompt || "", "chatgpt", "chatgpt-web");
+        sendResponse(result);
+      } catch (error) {
+        sendResponse({ success: false, error: error?.message || t("sidebar.parseError") });
+      }
+    })();
+    return true;
+  }
+  if (message?.type === "FOCUS_SAVED_HIGHLIGHT") {
+    (async () => {
+      try {
+        const entries = await getStoredHighlights();
+        const targetText = normalizeWhitespace(message.text || "").toLowerCase();
+        const entry = entries.find((item) => {
+          if (normalizeWhitespace(item?.text || "").toLowerCase() !== targetText) return false;
+          if (message.kind === "term") return item.kind === "term";
+          return !message.kind || item.kind === "passage" || !item.kind;
+        });
+        const preview = previewData.find((item) =>
+          normalizeWhitespace(item.data?.text || "").toLowerCase() === targetText &&
+          (!message.kind || item.data?.kind === message.kind)
+        );
+        const targetEntry = entry || preview?.data;
+        if (!targetEntry) throw new Error(t("sidebar.noMatch"));
+        const target = document.querySelector(`[${HIGHLIGHT_ATTR}="${targetEntry.id}"]`);
+        if (!target) throw new Error(t("sidebar.noMatch"));
+        focusHighlightElement(targetEntry.id);
+        sendResponse({ success: true });
+      } catch (error) {
+        sendResponse({ success: false, error: error?.message || t("sidebar.noMatch") });
+      }
+    })();
+    return true;
+  }
   if (message?.type === "GET_PAGE_HIGHLIGHTS") {
     (async () => {
       try {
@@ -7474,6 +7718,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
     })();
     return true;
+  }
+  if (message?.type === "OPEN_AI_SETTINGS") {
+    openHighlightPanel({ view: "ai-note" });
+    sendResponse({ success: true });
+    return false;
   }
   if (message?.type === "BUILD_AI_HIGHLIGHT_PROMPT") {
     (async () => {
@@ -7883,6 +8132,7 @@ const startRawShareImport = (page) => {
       PAGE_META_KEY,
       "hkGeneratedNotes",
       MINDMAP_STORAGE_KEY,
+      "hkPersonalNotes",
     ]);
     const existingEntries = Array.isArray(cur[url]) ? cur[url] : [];
     let entries;
@@ -7913,12 +8163,27 @@ const startRawShareImport = (page) => {
     metaAll[url] = metaEntry;
 
     const notesAll = { ...(cur.hkGeneratedNotes || {}) };
-    if (page.note && (mode !== "merge" || !notesAll[url])) {
-      notesAll[url] = page.note;
+    if (page.note) {
+      if (mode === "merge" && notesAll[url]) {
+        notesAll[url] = {
+          ...page.note,
+          ...notesAll[url],
+          ...(notesAll[url].context || !page.note.context ? {} : { context: page.note.context }),
+        };
+      } else {
+        notesAll[url] = page.note;
+      }
     }
     const mapsAll = { ...(cur[MINDMAP_STORAGE_KEY] || {}) };
     if (page.mindmap && (mode !== "merge" || !mapsAll[url])) {
       mapsAll[url] = page.mindmap;
+    }
+    const personalNotesAll = { ...(cur.hkPersonalNotes || {}) };
+    if (
+      typeof page.personalNote === "string" &&
+      (mode !== "merge" || !personalNotesAll[url]?.text)
+    ) {
+      personalNotesAll[url] = { text: page.personalNote, updatedAt: Date.now() };
     }
 
     await chrome.storage.local.set({
@@ -7926,6 +8191,7 @@ const startRawShareImport = (page) => {
       [PAGE_META_KEY]: metaAll,
       hkGeneratedNotes: notesAll,
       [MINDMAP_STORAGE_KEY]: mapsAll,
+      hkPersonalNotes: personalNotesAll,
     });
     return entries.length;
   };
@@ -7992,7 +8258,7 @@ const detectSharedNotes = async () => {
       );
       if (
         payload?.v === 1 &&
-        (payload.hl?.length || payload.note || payload.mindmap)
+        (payload.hl?.length || payload.note || payload.context || payload.personalNote || payload.mindmap)
       ) {
         startFragmentShareImport(payload);
       }

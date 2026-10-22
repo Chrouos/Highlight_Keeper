@@ -14,7 +14,9 @@
 
   // 區塊標記別名（中英雙語）：===重點===／===Highlights=== 等都認。
   const AI_SECTION_ALIASES = {
-    highlights: ["重點", "畫重點", "標註", "highlights", "marks"],
+    highlights: ["重點", "重點標註", "畫重點", "標註", "highlights", "marks"],
+    context: ["脈絡", "主線", "論述脈絡", "context", "mainthread", "articlecontext"],
+    terms: ["專有名詞", "名詞解釋", "名詞", "terms", "glossary"],
     note: ["摘要", "筆記", "摘要筆記", "summary", "notes"],
     mindmap: ["心智圖", "mindmap"],
     tags: ["標籤", "tags", "tag", "關鍵字", "keywords"],
@@ -218,6 +220,55 @@
     return items;
   };
 
+  // 將新版閱讀指南與舊版「重點／摘要」格式統一成側欄可用資料。
+  // 專有名詞區塊接受「名詞／解釋」格式，也接受既有「原文／重點」格式。
+  const parseReadingGuideResponse = (rawText, deps = {}) => {
+    const sections = splitAiSections(rawText) || {};
+    const context = Array.from(String(sections.context || sections.note || "").trim())
+      .slice(0, 350)
+      .join("");
+    const termsText = sections.terms || "";
+    const parsedTerms = [];
+    const termBlocks = termsText.split(/\n\s*\n/);
+    termBlocks.forEach((block) => {
+      let text = "";
+      let explanation = "";
+      block.split(/\r?\n/).forEach((rawLine) => {
+        const line = rawLine.trim();
+        const term = line.match(/^(?:名詞|專有名詞|詞條|term)\s*[:：]\s*(.+)$/i);
+        const definition = line.match(/^(?:解釋|說明|定義|explanation|definition)\s*[:：]\s*(.*)$/i);
+        if (term) text = term[1].trim();
+        else if (definition) explanation = definition[1].trim();
+      });
+      if (text && explanation) parsedTerms.push({ text, explanation: Array.from(explanation).slice(0, 120).join("") });
+    });
+    if (!parsedTerms.length && termsText) {
+      parseHighlightBlocks(termsText, deps).forEach((item) => {
+        if (item.text && item.reason) {
+          parsedTerms.push({ text: item.text, explanation: Array.from(item.reason).slice(0, 120).join("") });
+        }
+      });
+    }
+
+    const highlights = parseHighlightBlocks(sections.highlights || "", deps)
+      .map((item) => ({
+        ...item,
+        reason: String(item.reason || "").slice(0, 180),
+        kind: "passage",
+      }));
+    const seen = new Set();
+    const terms = parsedTerms
+      .filter((item) => {
+        const key = item.text.toLocaleLowerCase();
+        if (!item.text || !item.explanation || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 7)
+      .map((item) => ({ text: item.text, explanation: item.explanation }));
+    return { context, terms, highlights: highlights.slice(0, 7) };
+  };
+
   // 解析「延伸」區塊：每組兩行「原文：…／延伸：…」，回傳 [{text, extra}]。
   // 之所以要求 AI 附上原文片段，是為了把補充掛回「那一句」，而不是丟一大段
   // 看不出在講哪裡的補充。
@@ -278,7 +329,12 @@
             : null;
         if (!url || !isHttpUrl(url)) return null;
         const entries = Array.isArray(page.entries) ? page.entries : [];
-        if (!entries.length) return null;
+        const note = page.note && typeof page.note === "object" ? page.note : null;
+        const mindmap =
+          page.mindmap && typeof page.mindmap === "object" ? page.mindmap : null;
+        const hasPersonalNote = typeof page.personalNote === "string";
+        const personalNote = hasPersonalNote ? page.personalNote : "";
+        if (!entries.length && !note && !mindmap && !personalNote) return null;
         return {
           url,
           title: typeof page.title === "string" ? page.title : "",
@@ -286,9 +342,9 @@
             ? page.tags.map((t) => String(t).trim()).filter(Boolean)
             : [],
           entries,
-          note: page.note && typeof page.note === "object" ? page.note : null,
-          mindmap:
-            page.mindmap && typeof page.mindmap === "object" ? page.mindmap : null,
+          note,
+          mindmap,
+          ...(hasPersonalNote ? { personalNote } : {}),
         };
       })
       .filter(Boolean);
@@ -303,6 +359,8 @@
       tags: labels.tags || "標籤",
       highlights: labels.highlights || "重點",
       summary: labels.summary || "摘要筆記",
+      context: labels.context || "脈絡",
+      personalNote: labels.personalNote || "我的筆記",
       mindmap: labels.mindmap || "心智圖大綱",
     };
     const lines = [];
@@ -323,7 +381,8 @@
       entries.forEach((entry) => {
         const text = (entry?.text || "").trim();
         if (!text) return;
-        lines.push(`- ${text.replace(/\n+/g, " ")}`);
+        const kindPrefix = entry?.kind === "term" ? "〔專有名詞〕 " : "";
+        lines.push(`- ${kindPrefix}${text.replace(/\n+/g, " ")}`);
         const note = (entry?.note || "").trim();
         if (note) lines.push(`  > ${note.replace(/\n+/g, " ")}`);
       });
@@ -334,6 +393,16 @@
         ? page.note.note.trim()
         : "";
     if (summary) lines.push("", `## ${L.summary}`, summary);
+
+    const context =
+      page.note && typeof page.note.context === "string"
+        ? page.note.context.trim()
+        : "";
+    if (context) lines.push("", `## ${L.context}`, context);
+
+    const personalNote =
+      typeof page.personalNote === "string" ? page.personalNote.trim() : "";
+    if (personalNote) lines.push("", `## ${L.personalNote}`, personalNote);
 
     const outline =
       page.mindmap && typeof page.mindmap.outline === "string"
@@ -349,6 +418,8 @@
   const MD_SECTION_ALIASES = {
     highlights: ["重點", "highlights"],
     summary: ["摘要筆記", "summary"],
+    context: ["脈絡", "文章脈絡", "context"],
+    personalNote: ["我的筆記", "個人筆記", "personal notes", "my notes"],
     mindmap: ["心智圖大綱", "mind map outline", "mindmap"],
   };
   const MD_TAGS_PREFIX = /^(標籤|tags)\s*[:：]\s*/i;
@@ -367,10 +438,14 @@
       tags: [],
       items: [],
       summary: "",
+      context: "",
+      personalNote: "",
       outline: "",
     };
     let section = null; // null | highlights | summary | mindmap
     const summaryLines = [];
+    const contextLines = [];
+    const personalNoteLines = [];
     const outlineLines = [];
 
     for (const rawLine of lines) {
@@ -406,7 +481,12 @@
       if (section === "highlights") {
         const item = line.match(/^-\s+(.*)$/);
         if (item) {
-          result.items.push({ text: item[1].trim(), note: "" });
+          const term = item[1].match(/^(?:〔專有名詞〕\s*|\[term\]\s*)/i);
+          result.items.push({
+            text: item[1].replace(/^(?:〔專有名詞〕\s*|\[term\]\s*)/i, "").trim(),
+            note: "",
+            ...(term ? { kind: "term" } : {}),
+          });
           continue;
         }
         const note = line.match(/^\s+>\s*(.*)$/);
@@ -420,16 +500,26 @@
         summaryLines.push(line);
         continue;
       }
+      if (section === "context") {
+        contextLines.push(line);
+        continue;
+      }
+      if (section === "personalNote") {
+        personalNoteLines.push(line);
+        continue;
+      }
       if (section === "mindmap") {
         outlineLines.push(line);
       }
     }
 
     result.summary = summaryLines.join("\n").trim();
+    result.context = contextLines.join("\n").trim();
+    result.personalNote = personalNoteLines.join("\n").trim();
     result.outline = outlineLines.join("\n").trim();
     result.items = result.items.filter((item) => item.text);
     // 至少要有「重點」條列或摘要其中之一，且有標題或網址，才視為分享格式。
-    if (!result.items.length && !result.summary) return null;
+    if (!result.items.length && !result.summary && !result.context && !result.personalNote) return null;
     if (!result.title && !result.url) return null;
     return result;
   };
@@ -442,6 +532,7 @@
     parseMindmapOutline,
     looksLikeMindmapOutline,
     parseHighlightBlocks,
+    parseReadingGuideResponse,
     parseExtraBlocks,
     looseKey,
     normalizeBulkPages,

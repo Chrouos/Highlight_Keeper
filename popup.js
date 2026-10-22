@@ -16,6 +16,7 @@ const els = {
   copyNotesBtn: document.getElementById("copyNotesBtn"),
   downloadNotesBtn: document.getElementById("downloadNotesBtn"),
   openPanelBtn: document.getElementById("openPanelBtn"),
+  openReadingSidebarBtn: document.getElementById("openReadingSidebarBtn"),
   openManagerBtn: document.getElementById("openManagerBtn"),
   langSelect: document.getElementById("langSelect"),
 };
@@ -30,6 +31,7 @@ const normalizePageKey = (href) =>
 const PAGE_META_KEY = "__hk_page_meta__";
 const GENERATED_NOTES_KEY = "hkGeneratedNotes";
 const MINDMAP_KEY = "hkMindmaps";
+const PERSONAL_NOTES_KEY = "hkPersonalNotes";
 const GITHUB_SETTINGS_KEY = "hkGithubSyncSettings";
 
 const RECEIVER_MISSING_ERROR = "Receiving end does not exist.";
@@ -166,12 +168,14 @@ const collectCurrentPageEntry = async () => {
     PAGE_META_KEY,
     GENERATED_NOTES_KEY,
     MINDMAP_KEY,
+    PERSONAL_NOTES_KEY,
   ]);
   const entries = Array.isArray(stored?.[key]) ? stored[key] : [];
   const meta = stored?.[PAGE_META_KEY]?.[key] || {};
   const note = stored?.[GENERATED_NOTES_KEY]?.[key] || null;
   const mindmap = stored?.[MINDMAP_KEY]?.[key] || null;
-  if (!entries.length && !note && !mindmap) {
+  const personalNote = stored?.[PERSONAL_NOTES_KEY]?.[key]?.text || "";
+  if (!entries.length && !note && !mindmap && !personalNote) {
     return { error: t("popup.errNoNotes") };
   }
   return {
@@ -182,6 +186,9 @@ const collectCurrentPageEntry = async () => {
       entries,
       note,
       mindmap,
+      ...(typeof stored?.[PERSONAL_NOTES_KEY]?.[key]?.text === "string"
+        ? { personalNote }
+        : {}),
     },
   };
 };
@@ -299,6 +306,8 @@ const copyCurrentPageNotes = async () => {
       tags: t("notesMd.tags"),
       highlights: t("notesMd.highlights"),
       summary: t("notesMd.summary"),
+      context: t("notesMd.context"),
+      personalNote: t("notesMd.personalNote"),
       mindmap: t("notesMd.mindmap"),
     });
     await navigator.clipboard.writeText(markdown);
@@ -399,6 +408,20 @@ els.shareLinkBtn?.addEventListener("click", shareCurrentPageLink);
 els.copyNotesBtn?.addEventListener("click", copyCurrentPageNotes);
 els.downloadNotesBtn?.addEventListener("click", downloadCurrentPageNotes);
 els.openPanelBtn?.addEventListener("click", openPagePanel);
+els.openReadingSidebarBtn?.addEventListener("click", async () => {
+  try {
+    const tab = await getActiveTab();
+    if (!tab?.id || !/^https?:/i.test(tab.url || "")) {
+      setStatus(t("popup.errNoTab"), true);
+      return;
+    }
+    await chrome.sidePanel.open({ tabId: tab.id });
+    window.close();
+  } catch (error) {
+    console.debug("開啟閱讀側欄失敗", error);
+    setStatus(t("popup.errOpenReadingSidebar"), true);
+  }
+});
 els.openManagerBtn?.addEventListener("click", () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("manager.html") });
 });

@@ -10,12 +10,14 @@ const GITHUB_DEFAULT_SETTINGS = {
 
 const MINDMAP_KEY = "hkMindmaps";
 const GENERATED_NOTES_KEY = "hkGeneratedNotes";
+const PERSONAL_NOTES_KEY = "hkPersonalNotes";
 
 const state = {
   pages: [],
   meta: {},
   notes: {},
   mindmaps: {},
+  personalNotes: {},
   searchTerm: "",
   sortBy: "updated",
   activeTag: "",
@@ -281,6 +283,7 @@ const normalizeImportedHighlightEntry = (entry, index) => {
       typeof entry.title === "string" && entry.title.trim()
         ? entry.title.trim()
         : undefined,
+    ...(entry.kind === "term" || entry.kind === "passage" ? { kind: entry.kind } : {}),
   };
 };
 
@@ -289,18 +292,34 @@ const fetchAllPages = async () => {
   const meta = all[PAGE_META_KEY] || {};
   const notes = all[GENERATED_NOTES_KEY] || {};
   const mindmaps = all[MINDMAP_KEY] || {};
-  const pages = Object.entries(all)
-    .filter(([key, value]) => isValidPageKey(key) && Array.isArray(value))
-    .map(([url, entries]) => {
+  const personalNotes = all[PERSONAL_NOTES_KEY] || {};
+  const pageKeys = new Set([
+    ...Object.entries(all)
+      .filter(([key, value]) => isValidPageKey(key) && Array.isArray(value))
+      .map(([key]) => key),
+    ...Object.keys(meta),
+    ...Object.keys(notes),
+    ...Object.keys(mindmaps),
+    ...Object.keys(personalNotes),
+  ].filter(isValidPageKey));
+  const pages = [...pageKeys]
+    .map((url) => {
+      const entries = Array.isArray(all[url]) ? all[url] : [];
       const latest = entries.reduce(
         (max, entry) => Math.max(max, Number(entry?.createdAt) || 0),
         0
+      );
+      const updatedAt = Math.max(
+        latest,
+        Number(notes[url]?.generatedAt) || 0,
+        Number(mindmaps[url]?.generatedAt) || 0,
+        Number(personalNotes[url]?.updatedAt) || 0
       );
       return {
         url,
         title: meta[url]?.title?.trim() || getPageDisplayName(url),
         total: entries.length,
-        updatedAt: latest,
+        updatedAt,
         tags: Array.isArray(meta[url]?.tags) ? meta[url].tags : [],
         entries,
       };
@@ -314,12 +333,16 @@ const fetchAllPages = async () => {
       if (entry?.note) parts.push(entry.note);
       if (Array.isArray(entry?.tags)) parts.push(...entry.tags);
     });
+    if (notes[page.url]?.note) parts.push(notes[page.url].note);
+    if (notes[page.url]?.context) parts.push(notes[page.url].context);
+    if (personalNotes[page.url]?.text) parts.push(personalNotes[page.url].text);
     page._search = parts.filter(Boolean).join("\n").toLowerCase();
   });
   state.pages = pages;
   state.meta = meta;
   state.notes = notes;
   state.mindmaps = mindmaps;
+  state.personalNotes = personalNotes;
 };
 
 const matchesSearch = (page, term) => {
@@ -687,18 +710,22 @@ const deletePage = async (url) => {
     PAGE_META_KEY,
     GENERATED_NOTES_KEY,
     MINDMAP_KEY,
+    PERSONAL_NOTES_KEY,
   ]);
   const meta = { ...(stored[PAGE_META_KEY] || {}) };
   const notes = { ...(stored[GENERATED_NOTES_KEY] || {}) };
   const maps = { ...(stored[MINDMAP_KEY] || {}) };
+  const personalNotes = { ...(stored[PERSONAL_NOTES_KEY] || {}) };
   delete meta[url];
   delete notes[url];
   delete maps[url];
+  delete personalNotes[url];
   await chrome.storage.local.remove(url);
   await chrome.storage.local.set({
     [PAGE_META_KEY]: meta,
     [GENERATED_NOTES_KEY]: notes,
     [MINDMAP_KEY]: maps,
+    [PERSONAL_NOTES_KEY]: personalNotes,
   });
 };
 
@@ -792,10 +819,12 @@ const mergeDuplicateGroups = async (groups) => {
     PAGE_META_KEY,
     GENERATED_NOTES_KEY,
     MINDMAP_KEY,
+    PERSONAL_NOTES_KEY,
   ]);
   const meta = { ...(stored[PAGE_META_KEY] || {}) };
   const notes = { ...(stored[GENERATED_NOTES_KEY] || {}) };
   const maps = { ...(stored[MINDMAP_KEY] || {}) };
+  const personalNotes = { ...(stored[PERSONAL_NOTES_KEY] || {}) };
   const entryUpdates = {};
   const keysToRemove = [];
   let mergedExtra = 0;
@@ -810,12 +839,14 @@ const mergeDuplicateGroups = async (groups) => {
     let title;
     let note;
     let mindmap;
+    let personalNote;
     pages.forEach((p) => {
       const m = meta[p.url];
       if (m?.title && !title) title = m.title;
       (Array.isArray(m?.tags) ? m.tags : []).forEach((tag) => tagSet.add(tag));
       if (note === undefined && notes[p.url] != null) note = notes[p.url];
       if (mindmap === undefined && maps[p.url] != null) mindmap = maps[p.url];
+      if (personalNote === undefined && personalNotes[p.url] != null) personalNote = personalNotes[p.url];
     });
 
     // 先清掉群組內所有舊 key 的附屬資料，再把合併結果寫到主頁面。
@@ -823,6 +854,7 @@ const mergeDuplicateGroups = async (groups) => {
       delete meta[u];
       delete notes[u];
       delete maps[u];
+      delete personalNotes[u];
       if (u !== canonical) keysToRemove.push(u);
     });
     const newMeta = {};
@@ -831,6 +863,7 @@ const mergeDuplicateGroups = async (groups) => {
     if (Object.keys(newMeta).length) meta[canonical] = newMeta;
     if (note !== undefined) notes[canonical] = note;
     if (mindmap !== undefined) maps[canonical] = mindmap;
+    if (personalNote !== undefined) personalNotes[canonical] = personalNote;
   });
 
   await chrome.storage.local.set({
@@ -838,6 +871,7 @@ const mergeDuplicateGroups = async (groups) => {
     [PAGE_META_KEY]: meta,
     [GENERATED_NOTES_KEY]: notes,
     [MINDMAP_KEY]: maps,
+    [PERSONAL_NOTES_KEY]: personalNotes,
   });
   if (keysToRemove.length) await chrome.storage.local.remove(keysToRemove);
   return mergedExtra;
@@ -921,6 +955,9 @@ const pageToExportEntry = (page) => ({
   entries: page.entries,
   note: state.notes[page.url] || null,
   mindmap: state.mindmaps[page.url] || null,
+  ...(typeof state.personalNotes[page.url]?.text === "string"
+    ? { personalNote: state.personalNotes[page.url].text }
+    : {}),
 });
 
 const buildExportPayloadForPages = (pages, extra = {}) => ({
@@ -1049,6 +1086,8 @@ const copyPageNotesAsMarkdown = async (page) => {
       tags: t("notesMd.tags"),
       highlights: t("notesMd.highlights"),
       summary: t("notesMd.summary"),
+      context: t("notesMd.context"),
+      personalNote: t("notesMd.personalNote"),
       mindmap: t("notesMd.mindmap"),
     });
     await navigator.clipboard.writeText(markdown);
@@ -2308,11 +2347,23 @@ const saveNotesAndMindmaps = async (noteUpdates, mindmapUpdates) => {
   });
 };
 
+const savePersonalNotes = async (personalNoteUpdates) => {
+  if (!Object.keys(personalNoteUpdates).length) return;
+  const stored = await chrome.storage.local.get(PERSONAL_NOTES_KEY);
+  await chrome.storage.local.set({
+    [PERSONAL_NOTES_KEY]: {
+      ...(stored[PERSONAL_NOTES_KEY] || {}),
+      ...personalNoteUpdates,
+    },
+  });
+};
+
 // 從一批已決定要匯入的頁面，組出 meta（title+tags）／notes／mindmaps 並寫入。
 const applyImportedPageExtras = async (pages) => {
   const metaUpdates = {};
   const noteUpdates = {};
   const mindmapUpdates = {};
+  const personalNoteUpdates = {};
   pages.forEach((page) => {
     const metaEntry = { ...(state.meta[page.url] || {}) };
     let touched = false;
@@ -2327,9 +2378,13 @@ const applyImportedPageExtras = async (pages) => {
     if (touched) metaUpdates[page.url] = metaEntry;
     if (page.note) noteUpdates[page.url] = page.note;
     if (page.mindmap) mindmapUpdates[page.url] = page.mindmap;
+    if (typeof page.personalNote === "string") {
+      personalNoteUpdates[page.url] = { text: page.personalNote, updatedAt: Date.now() };
+    }
   });
   await savePageMetaTitles(metaUpdates);
   await saveNotesAndMindmaps(noteUpdates, mindmapUpdates);
+  await savePersonalNotes(personalNoteUpdates);
 };
 
 const applyGithubBackupPages = async (pages) => {

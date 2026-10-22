@@ -17,7 +17,7 @@
 | A7 | 失聯標註提示 | 原文變動找不到標註時，在面板常駐提示數量 |
 | A8 | Toast 提示 | 存檔／匯入失敗等即時回饋 |
 
-## B. 側邊面板（contentScript 內建，`Ctrl/Cmd+Shift+K` 開關）
+## B. 頁面面板（contentScript 內建，`Ctrl/Cmd+Shift+K` 開關）
 
 | # | 功能 | 說明 |
 |---|---|---|
@@ -47,6 +47,7 @@
 |---|---|---|
 | C1 | 本頁標記數 / AI 模式 | 直接讀 storage，不喚醒 content script |
 | C2 | 在頁面開啟面板 | 必要時自動注入 content script |
+| C12 | 開啟閱讀側欄 | 由使用者點擊後呼叫 `chrome.sidePanel.open()` |
 | C3 | 複製 AI 畫重點 Prompt | 組出含全文＋色票＋標籤的 Prompt |
 | C4 | 貼上並套用 | textarea 貼上即自動套用；補 macOS popup 缺少的 Cmd+A/C/X/V/Z |
 | C5 | 複製分享連結 | 壓縮進 `原文網址#hk=…`；太長改走 GitHub raw |
@@ -88,9 +89,20 @@
 | # | 功能 |
 |---|---|
 | F1 | `normalizePageKey` 網址正規化（去追蹤參數、canonical 優先）|
-| F2 | `pageToMarkdown` 轉 Markdown（標籤／重點／摘要／心智圖）|
+| F2 | `pageToMarkdown` 轉 Markdown（標籤／重點／摘要／脈絡／個人筆記／心智圖）|
 | F3 | AI 回覆解析：重點 / 摘要 / 標籤 / 心智圖分段 |
-| F4 | storage keys：`hkColorPalette`、`hkLastColor`、`hkAISettings`、`__hk_page_meta__`、`hkGeneratedNotes`、`hkMindmaps`、`hkGithubSyncSettings`、`hkPanelSide`、`hkLang` |
+| F4 | storage keys：`hkColorPalette`、`hkLastColor`、`hkAISettings`、`__hk_page_meta__`、`hkGeneratedNotes`、`hkPersonalNotes`、`hkMindmaps`、`hkGithubSyncSettings`、`hkPanelSide`、`hkLang` |
+
+## G. Chrome 閱讀側欄（Chrome 116 以上）
+
+| # | 功能 | 說明 |
+|---|---|---|
+| G1 | 脈絡 | 3～5 句交代文章因果、轉折與結論，最多 350 個中文字 |
+| G2 | 專有名詞 | 顯示必要詞彙與簡短解釋，點擊可回到原文 |
+| G3 | 重點標註 | 精選關鍵段落；專有名詞與段落合計最多 7 項 |
+| G4 | 我的筆記 | 按頁自動儲存在 `hkPersonalNotes`，不會預設送入 AI |
+| G5 | AI 導覽 | OpenAI／Gemini 直接產生，或複製 Prompt 到 ChatGPT 貼回 |
+| G6 | 跨分頁同步 | 切換分頁時載入對應網址、文章脈絡與個人筆記 |
 
 ---
 
