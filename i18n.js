@@ -89,6 +89,7 @@
       "sidebar.notesSaving": "儲存中…",
       "sidebar.notesUnsaved": "尚未儲存",
       "sidebar.noMatch": "原文位置已變動，仍保留這則標註。",
+      "sidebar.unavailable": "未定位",
       "panel.deepResearchHint":
         "讓 AI 先想過一輪，再補文章沒寫到的背景、反面說法與延伸探索方向；結果接在摘要後面。",
       "ai.extraHeading": "延伸補充（未對應到句子）",
@@ -682,6 +683,7 @@
       "sidebar.notesSaving": "Saving…",
       "sidebar.notesUnsaved": "Unsaved",
       "sidebar.noMatch": "The source text moved; this saved highlight is kept.",
+      "sidebar.unavailable": "unlocated",
       "panel.deepResearchHint":
         "Ask the AI to think first, then add background, counterpoints and follow-up directions the article leaves out. Appended after the summary.",
       "ai.extraHeading": "Extra context (unmatched)",

@@ -402,7 +402,13 @@
 
     const personalNote =
       typeof page.personalNote === "string" ? page.personalNote.trim() : "";
-    if (personalNote) lines.push("", `## ${L.personalNote}`, personalNote);
+    if (personalNote) {
+      lines.push(
+        "",
+        `## ${L.personalNote}`,
+        ...personalNote.split("\n").map((line) => `> ${line}`)
+      );
+    }
 
     const outline =
       page.mindmap && typeof page.mindmap.outline === "string"
@@ -446,6 +452,7 @@
     const summaryLines = [];
     const contextLines = [];
     const personalNoteLines = [];
+    let hasPersonalNoteSection = false;
     const outlineLines = [];
 
     for (const rawLine of lines) {
@@ -453,8 +460,13 @@
       const heading = line.match(/^##\s+(.+)$/);
       if (heading) {
         const key = aliasToKey.get(heading[1].trim().toLowerCase());
+        if (!key && section === "personalNote") {
+          personalNoteLines.push(line);
+          continue;
+        }
         if (!key) return null; // 出現不認得的 ## 區塊 → 不是我們的格式
         section = key;
+        if (key === "personalNote") hasPersonalNoteSection = true;
         continue;
       }
       if (!section) {
@@ -505,7 +517,7 @@
         continue;
       }
       if (section === "personalNote") {
-        personalNoteLines.push(line);
+        personalNoteLines.push(line.replace(/^\s*> ?/, ""));
         continue;
       }
       if (section === "mindmap") {
@@ -515,11 +527,15 @@
 
     result.summary = summaryLines.join("\n").trim();
     result.context = contextLines.join("\n").trim();
-    result.personalNote = personalNoteLines.join("\n").trim();
+    if (hasPersonalNoteSection) {
+      result.personalNote = personalNoteLines.join("\n").trim();
+    } else {
+      delete result.personalNote;
+    }
     result.outline = outlineLines.join("\n").trim();
     result.items = result.items.filter((item) => item.text);
     // 至少要有「重點」條列或摘要其中之一，且有標題或網址，才視為分享格式。
-    if (!result.items.length && !result.summary && !result.context && !result.personalNote) return null;
+    if (!result.items.length && !result.summary && !result.context && !result.personalNote && !hasPersonalNoteSection) return null;
     if (!result.title && !result.url) return null;
     return result;
   };

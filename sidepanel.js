@@ -103,6 +103,10 @@ const makeItemButton = (item, kind) => {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "item-button";
+  if (item.unavailable) {
+    button.disabled = true;
+    button.classList.add("is-unavailable");
+  }
   button.addEventListener("click", async () => {
     if (!state.tabId) return;
     try {
@@ -120,6 +124,7 @@ const makeItemButton = (item, kind) => {
   const kindLabel = document.createElement("span");
   kindLabel.className = "item-kind";
   kindLabel.textContent = t(kind === "term" ? "sidebar.termKind" : "sidebar.passageKind");
+  if (item.unavailable) kindLabel.textContent += ` · ${t("sidebar.unavailable")}`;
   const text = document.createElement("span");
   text.className = "item-text";
   text.textContent = item.text || "";
@@ -148,12 +153,20 @@ const render = () => {
   els.emptyContext.hidden = Boolean(state.context);
 
   const storedHighlights = Array.isArray(page?.highlights) ? page.highlights : [];
-  const terms = state.guideTerms.length
-    ? state.guideTerms
-    : storedHighlights.filter((item) => item.kind === "term").map((item) => ({ text: item.text, reason: item.note }));
-  const highlights = state.guideHighlights.length
-    ? state.guideHighlights
-    : storedHighlights.filter((item) => item.kind !== "term").map((item) => ({ text: item.text, reason: item.note }));
+  const mergeItems = (stored, extra) => {
+    const items = stored.map((item) => ({ text: item.text, reason: item.note }));
+    const seen = new Set(items.map((item) => (item.text || "").trim().toLowerCase()));
+    extra.forEach((item) => {
+      const key = (item.text || "").trim().toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        items.push(item);
+      }
+    });
+    return items;
+  };
+  const terms = mergeItems(storedHighlights.filter((item) => item.kind === "term"), state.guideTerms);
+  const highlights = mergeItems(storedHighlights.filter((item) => item.kind !== "term"), state.guideHighlights);
   renderItems(els.terms, els.emptyTerms, terms, "term");
   renderItems(els.highlights, els.emptyHighlights, highlights, "passage");
   els.termsCount.textContent = String(terms.length);
@@ -187,9 +200,11 @@ const activateTab = (name) => {
 };
 
 const loadActiveTab = async () => {
-  await flushNote();
   const token = ++state.loadToken;
+  await flushNote();
+  if (token !== state.loadToken) return;
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (token !== state.loadToken) return;
   state.tabId = tab?.id ?? null;
   state.pageKey = "";
   state.page = null;
@@ -221,7 +236,9 @@ const loadActiveTab = async () => {
     if (token !== state.loadToken) return;
     const generated = stored[GENERATED_NOTES_KEY]?.[state.pageKey] || {};
     const personal = stored[PERSONAL_NOTES_KEY]?.[state.pageKey] || {};
-    state.context = generated.context || "";
+    state.context = generated.context || generated.note || "";
+    state.guideTerms = Array.isArray(generated.unlocatedTerms) ? generated.unlocatedTerms : [];
+    state.guideHighlights = Array.isArray(generated.unlocatedHighlights) ? generated.unlocatedHighlights : [];
     state.noteText = personal.text || "";
     els.personalNote.value = state.noteText;
     state.provider = promptInfo?.provider || "chatgpt";
@@ -241,13 +258,16 @@ const loadActiveTab = async () => {
 
 const applyGuideResponse = async (text) => {
   if (!state.tabId) return;
+  const request = { tabId: state.tabId, pageKey: state.pageKey, loadToken: state.loadToken };
+  const isCurrent = () => request.tabId === state.tabId && request.pageKey === state.pageKey && request.loadToken === state.loadToken;
   setStatus(t("sidebar.generating"));
   try {
-    const result = await sendToTab(state.tabId, {
+    const result = await sendToTab(request.tabId, {
       type: "APPLY_READING_GUIDE_RESPONSE",
       text,
       prompt: state.prompt,
     });
+    if (!isCurrent()) return;
     if (!result?.success) throw new Error(result?.error || t("sidebar.parseError"));
     state.context = result.context || state.context;
     state.guideTerms = result.terms || [];
@@ -256,15 +276,19 @@ const applyGuideResponse = async (text) => {
     render();
     setStatus(t("sidebar.guideApplied", { count: result.appliedCount || 0 }));
   } catch (error) {
+    if (!isCurrent()) return;
     setStatus(error?.message || t("sidebar.parseError"), true);
   }
 };
 
 const generateGuide = async () => {
   if (!state.tabId) return;
+  const request = { tabId: state.tabId, pageKey: state.pageKey, loadToken: state.loadToken };
+  const isCurrent = () => request.tabId === state.tabId && request.pageKey === state.pageKey && request.loadToken === state.loadToken;
   setStatus(t("sidebar.generating"));
   try {
-    const result = await sendToTab(state.tabId, { type: "GENERATE_READING_GUIDE" });
+    const result = await sendToTab(request.tabId, { type: "GENERATE_READING_GUIDE" });
+    if (!isCurrent()) return;
     if (result?.manual) {
       state.provider = "chatgpt";
       render();
@@ -278,6 +302,7 @@ const generateGuide = async () => {
     render();
     setStatus(t("sidebar.guideApplied", { count: result.appliedCount || 0 }));
   } catch (error) {
+    if (!isCurrent()) return;
     setStatus(error?.message || t("sidebar.generateError"), true);
   }
 };
@@ -341,7 +366,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !state.pageKey) return;
   if (changes[GENERATED_NOTES_KEY]) {
     const next = changes[GENERATED_NOTES_KEY].newValue || {};
-    state.context = next[state.pageKey]?.context || "";
+    state.context = next[state.pageKey]?.context || next[state.pageKey]?.note || "";
+    state.guideTerms = Array.isArray(next[state.pageKey]?.unlocatedTerms) ? next[state.pageKey].unlocatedTerms : [];
+    state.guideHighlights = Array.isArray(next[state.pageKey]?.unlocatedHighlights) ? next[state.pageKey].unlocatedHighlights : [];
     render();
   }
   if (changes[PERSONAL_NOTES_KEY] && !state.noteDirty) {

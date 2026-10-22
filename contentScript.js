@@ -1109,28 +1109,31 @@ ${existing || "（無）"}
 ${pageData.pageText}`;
 };
 
-const saveReadingGuideContext = async (context, provider, model, prompt) => {
-  if (!context?.trim()) return;
+const saveReadingGuideContext = async (context, provider, model, prompt, targetPageKey, unmatchedTerms = [], unmatchedHighlights = []) => {
+  if (!targetPageKey) return;
   const stored = await chrome.storage.local.get("hkGeneratedNotes");
-  const previous = stored?.hkGeneratedNotes?.[pageKey] || {};
+  const previous = stored?.hkGeneratedNotes?.[targetPageKey] || {};
   const payload = {
     ...previous,
-    context: context.trim(),
+    ...(context?.trim() ? { context: context.trim() } : {}),
+    unlocatedTerms: unmatchedTerms.map((item) => ({ text: item.text, explanation: item.reason, unavailable: true })),
+    unlocatedHighlights: unmatchedHighlights.map((item) => ({ text: item.text, reason: item.reason, unavailable: true })),
     formatVersion: 2,
     provider,
     model,
     prompt,
     generatedAt: Date.now(),
-    url: pageKey,
+    url: targetPageKey,
   };
-  await saveGeneratedNote(pageKey, payload);
+  await saveGeneratedNote(targetPageKey, payload);
   highlightPanelState.notesByPage = {
     ...highlightPanelState.notesByPage,
-    [pageKey]: payload,
+    [targetPageKey]: payload,
   };
 };
 
-const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatgpt", model = "chatgpt-web") => {
+const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatgpt", model = "chatgpt-web", targetPageKey = pageKey) => {
+  if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
   const parsed = HkParsers.parseReadingGuideResponse(rawText, {
     categories: aiSettings.categories,
     toHexColor,
@@ -1139,12 +1142,12 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
   if (!parsed.context && !parsed.terms.length && !parsed.highlights.length) {
     throw new Error(t("sidebar.parseError"));
   }
-  await saveReadingGuideContext(parsed.context, provider, model, prompt);
-
   const latestPalette = await refreshPaletteFromStorage();
+  if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
   const usageCounts = await collectColorUsageCounts();
   const palette = sortPaletteByUsage(latestPalette, usageCounts);
   const existing = await collectPageHighlights();
+  if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
   const seen = new Set(existing.map((item) => HkParsers.looseKey(item.text)));
   const tasks = [];
   parsed.terms.forEach((term) => {
@@ -1164,18 +1167,40 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
 
   let appliedCount = 0;
   let previewing = false;
+  let unmatchedTasks = [];
   if (tasks.length) {
     const result = await applyAutoHighlightTasksBatch(tasks, aiSettings.usePreview);
+    if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
+    unmatchedTasks = result.unmatched;
     appliedCount = result.appliedCount;
     previewing = aiSettings.usePreview && previewData.length > 0;
     if (previewing) showPreviewConfirmBar(previewData.length);
     else await ensurePageMetaTitle(pageKey, document.title);
+    await saveReadingGuideContext(
+      parsed.context,
+      provider,
+      model,
+      prompt,
+      targetPageKey,
+      result.unmatched.filter((item) => item.kind === "term"),
+      result.unmatched.filter((item) => item.kind !== "term")
+    );
+  } else {
+    await saveReadingGuideContext(parsed.context, provider, model, prompt, targetPageKey);
   }
+  const unmatchedKeys = new Set(unmatchedTasks.map((item) => HkParsers.looseKey(item.text)));
   return {
     success: true,
     context: parsed.context,
-    terms: tasks.filter((item) => item.kind === "term").map((item) => ({ text: item.text, explanation: item.reason })),
-    highlights: tasks.filter((item) => item.kind !== "term"),
+    terms: tasks.filter((item) => item.kind === "term").map((item) => ({
+      text: item.text,
+      explanation: item.reason,
+      ...(unmatchedKeys.has(HkParsers.looseKey(item.text)) ? { unavailable: true } : {}),
+    })),
+    highlights: tasks.filter((item) => item.kind !== "term").map((item) => ({
+      ...item,
+      ...(unmatchedKeys.has(HkParsers.looseKey(item.text)) ? { unavailable: true } : {}),
+    })),
     appliedCount,
     previewing,
   };
@@ -1884,18 +1909,21 @@ const findSpanForTextInIndex = (searchIndex, targetText, takenIntervals) => {
 };
 
 const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
+  const targetPageKey = pageKey;
   const searchIndex = buildNormalizedSearchIndex();
   if (searchIndex) {
     searchIndex.normalizedTextLower = searchIndex.normalizedText.toLowerCase();
   }
   let skippedCount = 0;
   const located = [];
+  const unmatched = [];
   const takenIntervals = [];
   if (searchIndex) {
     for (const task of tasks) {
       const span = findSpanForTextInIndex(searchIndex, task.text, takenIntervals);
       if (!span) {
         skippedCount += 1;
+        unmatched.push(task);
         continue;
       }
       takenIntervals.push(span);
@@ -1903,6 +1931,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
     }
   } else {
     skippedCount = tasks.length;
+    unmatched.push(...tasks);
   }
 
   // Apply back-to-front: wrapping a later range only splits text nodes inside
@@ -1920,6 +1949,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
       );
       if (!range) {
         skippedCount += 1;
+        unmatched.push(task);
         continue;
       }
       const ancestor =
@@ -1931,6 +1961,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
         rangeTouchesExistingHighlight(range)
       ) {
         skippedCount += 1;
+        unmatched.push(task);
         continue;
       }
       if (usePreview) {
@@ -1940,6 +1971,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
           appliedCount += 1;
         } else {
           skippedCount += 1;
+          unmatched.push(task);
         }
         continue;
       }
@@ -1947,6 +1979,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
       const text = normalizeWhitespace(snapshot.text);
       if (!text) {
         skippedCount += 1;
+        unmatched.push(task);
         continue;
       }
       const highlightId = `hk-ai-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -1959,7 +1992,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
         color: normalizedColor,
         text: snapshot.text,
         range: snapshot,
-        url: pageKey,
+        url: targetPageKey,
         createdAt: Date.now(),
         note,
         ...(task.kind ? { kind: task.kind } : {}),
@@ -1980,7 +2013,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
       panelRefreshSuppressed = false;
     }
   }
-  return { appliedCount, skippedCount };
+  return { appliedCount, skippedCount, unmatched };
 };
 
 const callOpenAI = async (key, prompt, options = {}) => {
@@ -2450,7 +2483,7 @@ const applyAiResponseSections = async (text, { type } = {}) => {
       hl: sharedMd.items.map((item) => ({ text: item.text, note: item.note, kind: item.kind })),
       note: sharedMd.summary,
       context: sharedMd.context,
-      personalNote: sharedMd.personalNote,
+      ...(typeof sharedMd.personalNote === "string" ? { personalNote: sharedMd.personalNote } : {}),
       mindmap: sharedMd.outline,
     });
     // 貼的是別頁的筆記 → 照套但提醒（文字定位可能找不到原文）。
@@ -7610,17 +7643,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "BUILD_READING_GUIDE_PROMPT") {
     (async () => {
       try {
+        const requestPageKey = pageKey;
         const pageData = {
           title: document.title,
-          url: pageKey,
+          url: requestPageKey,
           pageText: getPagePlainText(),
           highlights: await collectPageHighlights(),
         };
         const palette = await refreshPaletteFromStorage();
+        if (requestPageKey !== pageKey) throw new Error(t("sidebar.extractError"));
         sendResponse({
           success: true,
           prompt: buildReadingGuidePrompt(pageData, palette),
-          pageKey,
+          pageKey: requestPageKey,
           provider: aiSettings.provider,
           configured: aiSettings.provider === "chatgpt" || Boolean(
             (aiSettings.provider === "openai" ? aiSettings.openaiKey : aiSettings.geminiKey)?.trim()
@@ -7642,19 +7677,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         const apiKey = provider === "openai" ? aiSettings.openaiKey?.trim() : aiSettings.geminiKey?.trim();
         if (!apiKey) throw new Error(t("ai.errNoApiKey"));
+        const requestPageKey = pageKey;
         const pageData = {
           title: document.title,
-          url: pageKey,
+          url: requestPageKey,
           pageText: getPagePlainText(),
           highlights: await collectPageHighlights(),
         };
         const palette = await refreshPaletteFromStorage();
+        if (requestPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
         const prompt = buildReadingGuidePrompt(pageData, palette);
         const model = provider === "openai" ? aiSettings.openaiModel : aiSettings.geminiModel;
         const response = provider === "openai"
           ? await callOpenAI(apiKey, prompt)
           : await callGemini(apiKey, prompt);
-        sendResponse(await applyReadingGuideResponse(response, prompt, provider, model));
+        if (requestPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
+        sendResponse(await applyReadingGuideResponse(response, prompt, provider, model, requestPageKey));
       } catch (error) {
         console.debug("產生閱讀導覽失敗", error);
         sendResponse({ success: false, error: error?.message || t("sidebar.generateError") });
@@ -7667,7 +7705,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       try {
         const text = typeof message.text === "string" ? message.text.trim() : "";
         if (!text) throw new Error(t("sidebar.parseError"));
-        const result = await applyReadingGuideResponse(text, message.prompt || "", "chatgpt", "chatgpt-web");
+        const requestPageKey = pageKey;
+        const result = await applyReadingGuideResponse(text, message.prompt || "", "chatgpt", "chatgpt-web", requestPageKey);
         sendResponse(result);
       } catch (error) {
         sendResponse({ success: false, error: error?.message || t("sidebar.parseError") });

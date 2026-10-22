@@ -2400,15 +2400,31 @@ const applyGithubBackupPages = async (pages) => {
     return true;
   });
   const urls = uniquePages.map((page) => page.url);
-  const existing = await chrome.storage.local.get(urls);
-  const overlapping = uniquePages.filter(
-    (page) => Array.isArray(existing[page.url]) && existing[page.url].length
-  );
+  const existing = await chrome.storage.local.get([
+    ...urls,
+    PAGE_META_KEY,
+    GENERATED_NOTES_KEY,
+    MINDMAP_KEY,
+    PERSONAL_NOTES_KEY,
+  ]);
+  const hasLocalData = (url) =>
+    (Array.isArray(existing[url]) && existing[url].length > 0) ||
+    Boolean(existing[PAGE_META_KEY]?.[url]) ||
+    Boolean(existing[GENERATED_NOTES_KEY]?.[url]) ||
+    Boolean(existing[MINDMAP_KEY]?.[url]) ||
+    typeof existing[PERSONAL_NOTES_KEY]?.[url]?.text === "string";
+  const overlapping = uniquePages.filter((page) => hasLocalData(page.url));
   const toSortedJson = (value) => JSON.stringify(value ?? null);
   const isSameEntries = (currentEntries, nextEntries) =>
     toSortedJson(currentEntries) === toSortedJson(nextEntries);
   const identical = overlapping.filter((page) =>
-    isSameEntries(existing[page.url], page.entries)
+    isSameEntries(existing[page.url] || [], page.entries) &&
+    toSortedJson(existing[GENERATED_NOTES_KEY]?.[page.url] || null) === toSortedJson(page.note || null) &&
+    toSortedJson(existing[MINDMAP_KEY]?.[page.url] || null) === toSortedJson(page.mindmap || null) &&
+    (typeof page.personalNote !== "string" || existing[PERSONAL_NOTES_KEY]?.[page.url]?.text === page.personalNote) &&
+    (!(page.title || (Array.isArray(page.tags) && page.tags.length)) ||
+      (existing[PAGE_META_KEY]?.[page.url]?.title === page.title &&
+       toSortedJson(existing[PAGE_META_KEY]?.[page.url]?.tags || []) === toSortedJson(page.tags || [])))
   );
   const changed = overlapping.filter(
     (page) => !identical.includes(page)
@@ -2632,12 +2648,24 @@ const importMultipleFiles = async (files) => {
     return;
   }
 
-  const existing = await chrome.storage.local.get(candidatePages.map((p) => p.url));
+  const existing = await chrome.storage.local.get([
+    ...candidatePages.map((p) => p.url),
+    PAGE_META_KEY,
+    GENERATED_NOTES_KEY,
+    MINDMAP_KEY,
+    PERSONAL_NOTES_KEY,
+  ]);
   const toImport = [];
   const skipped = [];
   candidatePages.forEach((page) => {
     const current = existing[page.url];
-    if (Array.isArray(current) && current.length) {
+    const url = page.url;
+    const hasLocalData = (Array.isArray(current) && current.length > 0) ||
+      Boolean(existing[PAGE_META_KEY]?.[url]) ||
+      Boolean(existing[GENERATED_NOTES_KEY]?.[url]) ||
+      Boolean(existing[MINDMAP_KEY]?.[url]) ||
+      typeof existing[PERSONAL_NOTES_KEY]?.[url]?.text === "string";
+    if (hasLocalData) {
       skipped.push(page.url);
       return;
     }

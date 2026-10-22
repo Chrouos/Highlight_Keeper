@@ -42,6 +42,7 @@ textarea { width: 100%; resize: vertical; border: 1px solid #dededb; border-radi
 .item-list { display: grid; }
 .item-button { width: 100%; padding: 10px 0; border-width: 0 0 1px; border-radius: 0; text-align: left; background: transparent; }
 .item-button:last-child { border-bottom: 0; }
+.item-button.is-unavailable { cursor: default; opacity: 0.72; }
 .item-text { display: block; font-weight: 650; line-height: 1.55; }
 .item-kind { display: block; margin-bottom: 3px; color: #898989; font-size: 10px; }
 .item-note { display: block; margin-top: 4px; color: #727272; font-size: 12px; line-height: 1.6; }
