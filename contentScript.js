@@ -1092,10 +1092,11 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
   ];
   if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
   const seen = new Set(existing.map((item) => HkParsers.looseKey(item.text)));
-  const limits = HkParsers.getReadingGuideLimits(getPagePlainText());
+  const pageText = getPagePlainText();
+  const limits = HkParsers.getReadingGuideLimits(pageText);
   const guideItems = [
     ...parsed.terms.slice(0, limits.termsMax).map((term) => {
-      const text = normalizeWhitespace(HkParsers.pickTermText(term.text, getPagePlainText()));
+      const text = normalizeWhitespace(HkParsers.pickTermText(term.text, pageText));
       const label = normalizeWhitespace(term.text);
       return { text, ...(label !== text ? { label } : {}), kind: "term", reason: term.explanation, color: palette[1] || palette[0] || DEFAULT_COLOR };
     }),
@@ -1474,18 +1475,28 @@ const buildFoldedIndex = (searchIndex) => {
   return searchIndex.folded;
 };
 
-const findFoldedSpan = (searchIndex, targetText, takenIntervals) => {
+// 英文名詞不標在單字中間（test 不標 latest 的字尾）；中文沒有這個問題。
+const isWholeWordSpan = (searchIndex, span) => {
+  const raw = searchIndex.text || "";
+  const isWordChar = (char) => Boolean(char) && /[A-Za-z0-9]/.test(char);
+  const cutsStart = isWordChar(raw[span.startRaw]) && isWordChar(raw[span.startRaw - 1]);
+  const cutsEnd = isWordChar(raw[span.endRaw - 1]) && isWordChar(raw[span.endRaw]);
+  return !cutsStart && !cutsEnd;
+};
+
+const findFoldedSpan = (searchIndex, targetText, takenIntervals, accept) => {
   const needle = [...String(targetText || "")].map(foldForMatching).join("");
   if (!needle) return null;
   const { text, toRaw } = buildFoldedIndex(searchIndex);
   for (const start of findIndexesInText(text, needle)) {
     const span = { startRaw: toRaw[start], endRaw: toRaw[start + needle.length - 1] + 1 };
-    if (!takenIntervals.some((iv) => span.startRaw < iv.endRaw && span.endRaw > iv.startRaw)) return span;
+    if (takenIntervals.some((iv) => span.startRaw < iv.endRaw && span.endRaw > iv.startRaw)) continue;
+    if (accept(searchIndex, span)) return span;
   }
   return null;
 };
 
-const findSpanForTextInIndex = (searchIndex, targetText, takenIntervals) => {
+const findSpanForTextInIndex = (searchIndex, targetText, takenIntervals, accept = () => true) => {
   const normalizedNeedle = normalizeWhitespace(targetText);
   if (!normalizedNeedle || !searchIndex?.normalizedText) return null;
   const attempts = [
@@ -1508,11 +1519,11 @@ const findSpanForTextInIndex = (searchIndex, targetText, takenIntervals) => {
       const overlaps = takenIntervals.some(
         (iv) => rawSpan.startRaw < iv.endRaw && rawSpan.endRaw > iv.startRaw
       );
-      if (overlaps) continue;
+      if (overlaps || !accept(searchIndex, rawSpan)) continue;
       return rawSpan;
     }
   }
-  return findFoldedSpan(searchIndex, targetText, takenIntervals);
+  return findFoldedSpan(searchIndex, targetText, takenIntervals, accept);
 };
 
 const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
@@ -1531,11 +1542,12 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
       (a.kind === "term") - (b.kind === "term") || String(b.text).length - String(a.text).length
     );
     for (const task of ordered) {
-      const span = findSpanForTextInIndex(searchIndex, task.text, takenIntervals);
+      const accept = task.kind === "term" ? isWholeWordSpan : undefined;
+      const span = findSpanForTextInIndex(searchIndex, task.text, takenIntervals, accept);
       if (!span) {
         skippedCount += 1;
         // 文字其實在頁面上，只是落在別的標記裡：不是「找不到」。
-        task.covered = Boolean(findSpanForTextInIndex(searchIndex, task.text, []));
+        task.covered = Boolean(findSpanForTextInIndex(searchIndex, task.text, [], accept));
         unmatched.push(task);
         continue;
       }

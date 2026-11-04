@@ -399,14 +399,80 @@
           .replace(/[.,;:!?"'`()\[\]{}<>«»—–\-。，、；：！？「」『』（）【】…·“”‘’]/g, "")
       : "";
 
+  // 英文字的詞形變化：testing / tested / tests 都算 test。只產生真的會出現的寫法，
+  // 所以 rate 不會對到 rat，string 也不會被拆成 str。
+  const englishWordForms = (word) => {
+    const lower = word.toLowerCase();
+    if (lower.length < 3) return [lower];
+    const roots = new Set([lower]);
+    const addStem = (stem) => {
+      if (stem.length < 3 || !/[aeiouy]/.test(stem)) return;
+      roots.add(stem);
+      roots.add(`${stem}e`);
+      if (/([b-df-hj-np-tv-z])\1$/.test(stem)) roots.add(stem.slice(0, -1));
+    };
+    if (lower.endsWith("ies") && lower.length >= 5) roots.add(`${lower.slice(0, -3)}y`);
+    else if (lower.endsWith("es") && /(s|x|z|ch|sh)es$/.test(lower)) roots.add(lower.slice(0, -2));
+    else if (lower.endsWith("s") && !/(ss|us|is)$/.test(lower)) roots.add(lower.slice(0, -1));
+    if (lower.endsWith("ing")) addStem(lower.slice(0, -3));
+    if (lower.endsWith("ed")) addStem(lower.slice(0, -2));
+    const forms = new Set();
+    roots.forEach((item) => {
+      forms.add(item);
+      if (item.endsWith("e")) {
+        forms.add(`${item}s`);
+        forms.add(`${item}d`);
+        forms.add(`${item.slice(0, -1)}ing`);
+      } else if (/[^aeiou]y$/.test(item)) {
+        forms.add(`${item.slice(0, -1)}ies`);
+      } else {
+        forms.add(/(s|x|z|ch|sh)$/.test(item) ? `${item}es` : `${item}s`);
+        forms.add(`${item}ed`);
+        forms.add(`${item}ing`);
+        const last = item.slice(-1);
+        forms.add(`${item}${last}ed`);
+        forms.add(`${item}${last}ing`);
+      }
+    });
+    return [...forms].sort((a, b) => b.length - a.length);
+  };
+
+  // 比對完整單字的正規式，最後一個英文字（中心詞）可換成指定詞形；名詞不是英文結尾時回傳 null。
+  const buildTermPattern = (term, toForms) => {
+    const tokens = String(term || "").trim().split(/\s+/).filter(Boolean);
+    const lastWord = tokens.length ? tokens[tokens.length - 1].match(/^(.*?)([A-Za-z]+)$/) : null;
+    if (!lastWord) return null;
+    const escape = (value) => value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    const lead = [...tokens.slice(0, -1).map(escape), escape(lastWord[1])];
+    const prefix = `${lead.slice(0, -1).join("[\\s-]+")}${lead.length > 1 ? "[\\s-]+" : ""}${lead[lead.length - 1]}`;
+    const forms = toForms(lastWord[2]).map(escape).join("|");
+    return new RegExp(`(?<![\\p{L}\\p{N}])${prefix}(?:${forms})(?![\\p{L}\\p{N}])`, "iu");
+  };
+
+  // 容許詞形不同，回傳文章裡實際的寫法；對不到回傳 null。
+  const findTermVariant = (term, pageText) =>
+    String(pageText || "").match(buildTermPattern(term, englishWordForms) || /(?!)/)?.[0] || null;
+
   // AI 常把名詞寫成「Model ID（模型識別碼）」。標記要用文章裡真的出現的那一邊。
   const pickTermText = (text, pageText) => {
     const raw = String(text || "").trim();
     const parts = raw.match(/^(.+?)\s*[（(]\s*(.+?)\s*[）)]$/);
     const candidates = parts ? [parts[1], parts[2]] : [raw];
     const page = looseKey(String(pageText || ""));
-    const found = [raw, ...candidates].find((item) => looseKey(item) && page.includes(looseKey(item)));
-    return found || candidates[0];
+    // 英文名詞要是完整單字：test 不算出現在 latest 裡。
+    const isOnPage = (item) => {
+      if (!looseKey(item) || !page.includes(looseKey(item))) return false;
+      const exact = buildTermPattern(item, (word) => [word]);
+      return exact ? exact.test(String(pageText || "")) : true;
+    };
+    const found = [raw, ...candidates].find(isOnPage);
+    if (found) return found;
+    // 完全相同的寫法優先；都沒有才看詞形變化（A/B Testing → A/B test）。
+    for (const item of candidates) {
+      const variant = findTermVariant(item, pageText);
+      if (variant) return variant;
+    }
+    return candidates[0];
   };
 
   // 把 bulk 備份的 pages 陣列正規化成 {url,title,tags,entries,note,mindmap}。
