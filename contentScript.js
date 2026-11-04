@@ -93,7 +93,7 @@ const DEFAULT_READING_GUIDE_PROMPT = `# 任務：製作閱讀導覽
 分成 3～5 個短段落，段落之間空一行，每段最多 2 句：問題從哪裡來、作者怎麼處理、證據支持什麼、限制或取捨在哪裡。自然串起前因、結果與轉折，不逐段翻述；全部約 200～400 個中文字，短文可以更短。
 
 ### 名詞解釋
-只挑理解本文必要的專有名詞，與重點段落分開計算。每個名詞分行寫：「解釋」一句白話說它是什麼；「例子」一句具體例子，沒有好例子就省略這行；「在本文」一句說它在這篇的作用，以及本文有沒有證實。每行不超過 40 個中文字。不可只改寫相鄰原句；一般背景知識須標明「補充」，不要捏造本文沒有的結果。
+只挑理解本文必要、且文章裡逐字出現的專有名詞，與重點段落分開計算。「名詞」欄照文章的寫法，不加翻譯或括號，中文意思寫進解釋。每個名詞分行寫：「解釋」一句白話說它是什麼；「例子」一句具體例子，沒有好例子就省略這行；「在本文」一句說它在這篇的作用，以及本文有沒有證實。每行不超過 40 個中文字。不可只改寫相鄰原句；一般背景知識須標明「補充」，不要捏造本文沒有的結果。
 
 ### 重點整理
 挑選關鍵段落，涵蓋全文主要章節，不要只挑開頭或結論。同一個論點不重複標；方法、重要結果、數據的意義、取捨與限制都應納入考量。原文保留文章的語言，逐字引用連續文字，不翻譯、不加省略號。分行寫：「重點」一句說這段在講什麼；「為何重要」一句說它和主線的關係。每行不超過 40 個中文字，不能只是重述數字或原句。
@@ -987,7 +987,7 @@ const buildReadingGuidePrompt = (pageData, palette, existingTags = []) => {
 第三段：證據與限制。
 
 ## 名詞解釋
-- **名詞：** A/B 測試
+- **名詞：** A/B test
   - **解釋：** 把使用者分到不同版本，比較哪個表現好。
   - **例子：** 部分請求用新模型，其餘維持舊版。
   - **在本文：** 被列為流量變化的可能原因，但沒有證據證實。
@@ -1094,7 +1094,11 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
   const seen = new Set(existing.map((item) => HkParsers.looseKey(item.text)));
   const limits = HkParsers.getReadingGuideLimits(getPagePlainText());
   const guideItems = [
-    ...parsed.terms.slice(0, limits.termsMax).map((term) => ({ text: normalizeWhitespace(term.text), kind: "term", reason: term.explanation, color: palette[1] || palette[0] || DEFAULT_COLOR })),
+    ...parsed.terms.slice(0, limits.termsMax).map((term) => {
+      const text = normalizeWhitespace(HkParsers.pickTermText(term.text, getPagePlainText()));
+      const label = normalizeWhitespace(term.text);
+      return { text, ...(label !== text ? { label } : {}), kind: "term", reason: term.explanation, color: palette[1] || palette[0] || DEFAULT_COLOR };
+    }),
     ...parsed.highlights.slice(0, limits.highlightsMax).map((item) => ({ ...item, text: normalizeWhitespace(item.text), kind: "passage" })),
   ].filter((item) => item.text);
   const tasks = guideItems.filter((item) => {
@@ -1162,13 +1166,14 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
       explanation: item.reason,
       ...(unmatchedKeys.has(HkParsers.looseKey(item.text)) ? { unavailable: true } : {}),
       ...(item.covered ? { covered: true } : {}),
+      ...(item.label ? { label: item.label } : {}),
     })),
     highlights: savedGuideItems.filter((item) => item.kind !== "term").map((item) => ({
       ...item,
       ...(unmatchedKeys.has(HkParsers.looseKey(item.text)) ? { unavailable: true } : {}),
     })),
     appliedCount,
-    unmatchedCount: unmatchedTasks.filter((item) => !item.covered).length,
+    unmatchedCount: unmatchedTasks.filter((item) => !item.covered && item.kind !== "term").length,
     previewCount: previewData.filter((item) => item.data.url === targetPageKey).length,
     previewing,
   };

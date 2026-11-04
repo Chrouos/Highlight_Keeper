@@ -146,6 +146,7 @@ textarea { width: 100%; resize: vertical; border: 1px solid var(--border); borde
 .item-kind { display: block; margin-bottom: 4px; color: var(--error-text); font-size: 12px; }
 .item-text { display: block; font-weight: 650; line-height: 1.55; }
 .item-note { display: block; margin-top: 6px; color: var(--muted); line-height: 1.6; }
+.item-kind.is-quiet { color: var(--muted); }
 .note-line { display: block; margin-top: 5px; }
 .note-line strong { color: var(--text); font-weight: 650; }
 

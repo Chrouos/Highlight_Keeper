@@ -399,6 +399,16 @@
           .replace(/[.,;:!?"'`()\[\]{}<>«»—–\-。，、；：！？「」『』（）【】…·“”‘’]/g, "")
       : "";
 
+  // AI 常把名詞寫成「Model ID（模型識別碼）」。標記要用文章裡真的出現的那一邊。
+  const pickTermText = (text, pageText) => {
+    const raw = String(text || "").trim();
+    const parts = raw.match(/^(.+?)\s*[（(]\s*(.+?)\s*[）)]$/);
+    const candidates = parts ? [parts[1], parts[2]] : [raw];
+    const page = looseKey(String(pageText || ""));
+    const found = [raw, ...candidates].find((item) => looseKey(item) && page.includes(looseKey(item)));
+    return found || candidates[0];
+  };
+
   // 把 bulk 備份的 pages 陣列正規化成 {url,title,tags,entries,note,mindmap}。
   const normalizeBulkPages = (pages) => {
     if (!Array.isArray(pages)) return [];
@@ -639,6 +649,7 @@
     matchesReadingGuideSource,
     parseExtraBlocks,
     looseKey,
+    pickTermText,
     normalizeBulkPages,
     pageToMarkdown,
     parseSharedMarkdown,

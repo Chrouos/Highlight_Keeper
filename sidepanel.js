@@ -100,6 +100,15 @@ const sendToTab = async (tabId, message) => {
     if (!tab?.url || !/^https?:/i.test(tab.url)) throw firstError;
     // 頁面還在載入時內容腳本會自己注入；載入完成後 onUpdated 會再讀一次。
     if (tab.status === "loading") throw firstError;
+    // 重新整理的瞬間分頁可能還標示 complete：先等一下再試，真的沒有內容腳本才注入。
+    await wait(300);
+    const retried = await chrome.tabs.sendMessage(tabId, message).then(
+      (response) => ({ response }),
+      () => null
+    );
+    if (retried) return retried.response;
+    const latest = await chrome.tabs.get(tabId).catch(() => null);
+    if (latest?.status !== "complete") throw firstError;
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ["shared.js", "parsers.js", "i18n.js", "highlightDom.js", "contentScript.js"],
@@ -168,8 +177,10 @@ const makeItemButton = (item, kind) => {
   }
   if ((item.unavailable && !item.covered) || item.notOnPage) {
     const unavailable = document.createElement("span");
-    unavailable.className = "item-kind";
-    unavailable.textContent = t(item.notApplied ? "sidebar.notApplied" : "sidebar.unavailable");
+    // 名詞本來就可能只是概念，沒有標記仍有解釋，不用警示。
+    const termOnly = kind === "term" && item.unavailable && !item.notApplied;
+    unavailable.className = termOnly ? "item-kind is-quiet" : "item-kind";
+    unavailable.textContent = t(item.notApplied ? "sidebar.notApplied" : termOnly ? "sidebar.termNotInArticle" : "sidebar.unavailable");
     button.appendChild(unavailable);
   }
   button.addEventListener("click", async () => {
@@ -188,7 +199,7 @@ const makeItemButton = (item, kind) => {
   });
   const text = document.createElement("span");
   text.className = "item-text";
-  text.textContent = item.text || "";
+  text.textContent = item.label || item.text || "";
   button.appendChild(text);
   const note = item.explanation || item.reason || item.note || "";
   if (note) {

@@ -124,6 +124,10 @@ const english = "The recall went up to 3.5 percent in the test, e.g. Foo beat Ba
 assert.equal(P.breakNoteLines(english).split("\n").length, 3, "decimals and abbreviations do not split");
 assert.equal(P.breakNoteLines("「這是一段夠長的引用句子，長到需要被斷開來才好閱讀。」下一句也很長，一樣要留在自己的那一行才行。").split("\n")[0].endsWith("」"), true, "closing quotes stay with their sentence");
 assert.equal(P.looseKey("“Don’t” — stop"), P.looseKey('"Don\'t" - stop'), "curly and straight quotes match");
+assert.equal(P.pickTermText("Model ID（模型識別碼）", "The model id is new."), "Model ID", "translation in brackets is ignored");
+assert.equal(P.pickTermText("模型識別碼 (Model ID)", "The Model ID is new."), "Model ID", "the side found in the article wins");
+assert.equal(P.pickTermText("Staged Rollout（分階段推出）", "Nothing about it."), "Staged Rollout", "falls back to the first part");
+assert.equal(P.pickTermText("GPT (beta)", "Try GPT (beta) today."), "GPT (beta)", "brackets in the article itself are kept");
 const multiLineMd = P.pageToMarkdown({ title: "T", url: "https://example.com/a", entries: [{ text: "Q", note: "第一行\n第二行" }] });
 assert.equal(P.parseSharedMarkdown(multiLineMd).items[0].note, "第一行\n第二行", "shared Markdown keeps note lines");
 
