@@ -282,7 +282,11 @@
     )}/${encodeURIComponent(settings.branch)}/${encodedPath}`;
   };
 
+  // 完全沒有 commit 的 repo：GitHub 的 Git Data API 一律回 409。
+  const isEmptyRepoError = (error) => error?.status === 409 && /empty/i.test(error?.message || "");
+
   root.HkShareLink = {
+    isEmptyRepoError,
     FRAGMENT_LIMIT,
     FRAGMENT_PREFIX,
     buildSharePayload,

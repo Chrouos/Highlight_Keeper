@@ -5978,14 +5978,18 @@ const saveHighlight = async (entry) => {
   await setStoredHighlights([...highlights, entry], entry.url ?? pageKey);
 };
 
-const updateHighlightEntry = async (id, partial, key = pageKey) => {
+const updateHighlightEntry = (id, partial, key = pageKey) =>
+  updateHighlightEntries(new Map([[id, partial]]), key);
+
+// 一次更新多筆，只寫入一次。partials：Map(id → 要合併的欄位)。
+const updateHighlightEntries = async (partials, key = pageKey) => {
   if (!storage) return false;
   const highlights = await getStoredHighlights(key);
   let updated = false;
   const next = highlights.map((item) => {
-    if (item.id !== id) return item;
+    if (!partials.has(item.id)) return item;
     updated = true;
-    return { ...item, ...partial };
+    return { ...item, ...partials.get(item.id) };
   });
   if (updated) {
     await setStoredHighlights(next, key);
@@ -6013,9 +6017,11 @@ const findHighlightEntry = async (id, key = pageKey) => {
 const restoreHighlights = async () => {
   if (!storage) return { total: 0, visible: 0 };
   try {
-    const saved = await storage.get(pageKey);
-    const allHighlights = Array.isArray(saved[pageKey]) ? saved[pageKey] : [];
+    const restoringKey = pageKey;
+    const saved = await storage.get(restoringKey);
+    const allHighlights = Array.isArray(saved[restoringKey]) ? saved[restoringKey] : [];
     const highlights = allHighlights.filter((item) => Boolean(item?.range));
+    const reanchored = new Map();
     let visibleCount = 0;
 
     for (const highlight of highlights) {
@@ -6040,19 +6046,16 @@ const restoreHighlights = async () => {
         });
         visibleCount += 1;
         if (resolved.updated && resolved.snapshot) {
-          await updateHighlightEntry(
-            highlight.id,
-            {
-              range: resolved.snapshot,
-              text: resolved.snapshot.text ?? highlight.text ?? highlight.range?.text ?? "",
-            },
-            pageKey
-          );
+          reanchored.set(highlight.id, {
+            range: resolved.snapshot,
+            text: resolved.snapshot.text ?? highlight.text ?? highlight.range?.text ?? "",
+          });
         }
       } catch (error) {
         console.debug("無法還原 highlight:", highlight, error);
       }
     }
+    if (reanchored.size) await updateHighlightEntries(reanchored, restoringKey);
 
     return { total: highlights.length, visible: visibleCount };
   } catch (error) {
@@ -6176,7 +6179,30 @@ const notifyOrphanHighlights = (orphanCount, total) => {
   );
 };
 
+// 同一時間只跑一輪重試：DOMContentLoaded、load 與 SPA 換頁可能先後觸發，
+// 新的請求接手舊的排程，還在跑就等它跑完再補一次。
+let restoreTimer = 0;
+let restoreRunning = false;
+let restoreQueued = false;
 const attemptRestoreHighlights = async (attempt = 0) => {
+  if (restoreRunning) {
+    restoreQueued = true;
+    return;
+  }
+  window.clearTimeout(restoreTimer);
+  restoreRunning = true;
+  try {
+    await runRestoreAttempt(attempt);
+  } finally {
+    restoreRunning = false;
+    if (restoreQueued) {
+      restoreQueued = false;
+      attemptRestoreHighlights();
+    }
+  }
+};
+
+const runRestoreAttempt = async (attempt) => {
   if (attempt === 0) await migrateLegacyPageData();
   const { total, visible } = await restoreHighlights();
   checkPendingFocusHighlight();
@@ -6196,7 +6222,7 @@ const attemptRestoreHighlights = async (attempt = 0) => {
   if (attempt < HIGHLIGHT_RETRY_DELAYS.length) {
     // 還有重試額度：內容可能還在延遲載入，先別判定為失聯。
     const nextDelay = HIGHLIGHT_RETRY_DELAYS[attempt] ?? 1200;
-    window.setTimeout(() => attemptRestoreHighlights(attempt + 1), nextDelay);
+    restoreTimer = window.setTimeout(() => attemptRestoreHighlights(attempt + 1), nextDelay);
     return;
   }
   // 重試用盡仍有缺 → 視為失聯，提示使用者。
@@ -6462,7 +6488,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const payload = {
           title: document.title,
           url: pageKey,
-          pageText: getPagePlainText(),
+          ...(message.checkText ? { hasText: Boolean(getPagePlainText().trim()) } : {}),
           // 存了但頁面上找不到標記的，讓側欄標示出來，不要看起來一切正常。
           highlights: highlights.map((item) => ({
             ...item,
@@ -7318,7 +7344,6 @@ const mergeBulkImportPayload = async (files) => {
         skipped: skipped.length + bulk.skipped.length,
       })
     );
-    await refreshHighlightPanelData();
     await renderHighlightPanel();
     attemptRestoreHighlights();
   } catch (error) {

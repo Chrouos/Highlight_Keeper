@@ -506,17 +506,7 @@ const exportSelectedPages = () => {
   const payload = buildFullExportPayload();
   payload.pages = payload.pages.filter((p) => urls.has(p.url));
   if (!payload.pages.length) return;
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "highlight-keeper-selected.json";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadJson(payload, "highlight-keeper-selected.json");
   setStatus(t("manager.statusExportedSelected", { count: payload.pages.length }));
 };
 
@@ -704,6 +694,14 @@ const refreshManager = async () => {
 };
 
 // 刪除整頁：清掉標註、頁面 meta、AI 摘要與心智圖。無法復原。
+// 這一頁在本機是否已有內容（只有標題不算）。existing 需含四份 map 與該頁標註。
+const hasLocalPageData = (existing, url) =>
+  (Array.isArray(existing[url]) && existing[url].length > 0) ||
+  Boolean(existing[PAGE_META_KEY]?.[url]?.tags?.length) ||
+  Boolean(existing[GENERATED_NOTES_KEY]?.[url]) ||
+  Boolean(existing[MINDMAP_KEY]?.[url]) ||
+  typeof existing[PERSONAL_NOTES_KEY]?.[url]?.text === "string";
+
 const deletePage = (url) => deletePages([url]);
 
 const deletePages = async (urls) => {
@@ -1999,7 +1997,9 @@ const commitFilesToGithub = async (settings, files, commitMessage) => {
   try {
     await window.HkShareLink.commitFilesToGithub(settings, files, commitMessage);
   } catch (error) {
-    if (typeof error?.responseText === "string") {
+    if (window.HkShareLink.isEmptyRepoError(error)) {
+      error.message = t("manager.syncRepoEmpty");
+    } else if (typeof error?.responseText === "string") {
       error.message = describeGithubError(error.status, error.responseText);
     }
     throw error;
@@ -2236,13 +2236,7 @@ const applyGithubBackupPages = async (pages) => {
     MINDMAP_KEY,
     PERSONAL_NOTES_KEY,
   ]);
-  const hasLocalData = (url) =>
-    (Array.isArray(existing[url]) && existing[url].length > 0) ||
-    Boolean(existing[PAGE_META_KEY]?.[url]?.tags?.length) ||
-    Boolean(existing[GENERATED_NOTES_KEY]?.[url]) ||
-    Boolean(existing[MINDMAP_KEY]?.[url]) ||
-    typeof existing[PERSONAL_NOTES_KEY]?.[url]?.text === "string";
-  const overlapping = uniquePages.filter((page) => hasLocalData(page.url));
+  const overlapping = uniquePages.filter((page) => hasLocalPageData(existing, page.url));
   const toSortedJson = (value) => JSON.stringify(value ?? null);
   const isSameEntries = (currentEntries, nextEntries) =>
     toSortedJson(currentEntries) === toSortedJson(nextEntries);
@@ -2326,6 +2320,7 @@ const autoSyncStatusText = (syncState) => {
   if (syncState.status === "error") {
     if (syncState.errorCode === "remote-moved") return t("manager.syncRetryNext");
     if (syncState.errorCode === "remote-invalid") return t("manager.syncRemoteInvalid");
+    if (syncState.errorCode === "repo-empty") return t("manager.syncRepoEmpty");
     if (!syncState.errorMessage) return t("manager.syncNeedSettings");
     return t("manager.syncFailed", { error: syncState.errorMessage });
   }
@@ -2652,14 +2647,7 @@ const importMultipleFiles = async (files) => {
   const toImport = [];
   const skipped = [];
   candidatePages.forEach((page) => {
-    const current = existing[page.url];
-    const url = page.url;
-    const hasLocalData = (Array.isArray(current) && current.length > 0) ||
-      Boolean(existing[PAGE_META_KEY]?.[url]?.tags?.length) ||
-      Boolean(existing[GENERATED_NOTES_KEY]?.[url]) ||
-      Boolean(existing[MINDMAP_KEY]?.[url]) ||
-      typeof existing[PERSONAL_NOTES_KEY]?.[url]?.text === "string";
-    if (hasLocalData) {
+    if (hasLocalPageData(existing, page.url)) {
       skipped.push(page.url);
       return;
     }

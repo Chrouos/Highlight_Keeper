@@ -289,6 +289,13 @@ const conflictUrls = (result) => result.conflicts.map((c) => c.url);
   result = await sync(moved);
   assert.equal(result.pushed, 1, "a new backup location starts clean");
 
+  // An empty repository gets a clear reason instead of a raw API error.
+  const fetchForEmptyRepo = globalThis.fetch;
+  globalThis.fetch = async () => respond(409, { message: "Git Repository is empty." });
+  result = await sync(makeDevice({ [URL_A]: mark("x") }));
+  globalThis.fetch = fetchForEmptyRepo;
+  assert.equal(result.errorCode, "repo-empty");
+
   // An edit made while a cycle is running is pushed by the next cycle.
   moved[URL_B] = mark("b");
   const fetchBeforeEdit = globalThis.fetch;

@@ -409,7 +409,7 @@ const loadActiveTab = async () => {
   }
 
   try {
-    const response = await sendToTab(tab.id, { type: "GET_PAGE_HIGHLIGHTS" });
+    const response = await sendToTab(tab.id, { type: "GET_PAGE_HIGHLIGHTS", checkText: true });
     if (token !== state.loadToken) return;
     if (!response?.success || !response.data?.url) throw new Error(response?.error || t("sidebar.extractError"));
     if (previousPageKey && previousPageKey !== response.data.url) els.response.value = "";
@@ -436,7 +436,7 @@ const loadActiveTab = async () => {
     // 同一篇文章因標註變動重新載入時，不動使用者正在操作的區塊。
     if (previousPageKey !== state.pageKey) els.aiControls.open = !hasGuide();
     render();
-    if (!response.data.pageText?.trim()) setStatus(t("sidebar.extractError"), true);
+    if (response.data.hasText === false) setStatus(t("sidebar.extractError"), true);
   } catch (error) {
     if (token !== state.loadToken) return;
     console.debug("讀取側欄文章資料失敗", error);
@@ -444,6 +444,27 @@ const loadActiveTab = async () => {
     render();
     setStatus(t("sidebar.extractError"), true);
   }
+};
+
+// 標註變動時只更新清單：不清空畫面，也不動使用者正在打的筆記、游標與狀態訊息。
+let highlightsRefreshTimer = 0;
+let highlightsRefreshSeq = 0;
+const refreshHighlights = async () => {
+  const { tabId, pageKey, loadToken } = state;
+  const seq = ++highlightsRefreshSeq;
+  const response = await sendToTab(tabId, { type: "GET_PAGE_HIGHLIGHTS" }).catch(() => null);
+  if (seq !== highlightsRefreshSeq || loadToken !== state.loadToken || pageKey !== state.pageKey) return;
+  if (response?.data?.url && response.data.url !== pageKey) {
+    loadActiveTab();
+    return;
+  }
+  if (!response?.success) return;
+  state.page = response.data;
+  render();
+};
+const scheduleHighlightsRefresh = () => {
+  window.clearTimeout(highlightsRefreshTimer);
+  highlightsRefreshTimer = window.setTimeout(refreshHighlights, 100);
 };
 
 const applyGuideResponse = async (text) => {
@@ -780,7 +801,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     els.personalNote.value = state.noteText;
     setNoteStatus("sidebar.notesSaved");
   }
-  if (changes[state.pageKey]) loadActiveTab();
+  if (changes[state.pageKey]) scheduleHighlightsRefresh();
 });
 
 window.HkI18n.initI18n().then(() => {

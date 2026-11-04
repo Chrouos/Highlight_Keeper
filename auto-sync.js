@@ -328,7 +328,10 @@
           target,
           status: "error",
           // 其他裝置剛好同時推送：不算失敗，下一輪重新比對即可。
-          errorCode: error?.status === 422 ? "remote-moved" : error?.code || "",
+          errorCode:
+            error?.status === 422 ? "remote-moved"
+            : root.HkShareLink.isEmptyRepoError(error) ? "repo-empty"
+            : error?.code || "",
           errorMessage: error?.message || String(error),
           lastRunAt: Date.now(),
         });
