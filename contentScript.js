@@ -1030,7 +1030,7 @@ ${existing || "（無）"}
 ${pageData.pageText}`;
 };
 
-const saveReadingGuideContext = async (context, provider, model, prompt, targetPageKey, unmatchedTerms = [], unmatchedHighlights = [], guideItems = []) => {
+const saveReadingGuideContext = async (context, provider, model, targetPageKey, unmatchedTerms = [], unmatchedHighlights = [], guideItems = []) => {
   if (!targetPageKey) return;
   const stored = await chrome.storage.local.get("hkGeneratedNotes");
   const previous = stored?.hkGeneratedNotes?.[targetPageKey] || {};
@@ -1044,7 +1044,6 @@ const saveReadingGuideContext = async (context, provider, model, prompt, targetP
     formatVersion: 2,
     provider,
     model,
-    prompt,
     generatedAt: Date.now(),
     url: targetPageKey,
   };
@@ -1068,7 +1067,7 @@ const capturePreviewUndo = async (targetPageKey) => {
   };
 };
 
-const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatgpt", model = "chatgpt-web", targetPageKey = pageKey) => {
+const applyReadingGuideResponse = async (rawText, provider = "chatgpt", model = "chatgpt-web", targetPageKey = pageKey) => {
   if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
   const parsed = HkParsers.parseReadingGuideResponse(rawText, {
     categories: aiSettings.categories,
@@ -1152,7 +1151,7 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
     ...(isCovered(item) ? { covered: true } : {}),
   }));
   if (previewData.some((item) => item.data.url === targetPageKey)) previewUndo = undoSnapshot;
-  await saveReadingGuideContext(parsed.context, provider, model, prompt, targetPageKey,
+  await saveReadingGuideContext(parsed.context, provider, model, targetPageKey,
     unmatchedTasks.filter((item) => item.kind === "term"),
     unmatchedTasks.filter((item) => item.kind !== "term"), savedGuideItems);
   if (parsed.mindmap && parseMindmapOutline(parsed.mindmap)) {
@@ -1740,9 +1739,11 @@ const saveGeneratedNote = async (pageUrl, notePayload) => {
   try {
     const stored = await chrome.storage?.local.get("hkGeneratedNotes");
     const previous = stored?.hkGeneratedNotes?.[pageUrl] || {};
+    // 舊版把文章全文存在 prompt，覆寫時順便丟掉。
+    const { prompt: _oldPrompt, ...merged } = { ...previous, ...notePayload, formatVersion: 2 };
     const nextNotes = {
       ...(stored?.hkGeneratedNotes ?? {}),
-      [pageUrl]: { ...previous, ...notePayload, formatVersion: 2 },
+      [pageUrl]: merged,
     };
     await chrome.storage?.local.set({ hkGeneratedNotes: nextNotes });
   } catch (error) {
@@ -6466,7 +6467,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           ? await callOpenAI(apiKey, prompt)
           : await callGemini(apiKey, prompt);
         if (requestPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
-        sendResponse(await applyReadingGuideResponse(response, prompt, provider, model, requestPageKey));
+        sendResponse(await applyReadingGuideResponse(response, provider, model, requestPageKey));
       } catch (error) {
         console.debug("產生閱讀導覽失敗", error);
         sendResponse({ success: false, error: error?.message || t("sidebar.generateError") });
@@ -6488,7 +6489,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const requestPageKey = pageKey;
         const provider = message.provider === "gemini-web" ? "gemini-web" : "chatgpt";
         const model = provider === "gemini-web" ? "gemini-web" : "chatgpt-web";
-        const result = await applyReadingGuideResponse(text, message.prompt || "", provider, model, requestPageKey);
+        const result = await applyReadingGuideResponse(text, provider, model, requestPageKey);
         sendResponse(result);
       } catch (error) {
         sendResponse({ success: false, error: error?.message || t("sidebar.parseError") });

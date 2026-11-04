@@ -530,12 +530,10 @@ const bulkDeleteSelected = async () => {
     cancelLabel: t("manager.btnCancel"),
   });
   if (!ok) return;
-  for (const url of urls) {
-    try {
-      await deletePage(url);
-    } catch (error) {
-      console.debug("批次刪除失敗", error);
-    }
+  try {
+    await deletePages(urls);
+  } catch (error) {
+    console.debug("批次刪除失敗", error);
   }
   state.selected.clear();
   if (detailCurrentPageUrl && urls.includes(detailCurrentPageUrl)) {
@@ -706,7 +704,9 @@ const refreshManager = async () => {
 };
 
 // 刪除整頁：清掉標註、頁面 meta、AI 摘要與心智圖。無法復原。
-const deletePage = async (url) => {
+const deletePage = (url) => deletePages([url]);
+
+const deletePages = async (urls) => {
   const stored = await chrome.storage.local.get([
     PAGE_META_KEY,
     GENERATED_NOTES_KEY,
@@ -717,11 +717,13 @@ const deletePage = async (url) => {
   const notes = { ...(stored[GENERATED_NOTES_KEY] || {}) };
   const maps = { ...(stored[MINDMAP_KEY] || {}) };
   const personalNotes = { ...(stored[PERSONAL_NOTES_KEY] || {}) };
-  delete meta[url];
-  delete notes[url];
-  delete maps[url];
-  delete personalNotes[url];
-  await chrome.storage.local.remove(url);
+  urls.forEach((url) => {
+    delete meta[url];
+    delete notes[url];
+    delete maps[url];
+    delete personalNotes[url];
+  });
+  await chrome.storage.local.remove(urls);
   await chrome.storage.local.set({
     [PAGE_META_KEY]: meta,
     [GENERATED_NOTES_KEY]: notes,

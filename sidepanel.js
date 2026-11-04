@@ -457,7 +457,6 @@ const applyGuideResponse = async (text) => {
     const result = await sendToTab(request.tabId, {
       type: "APPLY_READING_GUIDE_RESPONSE",
       text,
-      prompt: state.prompt,
       provider: request.provider,
       pageKey: request.pageKey,
     });

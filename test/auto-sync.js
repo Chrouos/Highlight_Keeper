@@ -323,6 +323,11 @@ const conflictUrls = (result) => result.conflicts.map((c) => c.url);
   assert.deepEqual(Object.keys(P.cleanStoredData(stored)["__hk_page_meta__"]).sort(), [URL_A, URL_B, URL_C].sort());
   assert.deepEqual(P.cleanStoredData({ "__hk_page_meta__": { [URL_A]: { title: "t" } }, [URL_A]: mark("x") }), {}, "nothing to clean writes nothing");
 
+  // The article text left in old notes is cleaned out; clean notes are not rewritten.
+  const oldNotes = { hkGeneratedNotes: { [URL_A]: { context: "c", prompt: "article" }, [URL_B]: { context: "d" } } };
+  assert.deepEqual(P.cleanStoredData(oldNotes).hkGeneratedNotes, { [URL_A]: { context: "c" }, [URL_B]: { context: "d" } });
+  assert.deepEqual(P.cleanStoredData({ hkGeneratedNotes: { [URL_B]: { context: "d" } } }), {});
+
   // Importing restores everything a download contains, and never overwrites.
   const exported = P.collectBackupPages({
     "__hk_page_meta__": { [URL_A]: { title: "A", tags: ["t"] } },

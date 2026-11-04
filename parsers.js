@@ -578,7 +578,7 @@
       if (page.title || page.tags.length) {
         meta[page.url] = { ...meta[page.url], title: page.title, tags: page.tags, updatedAt: now };
       }
-      if (page.note) notes[page.url] = page.note;
+      if (page.note) notes[page.url] = exportNote(page.note);
       if (page.mindmap) mindmaps[page.url] = page.mindmap;
       if (typeof page.personalNote === "string") personal[page.url] = { text: page.personalNote, updatedAt: now };
     });
@@ -591,14 +591,23 @@
     return { updates, imported, skipped };
   };
 
-  // 清掉舊版留下的多餘資料：只逛過、沒有任何內容的頁面標題。回傳要寫入的部分。
+  // 清掉舊版留下的多餘資料：只逛過的頁面標題、AI 筆記裡的文章全文。回傳要寫入的部分。
   const cleanStoredData = (all) => {
+    const updates = {};
     const meta = all[STORAGE_KEYS.meta];
-    if (!meta) return {};
-    const kept = Object.fromEntries(
-      Object.entries(meta).filter(([url, value]) => value?.tags?.length || pageHasContent(all, url))
-    );
-    return Object.keys(kept).length === Object.keys(meta).length ? {} : { [STORAGE_KEYS.meta]: kept };
+    if (meta) {
+      const kept = Object.fromEntries(
+        Object.entries(meta).filter(([url, value]) => value?.tags?.length || pageHasContent(all, url))
+      );
+      if (Object.keys(kept).length !== Object.keys(meta).length) updates[STORAGE_KEYS.meta] = kept;
+    }
+    const notes = all[STORAGE_KEYS.notes];
+    if (notes && Object.values(notes).some((note) => note && "prompt" in note)) {
+      updates[STORAGE_KEYS.notes] = Object.fromEntries(
+        Object.entries(notes).map(([url, note]) => [url, exportNote(note) || note])
+      );
+    }
+    return updates;
   };
 
   // 把單頁匯出格式 {url,title,tags,entries,note,mindmap} 轉成可分享的 Markdown。

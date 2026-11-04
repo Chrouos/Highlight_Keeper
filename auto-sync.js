@@ -378,8 +378,9 @@
     const localByUrl = new Map(localPages.map((page) => [page.url, page]));
 
     // 網路請求期間使用者可能又改了標註：這些頁留到下一輪，不覆蓋剛寫的內容。
-    const freshAll = await chrome.storage.local.get(null);
-    const freshHashes = await hashPages(collectLocalPages(freshAll));
+    const writesLocally = Object.values(actions).some((action) => action === "pull" || action === "delete-local");
+    const freshAll = writesLocally ? await chrome.storage.local.get(null) : null;
+    const freshHashes = writesLocally ? await hashPages(collectLocalPages(freshAll)) : null;
     const unchangedLocally = (url) => (freshHashes[url] ?? null) === (localHashes[url] ?? null);
     const deferred = new Set(
       Object.keys(actions).filter((url) => ["pull", "delete-local"].includes(actions[url]) && !unchangedLocally(url))
