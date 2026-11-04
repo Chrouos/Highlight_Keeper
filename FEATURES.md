@@ -22,7 +22,7 @@
 | # | 功能 | 說明 |
 |---|---|---|
 | B1 | 可拖曳／左右側切換 | header 拖曳定位，記憶 `hkPanelSide` |
-| B2 | 字級縮放 | A− / A+，記憶 `--hk-panel-font-scale` |
+| B2 | 字級縮放 | A− / A+，記憶 `hkPanelFontScale` |
 | B3 | 開啟閱讀導覽 | 面板不放 AI 流程，只提供前往側欄的入口 |
 | B7 | 清除本頁標記 | 危險色按鈕 + 二次確認 |
 | B8 | 分頁：本頁 | 本頁標註列表，點擊跳轉並閃爍定位，可單筆刪除 |
@@ -30,7 +30,7 @@
 | B11 | 設定抽屜 | 顯示、本頁工具、本頁備份、全部備份、AI 服務 |
 | B12 | 頁面標籤 | 新增／刪除標籤，含既有標籤建議下拉 |
 | B13 | 本頁備份 | 複製純文字、下載本頁 JSON、匯入一份 JSON |
-| B14 | 全部備份 | 下載全部 JSON、批次匯入多個 JSON（已存在頁面跳過） |
+| B14 | 全部備份 | 下載全部 JSON（含標籤、AI 筆記、閱讀地圖、個人筆記）、批次匯入多個 JSON（已有內容的頁面跳過） |
 | B15 | AI 服務設定 | provider（OpenAI／Gemini API、ChatGPT／Gemini 網頁版）、model、API Key、補充要求；預設免 API Key |
 | B16 | 標註分類 | 自訂分類名稱對應顏色，供重點整理使用；可重設 |
 | B17 | 套用前預覽 | AI 回覆套用前先預覽數量，可確認／取消 |
@@ -88,4 +88,4 @@
 | F1 | `normalizePageKey` 網址正規化（去追蹤參數、canonical 優先）|
 | F2 | `pageToMarkdown` 轉 Markdown（標籤／重點／摘要／脈絡／個人筆記／心智圖）|
 | F3 | AI 回覆解析：脈絡 / 名詞解釋 / 重點整理 / 閱讀地圖 / 標籤分段；相容舊版 `===重點===` 標記與反斜線跳脫的 Markdown |
-| F4 | storage keys：`hkColorPalette`、`hkLastColor`、`hkAISettings`、`__hk_page_meta__`、`hkGeneratedNotes`、`hkPersonalNotes`、`hkMindmaps`、`hkGithubSyncSettings`、`hkPanelSide`、`hkLang` |
+| F4 | storage keys：`hkColorPalette`、`hkLastColor`、`hkAISettings`、`__hk_page_meta__`、`hkGeneratedNotes`、`hkPersonalNotes`、`hkMindmaps`、`hkGithubSyncSettings`、`hkAutoSyncState`、`hkPanelSide`、`hkPanelFontScale`、`hkLang` |

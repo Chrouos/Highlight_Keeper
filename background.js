@@ -1,7 +1,13 @@
 /* Service worker：點擴充功能圖示一律開啟閱讀導覽側欄、轉發鍵盤快捷鍵、定時自動同步。 */
 importScripts("shared.js", "parsers.js", "share-link.js", "auto-sync.js");
 
+const cleanStoredData = async () => {
+  const updates = HkParsers.cleanStoredData(await chrome.storage.local.get(null));
+  if (Object.keys(updates).length) await chrome.storage.local.set(updates);
+};
+
 const onExtensionReady = () => {
+  cleanStoredData().catch((error) => console.debug("清理舊資料失敗", error));
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch((error) => console.debug("設定側欄行為失敗", error));

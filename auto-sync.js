@@ -27,38 +27,10 @@
 
   const isPageKey = (key) => root.HkParsers.isHttpUrl(key);
 
-  // AI 筆記裡的 prompt 是整篇文章全文，不需要備份，也不算內容變動。
-  const exportNote = (note) => {
-    if (!note || typeof note !== "object") return null;
-    const { prompt: _prompt, ...rest } = note;
-    return rest;
-  };
+  const exportNote = (note) => root.HkParsers.exportNote(note);
 
   /* ── 資料轉換 ─────────────────────────────────────── */
-  const collectLocalPages = (all) => {
-    const meta = all[PAGE_META_KEY] || {};
-    const notes = all[GENERATED_NOTES_KEY] || {};
-    const mindmaps = all[MINDMAP_KEY] || {};
-    const personal = all[PERSONAL_NOTES_KEY] || {};
-    const urls = new Set([
-      ...Object.keys(all).filter((key) => isPageKey(key) && Array.isArray(all[key])),
-      ...Object.keys(meta).filter(isPageKey),
-      ...Object.keys(notes).filter(isPageKey),
-      ...Object.keys(mindmaps).filter(isPageKey),
-      ...Object.keys(personal).filter(isPageKey),
-    ]);
-    return root.HkParsers.normalizeBulkPages(
-      [...urls].map((url) => ({
-        url,
-        title: meta[url]?.title || "",
-        tags: Array.isArray(meta[url]?.tags) ? meta[url].tags : [],
-        entries: Array.isArray(all[url]) ? all[url] : [],
-        note: exportNote(notes[url]),
-        mindmap: mindmaps[url] || null,
-        ...(typeof personal[url]?.text === "string" ? { personalNote: personal[url].text } : {}),
-      }))
-    );
-  };
+  const collectLocalPages = (all) => root.HkParsers.collectBackupPages(all);
 
   const parseRemotePages = (rawText) => {
     const parsed = JSON.parse(rawText);
@@ -448,12 +420,15 @@
       else delete nextBase[url];
     });
 
-    const afterAll = await chrome.storage.local.get(null);
+    // 只記下這一輪處理過的內容：同步途中才改的頁面雜湊會不同，下一輪就不會被跳過。
+    const handledHashes = { ...localHashes };
+    pullUrls.forEach((url) => { handledHashes[url] = remoteHashes[url]; });
+    deleteLocalUrls.forEach((url) => { delete handledHashes[url]; });
     return saveState({
       ...state,
       base: nextBase,
       commitSha: nextCommitSha,
-      localDigest: await digestHashes(await hashPages(collectLocalPages(afterAll))),
+      localDigest: await digestHashes(handledHashes),
       conflicts,
       resolutions: {},
       status: conflicts.length ? "conflict" : "ok",

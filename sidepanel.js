@@ -5,6 +5,7 @@ const MINDMAP_KEY = "hkMindmaps";
 const PAGE_META_KEY = "__hk_page_meta__";
 const GITHUB_SETTINGS_KEY = "hkGithubSyncSettings";
 const SYNC_STATE_KEY = "hkAutoSyncState";
+const AI_SETTINGS_KEY = "hkAISettings";
 const WEB_PROVIDERS = ["chatgpt", "gemini-web"];
 
 const els = {
@@ -120,10 +121,18 @@ const sendToTab = async (tabId, message) => {
 
 const saveNote = async (pageKey, text) => {
   if (!pageKey) return;
-  const stored = await chrome.storage.local.get(PERSONAL_NOTES_KEY);
+  const stored = await chrome.storage.local.get([PERSONAL_NOTES_KEY, PAGE_META_KEY]);
   const notes = { ...(stored[PERSONAL_NOTES_KEY] || {}) };
   notes[pageKey] = { text, updatedAt: Date.now() };
-  await chrome.storage.local.set({ [PERSONAL_NOTES_KEY]: notes });
+  const updates = { [PERSONAL_NOTES_KEY]: notes };
+  const title = state.pageKey === pageKey ? state.page?.title : "";
+  if (title && !stored[PAGE_META_KEY]?.[pageKey]?.title) {
+    updates[PAGE_META_KEY] = {
+      ...(stored[PAGE_META_KEY] || {}),
+      [pageKey]: { ...stored[PAGE_META_KEY]?.[pageKey], title, updatedAt: Date.now() },
+    };
+  }
+  await chrome.storage.local.set(updates);
 };
 
 const flushNote = async () => {
@@ -671,15 +680,10 @@ els.copyPrompt.addEventListener("click", async () => {
     setStatus(t("sidebar.promptCopyError"), true);
   }
 });
-els.openWebAI.addEventListener("click", async () => {
-  try {
-    await copyPromptToClipboard();
-    const url = state.provider === "gemini-web" ? "https://gemini.google.com/app" : "https://chatgpt.com/";
-    await chrome.tabs.create({ url });
-    setStatus(t("sidebar.promptCopied"));
-  } catch (_error) {
-    setStatus(t("sidebar.promptCopyError"), true);
-  }
+// 只開網站；複製 Prompt 只有一個入口。
+els.openWebAI.addEventListener("click", () => {
+  const url = state.provider === "gemini-web" ? "https://gemini.google.com/app" : "https://chatgpt.com/";
+  chrome.tabs.create({ url }).catch(() => setStatus(t("sidebar.noMatch"), true));
 });
 els.applyResponse.addEventListener("click", async () => {
   let text = els.response.value.trim();
@@ -755,6 +759,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[SYNC_STATE_KEY]) renderSyncNotice(changes[SYNC_STATE_KEY].newValue);
   if (area !== "local" || !state.pageKey) return;
+  if (changes[AI_SETTINGS_KEY]) {
+    state.provider = changes[AI_SETTINGS_KEY].newValue?.provider || "chatgpt";
+    render();
+  }
   if (changes[MINDMAP_KEY]) {
     state.mindmapOutline = changes[MINDMAP_KEY].newValue?.[state.pageKey]?.outline || "";
     render();

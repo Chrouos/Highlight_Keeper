@@ -510,6 +510,97 @@
       .filter(Boolean);
   };
 
+  const STORAGE_KEYS = {
+    meta: "__hk_page_meta__",
+    notes: "hkGeneratedNotes",
+    mindmaps: "hkMindmaps",
+    personal: "hkPersonalNotes",
+  };
+
+  // AI 筆記裡的 prompt 是整篇文章全文，不需要備份，也不算內容變動。
+  const exportNote = (note) => {
+    if (!note || typeof note !== "object") return null;
+    const { prompt: _prompt, ...rest } = note;
+    return rest;
+  };
+
+  // 這一頁在本機有沒有真正的內容（只存了標題不算）。
+  const pageHasContent = (all, url) =>
+    (Array.isArray(all[url]) && all[url].length > 0) ||
+    Boolean(all[STORAGE_KEYS.notes]?.[url]) ||
+    Boolean(all[STORAGE_KEYS.mindmaps]?.[url]) ||
+    typeof all[STORAGE_KEYS.personal]?.[url]?.text === "string";
+
+  // 從 storage 全部內容組出備份頁面；下載全部與自動同步都用這一份。
+  const collectBackupPages = (all) => {
+    const meta = all[STORAGE_KEYS.meta] || {};
+    const notes = all[STORAGE_KEYS.notes] || {};
+    const mindmaps = all[STORAGE_KEYS.mindmaps] || {};
+    const personal = all[STORAGE_KEYS.personal] || {};
+    const urls = new Set(
+      [
+        ...Object.keys(all).filter((key) => Array.isArray(all[key])),
+        ...Object.keys(meta),
+        ...Object.keys(notes),
+        ...Object.keys(mindmaps),
+        ...Object.keys(personal),
+      ].filter(isHttpUrl)
+    );
+    return normalizeBulkPages(
+      [...urls].map((url) => ({
+        url,
+        title: meta[url]?.title || "",
+        tags: Array.isArray(meta[url]?.tags) ? meta[url].tags : [],
+        entries: Array.isArray(all[url]) ? all[url] : [],
+        note: exportNote(notes[url]),
+        mindmap: mindmaps[url] || null,
+        ...(typeof personal[url]?.text === "string" ? { personalNote: personal[url].text } : {}),
+      }))
+    );
+  };
+
+  // 把備份頁面轉成要寫入 storage 的內容。本機已有內容的頁面跳過，不覆蓋。
+  const pagesToStorageUpdates = (pages, all, now = Date.now()) => {
+    const meta = { ...(all[STORAGE_KEYS.meta] || {}) };
+    const notes = { ...(all[STORAGE_KEYS.notes] || {}) };
+    const mindmaps = { ...(all[STORAGE_KEYS.mindmaps] || {}) };
+    const personal = { ...(all[STORAGE_KEYS.personal] || {}) };
+    const updates = {};
+    const skipped = [];
+    const imported = [];
+    pages.forEach((page) => {
+      if (pageHasContent(all, page.url)) {
+        skipped.push(page.url);
+        return;
+      }
+      imported.push(page.url);
+      if (page.entries.length) updates[page.url] = page.entries;
+      if (page.title || page.tags.length) {
+        meta[page.url] = { ...meta[page.url], title: page.title, tags: page.tags, updatedAt: now };
+      }
+      if (page.note) notes[page.url] = page.note;
+      if (page.mindmap) mindmaps[page.url] = page.mindmap;
+      if (typeof page.personalNote === "string") personal[page.url] = { text: page.personalNote, updatedAt: now };
+    });
+    if (imported.length) {
+      updates[STORAGE_KEYS.meta] = meta;
+      updates[STORAGE_KEYS.notes] = notes;
+      updates[STORAGE_KEYS.mindmaps] = mindmaps;
+      updates[STORAGE_KEYS.personal] = personal;
+    }
+    return { updates, imported, skipped };
+  };
+
+  // 清掉舊版留下的多餘資料：只逛過、沒有任何內容的頁面標題。回傳要寫入的部分。
+  const cleanStoredData = (all) => {
+    const meta = all[STORAGE_KEYS.meta];
+    if (!meta) return {};
+    const kept = Object.fromEntries(
+      Object.entries(meta).filter(([url, value]) => value?.tags?.length || pageHasContent(all, url))
+    );
+    return Object.keys(kept).length === Object.keys(meta).length ? {} : { [STORAGE_KEYS.meta]: kept };
+  };
+
   // 把單頁匯出格式 {url,title,tags,entries,note,mindmap} 轉成可分享的 Markdown。
   // 區塊標題由呼叫端以 labels 傳入（i18n 由呼叫端處理，維持本檔無相依）。
   // labels: { tags, highlights, summary, mindmap }
@@ -717,6 +808,10 @@
     looseKey,
     pickTermText,
     normalizeBulkPages,
+    exportNote,
+    collectBackupPages,
+    pagesToStorageUpdates,
+    cleanStoredData,
     pageToMarkdown,
     parseSharedMarkdown,
   };

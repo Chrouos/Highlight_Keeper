@@ -297,7 +297,8 @@ const fetchAllPages = async () => {
     ...Object.entries(all)
       .filter(([key, value]) => isValidPageKey(key) && Array.isArray(value))
       .map(([key]) => key),
-    ...Object.keys(meta),
+    // 只有標題、沒有標籤的紀錄不算一頁（舊版單純瀏覽時留下的）。
+    ...Object.keys(meta).filter((url) => meta[url]?.tags?.length),
     ...Object.keys(notes),
     ...Object.keys(mindmaps),
     ...Object.keys(personalNotes),
@@ -2354,7 +2355,7 @@ const applyGithubBackupPages = async (pages) => {
   ]);
   const hasLocalData = (url) =>
     (Array.isArray(existing[url]) && existing[url].length > 0) ||
-    Boolean(existing[PAGE_META_KEY]?.[url]) ||
+    Boolean(existing[PAGE_META_KEY]?.[url]?.tags?.length) ||
     Boolean(existing[GENERATED_NOTES_KEY]?.[url]) ||
     Boolean(existing[MINDMAP_KEY]?.[url]) ||
     typeof existing[PERSONAL_NOTES_KEY]?.[url]?.text === "string";
@@ -2771,7 +2772,7 @@ const importMultipleFiles = async (files) => {
     const current = existing[page.url];
     const url = page.url;
     const hasLocalData = (Array.isArray(current) && current.length > 0) ||
-      Boolean(existing[PAGE_META_KEY]?.[url]) ||
+      Boolean(existing[PAGE_META_KEY]?.[url]?.tags?.length) ||
       Boolean(existing[GENERATED_NOTES_KEY]?.[url]) ||
       Boolean(existing[MINDMAP_KEY]?.[url]) ||
       typeof existing[PERSONAL_NOTES_KEY]?.[url]?.text === "string";

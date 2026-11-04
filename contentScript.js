@@ -1141,8 +1141,8 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
     appliedCount = result.appliedCount;
     previewing = aiSettings.usePreview && previewData.length > 0;
     if (previewing) showPreviewConfirmBar(previewData.length);
-    else await ensurePageMetaTitle(pageKey, document.title);
   }
+  await ensurePageMetaTitle(pageKey, document.title);
   const unmatchedByKey = new Map(unmatchedTasks.map((item) => [HkParsers.looseKey(item.text), item]));
   const unmatchedKeys = new Set(unmatchedByKey.keys());
   const isCovered = (item) => Boolean(unmatchedByKey.get(HkParsers.looseKey(item.text))?.covered);
@@ -6254,7 +6254,6 @@ const notifyOrphanHighlights = (orphanCount, total) => {
 
 const attemptRestoreHighlights = async (attempt = 0) => {
   if (attempt === 0) await migrateLegacyPageData();
-  await ensurePageMetaTitle(pageKey, document.title);
   const { total, visible } = await restoreHighlights();
   checkPendingFocusHighlight();
   if (!total) {
@@ -6262,6 +6261,8 @@ const attemptRestoreHighlights = async (attempt = 0) => {
     updateOrphanNotice();
     return;
   }
+  // 只有真的有標註的頁面才記標題：單純瀏覽不留下任何紀錄。
+  await ensurePageMetaTitle(pageKey, document.title);
   if (visible >= total) {
     // 全部還原成功（可能是這次或之前重試補上的）→ 清掉殘留的失聯狀態。
     orphanHighlightCount = 0;
@@ -6667,7 +6668,7 @@ const onUrlChanged = (next) => {
   } catch (_e) {}
 
   // 重新還原；restoreHighlights 對已存在的標記是冪等的，重試階梯會處理
-  // SPA 延遲渲染。attemptRestoreHighlights 內已會 ensurePageMetaTitle。
+  // SPA 延遲渲染。有標註時 attemptRestoreHighlights 會更新標題。
   attemptRestoreHighlights(0);
 
   // 面板若開著，讓它跟著切到新頁。
@@ -7315,30 +7316,17 @@ document.addEventListener("keydown", (event) => {
   hideFloatingButton();
   closeHighlightPanel();
 });
-const collectAllPageHighlights = async () => {
-  if (!storage) throw new Error(t("ai.errStorageUnavailable"));
-  const everything = await storage.get(null);
-  const meta = everything[PAGE_META_KEY] || {};
-  const pages = Object.entries(everything)
-    .filter(([key, value]) => isValidPageKey(key) && Array.isArray(value))
-    .map(([url, entries]) => ({
-      url,
-      title: meta[url]?.title || "",
-      entries,
-    }));
-  return { pages, meta };
-};
-
 const handleDownloadAllHighlights = async () => {
   try {
-    const { pages } = await collectAllPageHighlights();
+    if (!storage) throw new Error(t("ai.errStorageUnavailable"));
+    const pages = HkParsers.collectBackupPages(await storage.get(null));
     if (!pages.length) {
       setArchiveStatus(t("archive.nothingToDownload"), true);
       return;
     }
     const payload = {
       type: "highlight-keeper-bulk",
-      version: 1,
+      version: 2,
       exportedAt: Date.now(),
       pages,
     };
@@ -7365,13 +7353,24 @@ const mergeBulkImportPayload = async (files) => {
   try {
     setArchiveStatus(t("archive.importing"));
     const fileTexts = await Promise.all(Array.from(files).map((file) => file.text()));
-    const allEntries = fileTexts.flatMap((text) =>
-      parseImportedHighlightsPayload(text)
-    );
+    const bulkPagesOf = (text) => {
+      try {
+        const parsed = JSON.parse(text);
+        return Array.isArray(parsed?.pages) ? parsed.pages : null;
+      } catch (_error) {
+        return null; // 下面的舊格式解析會回報 JSON 錯誤
+      }
+    };
+    const bulkPages = HkParsers.normalizeBulkPages(fileTexts.flatMap((text) => bulkPagesOf(text) || []));
+    const bulk = HkParsers.pagesToStorageUpdates(bulkPages, await storage.get(null));
+    if (Object.keys(bulk.updates).length) await storage.set(bulk.updates);
+    const allEntries = fileTexts
+      .filter((text) => !bulkPagesOf(text))
+      .flatMap((text) => parseImportedHighlightsPayload(text));
     const normalized = allEntries
       .map((entry, index) => normalizeImportedHighlightEntry(entry, index))
       .filter(Boolean);
-    if (!normalized.length) {
+    if (!normalized.length && !bulkPages.length) {
       throw new Error(t("manager.errNoImport"));
     }
     const grouped = new Map();
@@ -7392,17 +7391,20 @@ const mergeBulkImportPayload = async (files) => {
       }
       updates[url] = list.map(({ title, ...rest }) => rest);
     });
-    if (!Object.keys(updates).length) {
+    if (!Object.keys(updates).length && !bulk.imported.length) {
       throw new Error(t("ai.allSkipped"));
     }
-    await storage.set(updates);
+    if (Object.keys(updates).length) await storage.set(updates);
     await Promise.all(
       normalized
         .filter((entry) => entry.title)
         .map((entry) => ensurePageMetaTitle(entry.url, entry.title))
     );
     setArchiveStatus(
-      t("ai.bulkImported", { imported: Object.keys(updates).length, skipped: skipped.length })
+      t("ai.bulkImported", {
+        imported: Object.keys(updates).length + bulk.imported.length,
+        skipped: skipped.length + bulk.skipped.length,
+      })
     );
     await refreshHighlightPanelData();
     await renderHighlightPanel();

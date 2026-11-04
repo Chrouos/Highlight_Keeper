@@ -289,5 +289,55 @@ const conflictUrls = (result) => result.conflicts.map((c) => c.url);
   result = await sync(moved);
   assert.equal(result.pushed, 1, "a new backup location starts clean");
 
+  // An edit made while a cycle is running is pushed by the next cycle.
+  moved[URL_B] = mark("b");
+  const fetchBeforeEdit = globalThis.fetch;
+  let editedMidCycle = false;
+  globalThis.fetch = async (...args) => {
+    if (!editedMidCycle) { editedMidCycle = true; moved[URL_A] = mark("edited mid-cycle"); }
+    return fetchBeforeEdit(...args);
+  };
+  result = await sync(moved);
+  globalThis.fetch = fetchBeforeEdit;
+  assert.equal(result.status, "ok");
+  result = await sync(moved);
+  assert.equal(result.pushed, 1, "the mid-cycle edit is not skipped");
+  const movedFile = JSON.parse(github.blobs.get(headTree(github.head).get("other/hk.json")));
+  assert.equal(movedFile.pages.find((p) => p.url === URL_A).entries[0].text, "edited mid-cycle");
+  result = await sync(moved);
+  assert.equal(result.pushed, 0, "and then it settles");
+
+  // Pages that were only visited are not backed up, and old leftovers are cleaned.
+  const P = globalThis.HkParsers;
+  const stored = {
+    "__hk_page_meta__": {
+      "https://bank.example.com/1": { title: "Visited only" },
+      [URL_A]: { title: "Has marks" },
+      [URL_B]: { title: "Has tags", tags: ["x"] },
+      [URL_C]: { title: "Has a personal note" },
+    },
+    [URL_A]: mark("x"),
+    hkPersonalNotes: { [URL_C]: { text: "mine" } },
+  };
+  assert.deepEqual(P.collectBackupPages(stored).map((p) => p.url).sort(), [URL_A, URL_C].sort(), "visited-only pages stay out of backups");
+  assert.deepEqual(Object.keys(P.cleanStoredData(stored)["__hk_page_meta__"]).sort(), [URL_A, URL_B, URL_C].sort());
+  assert.deepEqual(P.cleanStoredData({ "__hk_page_meta__": { [URL_A]: { title: "t" } }, [URL_A]: mark("x") }), {}, "nothing to clean writes nothing");
+
+  // Importing restores everything a download contains, and never overwrites.
+  const exported = P.collectBackupPages({
+    "__hk_page_meta__": { [URL_A]: { title: "A", tags: ["t"] } },
+    [URL_A]: mark("x"),
+    hkGeneratedNotes: { [URL_A]: { context: "c", prompt: "article text" } },
+    hkMindmaps: { [URL_A]: { outline: "# m" } },
+    hkPersonalNotes: { [URL_A]: { text: "mine" } },
+  });
+  assert.equal(exported[0].note.prompt, undefined, "the article text is not exported");
+  const restored = P.pagesToStorageUpdates(exported, {}, 5);
+  assert.deepEqual(restored.imported, [URL_A]);
+  assert.deepEqual(P.collectBackupPages(restored.updates), exported, "download then import round-trips");
+  const kept = P.pagesToStorageUpdates(exported, { [URL_A]: mark("local") });
+  assert.deepEqual(kept.skipped, [URL_A]);
+  assert.deepEqual(kept.updates, {}, "an existing page is left alone");
+
   console.log("Auto-sync passed: push, pull, idle, conflict, resolve, deletion, races, failures and mass-delete guard.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
