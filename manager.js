@@ -953,7 +953,7 @@ const pageToExportEntry = (page) => ({
   title: state.meta[page.url]?.title || "",
   tags: Array.isArray(page.tags) ? page.tags : [],
   entries: page.entries,
-  note: state.notes[page.url] || null,
+  note: window.HkAutoSync.exportNote(state.notes[page.url]),
   mindmap: state.mindmaps[page.url] || null,
   ...(typeof state.personalNotes[page.url]?.text === "string"
     ? { personalNote: state.personalNotes[page.url].text }
@@ -1526,7 +1526,7 @@ const renderPageDetail = (page) => {
       if (trimmedNote) {
         const note = document.createElement("p");
         note.className = "hk-manager-detail-note is-clickable";
-        note.textContent = trimmedNote;
+        note.textContent = window.HkParsers.breakNoteLines(trimmedNote);
         note.setAttribute("title", t("manager.clickToCopyNote"));
         note.addEventListener("click", async () => {
           try {
@@ -1602,8 +1602,8 @@ const renderPageDetail = (page) => {
   }
 
   const aiNote = state.notes?.[page.url];
-  if (aiNote?.note) {
-    aiContent.textContent = aiNote.note;
+  if (aiNote?.context || aiNote?.note) {
+    aiContent.textContent = window.HkParsers.breakNoteLines(aiNote.context || aiNote.note);
     aiSection.style.display = "";
   } else {
     aiContent.textContent = t("manager.emptyAiNote");
@@ -2130,64 +2130,9 @@ const githubDir = (path) => {
 };
 const joinPath = (dir, rel) => (dir ? `${dir}/${rel}` : rel);
 
-// 依標籤把「匯出格式的頁面陣列」分組（一頁多標籤→多組；無標籤→未分類）。
-const groupExportPagesByTag = (pages) => {
-  const groups = new Map();
-  const add = (key, page) => {
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(page);
-  };
-  pages.forEach((page) => {
-    const tags = (Array.isArray(page.tags) ? page.tags : [])
-      .map((tag) => String(tag).trim())
-      .filter(Boolean);
-    if (!tags.length) add(UNTAGGED_KEY, page);
-    else tags.forEach((tag) => add(tag, page));
-  });
-  return groups;
-};
-
-// 從完整備份 payload 組出要上傳的檔案清單：完整備份＋各分類檔＋index.json。
-const buildCategorizedFiles = (settings, payload) => {
-  const dir = githubDir(settings.path);
-  const fullName = String(settings.path).split("/").pop() || "highlight-keeper.json";
-  const groups = groupExportPagesByTag(payload.pages || []);
-  const usedSlugs = new Set();
-  const categories = [];
-  const files = [
-    // 完整備份（相容舊版「從 GitHub 下載」）
-    { path: settings.path, content: JSON.stringify(payload, null, 2) },
-  ];
-  for (const [tag, pages] of groups) {
-    const isUntagged = tag === UNTAGGED_KEY;
-    let slug = isUntagged ? "_untagged" : safeFileSlug(tag);
-    while (usedSlugs.has(slug)) slug += "-1"; // 避免不同標籤 slug 撞名
-    usedSlugs.add(slug);
-    const rel = `categories/${slug}.json`;
-    const catPayload = buildExportPayloadForPages([], {
-      category: isUntagged ? null : tag,
-    });
-    catPayload.pages = pages; // 直接用已是匯出格式的頁面
-    files.push({ path: joinPath(dir, rel), content: JSON.stringify(catPayload, null, 2) });
-    categories.push({
-      tag: isUntagged ? null : tag,
-      untagged: isUntagged || undefined,
-      file: rel,
-      pageCount: pages.length,
-    });
-  }
-  categories.sort((a, b) => (b.pageCount || 0) - (a.pageCount || 0));
-  const index = {
-    type: "highlight-keeper-index",
-    version: 1,
-    exportedAt: Date.now(),
-    totalPages: (payload.pages || []).length,
-    fullBackup: fullName,
-    categories,
-  };
-  files.push({ path: joinPath(dir, "index.json"), content: JSON.stringify(index, null, 2) });
-  return { files, index };
-};
+// 分類檔的組法與自動同步共用，檔名和內容才會一致。
+const buildCategorizedFiles = (settings, payload) =>
+  window.HkAutoSync.buildCategorizedFiles(settings, payload);
 
 const fetchGithubBackupContent = async (settings, overridePath) => {
   const repoBase = buildRepoApiBase(settings.repo);
@@ -2419,7 +2364,7 @@ const applyGithubBackupPages = async (pages) => {
     toSortedJson(currentEntries) === toSortedJson(nextEntries);
   const identical = overlapping.filter((page) =>
     isSameEntries(existing[page.url] || [], page.entries) &&
-    toSortedJson(existing[GENERATED_NOTES_KEY]?.[page.url] || null) === toSortedJson(page.note || null) &&
+    toSortedJson(window.HkAutoSync.exportNote(existing[GENERATED_NOTES_KEY]?.[page.url])) === toSortedJson(window.HkAutoSync.exportNote(page.note)) &&
     toSortedJson(existing[MINDMAP_KEY]?.[page.url] || null) === toSortedJson(page.mindmap || null) &&
     (typeof page.personalNote !== "string" || existing[PERSONAL_NOTES_KEY]?.[page.url]?.text === page.personalNote) &&
     (!(page.title || (Array.isArray(page.tags) && page.tags.length)) ||
@@ -2477,6 +2422,171 @@ const applyGithubBackupPages = async (pages) => {
   ].filter(Boolean);
   setGithubStatus(statusParts.join("，"));
   await refreshManager();
+};
+
+/* ── 自動同步 ─────────────────────────────────────── */
+const autoSyncEnabledInput = document.getElementById("autoSyncEnabled");
+const autoSyncMinutesInput = document.getElementById("autoSyncMinutes");
+const autoSyncNowBtn = document.getElementById("autoSyncNowBtn");
+const autoSyncStatusEl = document.getElementById("autoSyncStatus");
+const autoSyncConflictsEl = document.getElementById("autoSyncConflicts");
+
+const AUTO_SYNC_CONFLICT_LABELS = {
+  "both-changed": "manager.syncKindBoth",
+  "local-deleted": "manager.syncKindLocalDeleted",
+  "remote-deleted": "manager.syncKindRemoteDeleted",
+  "mass-delete": "manager.syncKindMassDelete",
+};
+
+const autoSyncStatusText = (syncState) => {
+  if (syncState.status === "error") {
+    if (syncState.errorCode === "remote-moved") return t("manager.syncRetryNext");
+    if (syncState.errorCode === "remote-invalid") return t("manager.syncRemoteInvalid");
+    if (!syncState.errorMessage) return t("manager.syncNeedSettings");
+    return t("manager.syncFailed", { error: syncState.errorMessage });
+  }
+  if (!syncState.lastRunAt) return "";
+  const time = new Date(syncState.lastRunAt).toLocaleTimeString();
+  const conflicts = syncState.conflicts?.length || 0;
+  const moved = (syncState.pulled || 0) + (syncState.pushed || 0) + (syncState.deleted || 0);
+  const summary = moved
+    ? t("manager.syncChanged", { pulled: syncState.pulled || 0, pushed: syncState.pushed || 0, deleted: syncState.deleted || 0 })
+    : t("manager.syncNoChange");
+  return [t("manager.syncLastRun", { time }), summary, conflicts ? t("manager.syncConflictCount", { count: conflicts }) : ""]
+    .filter(Boolean)
+    .join(" · ");
+};
+
+const resolveAutoSyncConflicts = async (choices) => {
+  autoSyncConflictsEl.querySelectorAll("button").forEach((btn) => { btn.disabled = true; });
+  try {
+    await chrome.runtime.sendMessage({ type: "HK_SYNC_RESOLVE", choices });
+    await refreshManager();
+  } catch (error) {
+    if (autoSyncStatusEl) autoSyncStatusEl.textContent = t("manager.syncFailed", { error: error?.message || "" });
+  }
+  renderAutoSyncState();
+};
+
+const makeConflictButton = (label, onClick) => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "hk-manager-btn hk-manager-btn-ghost";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+};
+
+const renderAutoSyncConflicts = (conflicts) => {
+  autoSyncConflictsEl.replaceChildren();
+  autoSyncConflictsEl.hidden = !conflicts.length;
+  if (!conflicts.length) return;
+  const choose = (choice) => Object.fromEntries(conflicts.map((item) => [item.url, choice]));
+  const head = document.createElement("div");
+  head.className = "hk-manager-autosync-conflict-head";
+  const intro = document.createElement("p");
+  intro.textContent = t("manager.syncConflictIntro", { count: conflicts.length });
+  head.append(
+    intro,
+    makeConflictButton(t("manager.syncAllLocal"), async () => {
+      const ok = await openConfirmDialog({
+        title: t("manager.syncAllLocal"),
+        message: t("manager.syncAllLocalConfirm", { count: conflicts.length }),
+        confirmLabel: t("manager.syncAllLocal"),
+        cancelLabel: t("manager.btnCancel"),
+      });
+      if (ok) resolveAutoSyncConflicts(choose("local"));
+    }),
+    makeConflictButton(t("manager.syncAllRemote"), async () => {
+      const ok = await openConfirmDialog({
+        title: t("manager.syncAllRemote"),
+        message: t("manager.syncAllRemoteConfirm", { count: conflicts.length }),
+        confirmLabel: t("manager.syncAllRemote"),
+        cancelLabel: t("manager.btnCancel"),
+      });
+      if (ok) resolveAutoSyncConflicts(choose("remote"));
+    })
+  );
+  autoSyncConflictsEl.appendChild(head);
+  conflicts.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "hk-manager-autosync-conflict";
+    const info = document.createElement("div");
+    info.className = "hk-manager-autosync-conflict-info";
+    const name = document.createElement("a");
+    name.href = item.url;
+    name.target = "_blank";
+    name.rel = "noopener";
+    name.textContent = state.meta[item.url]?.title || getPageDisplayName(item.url);
+    const kind = document.createElement("span");
+    kind.textContent = t(AUTO_SYNC_CONFLICT_LABELS[item.kind] || "manager.syncKindBoth");
+    info.append(name, kind);
+    row.append(
+      info,
+      makeConflictButton(t("manager.syncUseLocal"), () => resolveAutoSyncConflicts({ [item.url]: "local" })),
+      makeConflictButton(t("manager.syncUseRemote"), () => resolveAutoSyncConflicts({ [item.url]: "remote" }))
+    );
+    autoSyncConflictsEl.appendChild(row);
+  });
+};
+
+const renderAutoSyncState = async () => {
+  if (!autoSyncStatusEl || !autoSyncConflictsEl) return;
+  const syncState = await window.HkAutoSync.readState();
+  autoSyncStatusEl.textContent = autoSyncStatusText(syncState);
+  autoSyncStatusEl.classList.toggle(
+    "is-error",
+    syncState.status === "error" && syncState.errorCode !== "remote-moved"
+  );
+  renderAutoSyncConflicts(syncState.conflicts || []);
+};
+
+const runAutoSyncNow = async () => {
+  autoSyncNowBtn.disabled = true;
+  autoSyncStatusEl.textContent = t("manager.syncRunning");
+  autoSyncStatusEl.classList.remove("is-error");
+  try {
+    await chrome.runtime.sendMessage({ type: "HK_SYNC_NOW" });
+    await refreshManager();
+  } catch (error) {
+    console.debug("立即同步失敗", error);
+  } finally {
+    autoSyncNowBtn.disabled = false;
+    renderAutoSyncState();
+  }
+};
+
+const initAutoSyncUi = () => {
+  if (!autoSyncEnabledInput || !autoSyncMinutesInput || !autoSyncNowBtn) return;
+  const { DEFAULT_MINUTES, clampMinutes, STATE_KEY } = window.HkAutoSync;
+  const applyFields = () => {
+    autoSyncEnabledInput.checked = Boolean(githubSettings.autoSync);
+    autoSyncMinutesInput.value = clampMinutes(githubSettings.autoSyncMinutes ?? DEFAULT_MINUTES);
+  };
+  loadGithubSettings().then(applyFields);
+  autoSyncEnabledInput.addEventListener("change", async (event) => {
+    const enabled = event.target.checked;
+    await persistGithubSettings({
+      ...getGithubSettingsSnapshot(),
+      autoSync: enabled,
+      autoSyncMinutes: clampMinutes(autoSyncMinutesInput.value),
+    });
+    if (enabled) runAutoSyncNow();
+  });
+  autoSyncMinutesInput.addEventListener("change", (event) => {
+    const minutes = clampMinutes(event.target.value);
+    event.target.value = minutes;
+    persistGithubSettings({ autoSyncMinutes: minutes });
+  });
+  autoSyncNowBtn.addEventListener("click", async () => {
+    await persistGithubSettings(getGithubSettingsSnapshot());
+    runAutoSyncNow();
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes[STATE_KEY]) renderAutoSyncState();
+  });
+  window.HkI18n?.onLangChange?.(renderAutoSyncState);
+  renderAutoSyncState();
 };
 
 const downloadHighlightsFromGithub = async () => {
@@ -2764,6 +2874,7 @@ const init = async () => {
   bindGithubInput(githubRepoInput, "repo");
   bindGithubInput(githubBranchInput, "branch");
   bindGithubInput(githubPathInput, "path");
+  initAutoSyncUi();
   githubDownloadBtn?.addEventListener("click", () => {
     downloadHighlightsFromGithub();
   });

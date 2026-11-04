@@ -1,6 +1,6 @@
 # Highlight Keeper — 功能總清單
 
-盤點自 `manifest.json` / `popup.*` / `contentScript.js` / `manager.*` / `parsers.js` / `share-link.js` / `i18n.js`，作為 UI/UX 重做的依據。
+盤點自 `manifest.json` / `sidepanel.*` / `contentScript.js` / `manager.*` / `parsers.js` / `share-link.js` / `i18n.js`。
 
 ---
 
@@ -17,46 +17,42 @@
 | A7 | 失聯標註提示 | 原文變動找不到標註時，在面板常駐提示數量 |
 | A8 | Toast 提示 | 存檔／匯入失敗等即時回饋 |
 
-## B. 頁面面板（contentScript 內建，`Ctrl/Cmd+Shift+K` 開關）
+## B. 頁面工具面板（contentScript 內建，`Ctrl/Cmd+Shift+K` 開關）
 
 | # | 功能 | 說明 |
 |---|---|---|
 | B1 | 可拖曳／左右側切換 | header 拖曳定位，記憶 `hkPanelSide` |
 | B2 | 字級縮放 | A− / A+，記憶 `--hk-panel-font-scale` |
-| B3 | AI 卡片（常駐） | 預設複製 Prompt 到 ChatGPT；也可開啟 Gemini 網頁版，貼回回覆後自動套用 |
-| B4 | 直接產生 | 選用 API 模式並提供有效 API Key 時，一鍵呼叫 OpenAI / Gemini |
-| B5 | 心智圖 | 複製心智圖 Prompt、檢視已存心智圖、複製大綱 |
-| B6 | 指引閱讀 | 依標註順序逐段引導閱讀 |
+| B3 | 開啟閱讀導覽 | 面板不放 AI 流程，只提供前往側欄的入口 |
 | B7 | 清除本頁標記 | 危險色按鈕 + 二次確認 |
 | B8 | 分頁：本頁 | 本頁標註列表，點擊跳轉並閃爍定位，可單筆刪除 |
 | B9 | 分頁：搜尋 | 關鍵字（標題／網址／標註／註解／標籤）+ 網址下拉 + 標籤 chips 篩選 |
-| B10 | 分頁：摘要 | AI 筆記內容 + 複製 + 下方「跳到重點」清單 |
 | B11 | 設定抽屜 | 顯示、本頁工具、本頁備份、全部備份、AI 服務 |
 | B12 | 頁面標籤 | 新增／刪除標籤，含既有標籤建議下拉 |
 | B13 | 本頁備份 | 複製純文字、下載本頁 JSON、匯入一份 JSON |
 | B14 | 全部備份 | 下載全部 JSON、批次匯入多個 JSON（已存在頁面跳過） |
-| B15 | AI 服務設定 | provider（OpenAI／Gemini API、ChatGPT／Gemini 網頁版）、model、API Key、Prompt 模板；預設免 API Key |
-| B16 | 標註分類 | 自訂分類名稱對應顏色，供 AI 畫重點使用；可重設 |
+| B15 | AI 服務設定 | provider（OpenAI／Gemini API、ChatGPT／Gemini 網頁版）、model、API Key、補充要求；預設免 API Key |
+| B16 | 標註分類 | 自訂分類名稱對應顏色，供重點整理使用；可重設 |
 | B17 | 套用前預覽 | AI 回覆套用前先預覽數量，可確認／取消 |
-| B18 | 逐段延伸 | 每個重點區塊多「延伸：」「來源：」兩行，直接存成該標註的註解；面板列表會把延伸分隔降階、來源做成 Google 搜尋連結。AI 設定可關；舊版獨立 `===延伸===` 區塊仍相容 |
+| B18 | 逐段延伸 | 開啟後 Prompt 會要求每個重點附「延伸」「來源」，存成該標註的註解；面板列表會把延伸分隔降階、來源做成 Google 搜尋連結 |
 | B19 | 舊標註重上色 | 設定 → 標註顏色 → 把舊的深色標註換淺，掃過所有頁面把舊飽和色換成新淺色 |
 
-## C. Popup 快捷頁
+## C. 閱讀導覽側欄（Chrome 116 以上，點擴充功能圖示或 `Ctrl/Cmd+Shift+Y`）
 
 | # | 功能 | 說明 |
 |---|---|---|
-| C1 | 本頁標記數 / AI 模式 | 直接讀 storage，不喚醒 content script |
-| C2 | 在頁面開啟面板 | 必要時自動注入 content script |
-| C12 | 開啟閱讀側欄 | 由使用者點擊後呼叫 `chrome.sidePanel.open()` |
-| C3 | 複製 AI 畫重點 Prompt | 組出含全文＋色票＋標籤的 Prompt |
-| C4 | 貼上並套用 | textarea 貼上即自動套用；補 macOS popup 缺少的 Cmd+A/C/X/V/Z |
-| C5 | 複製分享連結 | 壓縮進 `原文網址#hk=…`；太長改走 GitHub raw |
-| C6 | 複製本頁筆記 | 輸出 Markdown |
-| C7 | 下載本頁 JSON | 匯出格式 `highlight-keeper-bulk` v2 |
-| C8 | 清除本頁標記 | — |
-| C9 | 色票管理 | 新增／編輯／刪除顏色，與面板即時同步 |
-| C10 | 管理所有筆記 | 開 `manager.html` |
-| C11 | 語言切換 | 繁中 / English |
+| C1 | 複製 Prompt | 全擴充功能唯一的 Markdown Prompt，一次取得脈絡、名詞解釋、重點整理、閱讀地圖與標籤 |
+| C2 | 貼上並套用 | 貼上即自動套用；框內沒東西時按「套用回覆」會讀剪貼簿 |
+| C3 | 用 API 一鍵整理 | 選用 OpenAI／Gemini API 時顯示 |
+| C4 | 脈絡 | 3～5 個短段落交代文章因果、證據與取捨，約 200～400 字 |
+| C5 | 閱讀地圖 | 依文章順序的可收合大綱，存於 `hkMindmaps` |
+| C6 | 開始導讀 | 依文章順序逐段帶讀本頁標註 |
+| C7 | 名詞解釋 | 必要詞彙與兩三句白話解釋，點擊可回到原文 |
+| C8 | 重點整理 | 短文 3～4 段、中篇 5～7 段、長文 8～12 段；另選最多 3～5 個必要名詞，不占段落名額。依回覆順序排列，預覽時也保存解釋 |
+| C9 | 我的筆記 | 按頁自動儲存在 `hkPersonalNotes`，不會預設送入 AI |
+| C10 | 分享與工具 | 複製分享連結、複製 Markdown、下載 JSON、標註工具面板、管理所有筆記、刪除這篇文章的筆記（按兩次確認）、語言切換 |
+| C12 | 刪除單項 | 名詞解釋與重點整理每項都能刪除，連同頁面標記；頁面上找不到標記的項目會標示出來 |
+| C11 | 跨分頁同步 | 切換文章時載入對應資料；開啟 AI 時保留來源文章，套用前驗證網址或原文片段 |
 
 ## D. 筆記總覽 manager.html
 
@@ -74,6 +70,7 @@
 | D10 | 整理重複頁面 | 合併只差網址參數、或同站同標題的頁面 |
 | D11 | GitHub 備份 | Token / repo / branch / path，上傳、下載、分類下載 |
 | D12 | 匯出此分類 | 依目前篩選匯出 |
+| D14 | 自動同步 | 每 N 分鐘逐頁三方比對 GitHub；只有一邊變動才同步，兩邊都變動的頁面不動，在此選擇版本 |
 | D13 | 語言切換 | — |
 
 ## E. 分享／匯入（share-link.js）
@@ -90,31 +87,5 @@
 |---|---|
 | F1 | `normalizePageKey` 網址正規化（去追蹤參數、canonical 優先）|
 | F2 | `pageToMarkdown` 轉 Markdown（標籤／重點／摘要／脈絡／個人筆記／心智圖）|
-| F3 | AI 回覆解析：重點 / 摘要 / 標籤 / 心智圖分段 |
+| F3 | AI 回覆解析：脈絡 / 名詞解釋 / 重點整理 / 閱讀地圖 / 標籤分段；相容舊版 `===重點===` 標記與反斜線跳脫的 Markdown |
 | F4 | storage keys：`hkColorPalette`、`hkLastColor`、`hkAISettings`、`__hk_page_meta__`、`hkGeneratedNotes`、`hkPersonalNotes`、`hkMindmaps`、`hkGithubSyncSettings`、`hkPanelSide`、`hkLang` |
-
-## G. Chrome 閱讀側欄（Chrome 116 以上）
-
-| # | 功能 | 說明 |
-|---|---|---|
-| G1 | 脈絡 | 1～2 段交代文章因果、證據與取捨，約 250～500 字 |
-| G2 | 專有名詞 | 必要詞彙與兩三句白話解釋，原文底色標註，點擊可回到原文 |
-| G3 | 重點標註 | 短文 3～4 段、中篇 5～7 段、長文 8～12 段；另選最多 3～5 個必要名詞，不占段落名額。備註說明段落意義，預覽時也保存解釋 |
-| G4 | 我的筆記 | 按頁自動儲存在 `hkPersonalNotes`，不會預設送入 AI |
-| G5 | AI 導覽 | 預設可用 ChatGPT 或 Gemini 網頁版；OpenAI／Gemini API 為選用模式 |
-| G6 | 跨分頁同步 | 切換文章時載入對應資料；開啟 AI 時保留來源文章，套用前驗證網址或原文片段 |
-
----
-
-## 重做後的擺放位置
-
-| 原本位置 | 新位置 |
-|---|---|
-| C3 複製 Prompt | **Popup 快捷區塊 ①** |
-| C4 貼上並套用 | **Popup 快捷區塊 ②** |
-| C5–C7 分享／複製／下載 | **Popup 快捷區塊 ③「分享此網頁」** |
-| C2 開啟面板 | Popup 底部單一按鈕 |
-| C9 色票管理 | 移到面板設定抽屜「標註顏色」 |
-| C8 清除本頁 | 已在面板 AI 卡片下方（B7） |
-| C10 / C11 | Popup 頁尾細字連結 |
-| 其餘 | 維持在面板 / manager，僅換視覺 |

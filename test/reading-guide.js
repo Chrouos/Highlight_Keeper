@@ -61,6 +61,72 @@ assert.equal(P.parseHighlightBlocks('原文：Quote\n備註：First sentence.\nS
 assert.equal(P.parseReadingGuideResponse('## **專有名詞**\n名詞：Example\n解釋：First sentence.\nSecond sentence.').terms[0].explanation,
   "First sentence.\nSecond sentence.");
 
+// One reply format, however it reaches the clipboard: code-block copy, rendered copy with
+// escaped Markdown, or the legacy ===marker=== format.
+const unifiedReply = `來源文章：https://example.com/a_b
+## 脈絡
+主線說明。
+## 名詞解釋
+- **名詞：** RAG
+  - **解釋：** 先檢索再生成。
+## 重點整理
+- **原文：** Exact quote
+  - **分類：** #fff5b8
+  - **重點：** 為何重要。
+## 閱讀地圖
+# 文章主題
+- 背景
+  - 問題
+- 結論
+## 標籤
+AI, 檢索`;
+const unified = P.parseReadingGuideResponse(unifiedReply);
+assert.equal(unified.context, "主線說明。");
+assert.equal(unified.terms[0].text, "RAG");
+assert.equal(unified.highlights[0].reason, "為何重要。");
+assert.equal(P.parseMindmapOutline(unified.mindmap).title, "文章主題");
+assert.equal(P.parseMindmapOutline(unified.mindmap).children[0].children[0].label, "問題");
+assert.deepEqual(P.parsePageTags(unified.tags), ["AI", "檢索"]);
+const escapeMarkdown = (text) => text.replace(/[=#*_-]/g, (char) => `\\${char}`);
+assert.deepEqual(P.parseReadingGuideResponse(escapeMarkdown(unifiedReply)), unified, "escaped Markdown parses identically");
+const legacyMarkers = P.parseReadingGuideResponse(escapeMarkdown("===脈絡===\n主線說明。\n===重點===\n原文：Exact quote\n重點：為何重要。"));
+assert.equal(legacyMarkers.context, "主線說明。", "\\=\\=\\= markers are recognized");
+assert.equal(legacyMarkers.highlights[0].text, "Exact quote");
+const renderedCopy = P.parseReadingGuideResponse("脈絡\n主線說明。\n重點整理\n原文：Exact quote\n重點：為何重要。");
+assert.equal(renderedCopy.context, "主線說明。", "headings survive losing their ## prefix");
+assert.equal(renderedCopy.highlights.length, 1);
+assert.equal(P.parseSharedMarkdown(unifiedReply), null, "a guide reply is not mistaken for shared notes");
+
+// Notes read line by line: new replies keep their lines, old walls of text get broken at display.
+const lined = P.parseReadingGuideResponse(`## 名詞解釋
+- **名詞：** A/B 測試
+  - **解釋：** 把使用者分到不同版本。
+  - **例子：** 部分請求用新模型。
+  - **在本文：** 只是可能原因。
+- **名詞：** Empty first line
+  - **解釋：**
+    說明在下一行。
+## 重點整理
+- **原文：** Exact quote
+  - **分類：** #fff5b8
+  - **重點：** 這段在講什麼。
+  - **為何重要：** 它和主線的關係。`);
+assert.equal(lined.terms[0].explanation, "把使用者分到不同版本。\n例子：部分請求用新模型。\n在本文：只是可能原因。");
+assert.equal(lined.terms[1].explanation, "說明在下一行。");
+assert.equal(lined.highlights[0].reason, "這段在講什麼。\n為何重要：它和主線的關係。");
+assert.equal(P.parseReadingGuideResponse("## 名詞解釋\n名詞：X\n解釋：第一句。\n說明：第二句。").terms[0].explanation, "第一句。\n第二句。", "a second label adds a line");
+assert.equal(P.parseHighlightBlocks("原文：Q\n重點：第一句。\n說明：第二句。")[0].reason, "第一句。\n第二句。");
+const wall = "AI：A/B 測試是將不同使用者或請求分配到不同版本，藉此比較系統表現的方法。例如部分 Codex 請求可能由新版模型處理，其餘維持舊版。本文將它列為新模型流量出現的可能原因，但沒有證據確認 OpenAI 確實正在執行 A/B 測試。";
+assert.equal(P.breakNoteLines(wall).split("\n").length, 3, "an old note breaks at each sentence");
+assert.equal(P.breakNoteLines("短句。還是短句。"), "短句。還是短句。", "short notes stay on one line");
+assert.equal(P.breakNoteLines("First line.\n\nSecond line."), "First line.\n\nSecond line.", "existing breaks are kept");
+const english = "The recall went up to 3.5 percent in the test, e.g. Foo beat Bar. The cost also rose! Is it worth it?";
+assert.equal(P.breakNoteLines(english).split("\n").length, 3, "decimals and abbreviations do not split");
+assert.equal(P.breakNoteLines("「這是一段夠長的引用句子，長到需要被斷開來才好閱讀。」下一句也很長，一樣要留在自己的那一行才行。").split("\n")[0].endsWith("」"), true, "closing quotes stay with their sentence");
+assert.equal(P.looseKey("“Don’t” — stop"), P.looseKey('"Don\'t" - stop'), "curly and straight quotes match");
+const multiLineMd = P.pageToMarkdown({ title: "T", url: "https://example.com/a", entries: [{ text: "Q", note: "第一行\n第二行" }] });
+assert.equal(P.parseSharedMarkdown(multiLineMd).items[0].note, "第一行\n第二行", "shared Markdown keeps note lines");
+
 async function checkPersistence() {
   const source = fs.readFileSync(require.resolve("../contentScript.js"), "utf8");
   const start = source.indexOf("const saveReadingGuideContext =");
@@ -70,6 +136,7 @@ async function checkPersistence() {
   let noteUpdates = 0;
   const context = {
     pageKey: articleUrl, HkParsers: P, DEFAULT_COLOR: "#fff5b8",
+    MINDMAP_STORAGE_KEY: "hkMindmaps", PAGE_META_KEY: "__hk_page_meta__",
     aiSettings: { categories: [], usePreview: true }, previewData: [],
     highlightPanelState: { notesByPage: {} },
     chrome: { storage: { local: { get: async () => ({ hkGeneratedNotes: saved }) } } },

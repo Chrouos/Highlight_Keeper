@@ -1,4 +1,4 @@
-/* 分享連結（popup 與 manager 共用，掛 window.HkShareLink）。
+/* 分享連結（側欄與 manager 共用，掛 window.HkShareLink）。
    兩種形式，收件端都由 contentScript 偵測後一鍵匯入：
    1. fragment：筆記壓縮後藏在「原文網址#hk=…」——零設定、無需任何後端。
       payload 為輕量版（只留 text/note/color，不含 range），收件端靠文字
@@ -132,21 +132,25 @@
   };
 
   // Git Data API 一次 commit：blobs → tree → commit → 更新 ref。
-  const commitFilesToGithub = async (settings, files, commitMessage) => {
+  // options.parentSha：以指定 commit 為基礎（可為 null）。分支若已前進，更新 ref 會失敗
+  // 而不是蓋掉別人的內容。options.deletions：要從樹中移除的路徑。
+  const commitFilesToGithub = async (settings, files, commitMessage, options = {}) => {
     const repoBase = buildRepoApiBase(settings.repo);
     if (!repoBase) throw new Error("INVALID_REPO");
     const { token, branch } = settings;
 
-    let latestSha = null;
-    try {
-      const refData = await githubApiRequest(
-        repoBase,
-        `/git/ref/heads/${encodeURIComponent(branch)}`,
-        token
-      );
-      latestSha = refData?.object?.sha || null;
-    } catch (error) {
-      if (error?.status !== 404) throw error;
+    let latestSha = options.parentSha ?? null;
+    if (options.parentSha === undefined) {
+      try {
+        const refData = await githubApiRequest(
+          repoBase,
+          `/git/ref/heads/${encodeURIComponent(branch)}`,
+          token
+        );
+        latestSha = refData?.object?.sha || null;
+      } catch (error) {
+        if (error?.status !== 404) throw error;
+      }
     }
     let baseTree = null;
     if (latestSha) {
@@ -166,6 +170,10 @@
       });
       treeEntries.push({ path: file.path, mode: "100644", type: "blob", sha: blob.sha });
     }
+    (options.deletions || []).forEach((path) => {
+      treeEntries.push({ path, mode: "100644", type: "blob", sha: null });
+    });
+    if (!treeEntries.length) return latestSha;
 
     const tree = await githubApiRequest(repoBase, "/git/trees", token, {
       method: "POST",
@@ -195,6 +203,7 @@
         body: { ref: `refs/heads/${branch}`, sha: commit.sha },
       });
     }
+    return commit.sha;
   };
 
   // ── 路徑／slug（確定性：同一頁永遠同一檔名） ─────────────────────
@@ -279,5 +288,8 @@
     buildFragmentShareUrl,
     validateGithubSettings,
     commitPageToGithub,
+    commitFilesToGithub,
+    buildRepoApiBase,
+    githubApiRequest,
   };
 })(typeof window !== "undefined" ? window : globalThis);

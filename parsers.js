@@ -12,13 +12,32 @@
     }
   };
 
-  // 區塊標記別名（中英雙語）：===重點===／===Highlights=== 等都認。
+  // 從 AI 網頁的畫面複製回覆時，Markdown 符號常被加上反斜線（\=\=\=、\#\#、\*\*、\_），
+  // 所有解析前先還原，貼上來源不同也能得到相同結果。
+  const unescapeAiMarkdown = (text) =>
+    String(text ?? "").replace(/\\([\\`*_{}[\]()#+\-.!=~>|:])/g, "$1");
+
+  // 顯示用：長句一句一行，已存的舊筆記不用重跑 AI 也好讀。不改動儲存的內容。
+  const BREAK_NOTE_MIN_LENGTH = 40;
+  const breakNoteLines = (text) =>
+    String(text ?? "")
+      .split("\n")
+      .map((line) =>
+        Array.from(line).length < BREAK_NOTE_MIN_LENGTH
+          ? line
+          : line
+              .replace(/([。！？]+[」』）)"”]*)\s*(?=\S)/g, "$1\n")
+              .replace(/(?<!\b(?:e\.g|i\.e|vs|etc|Dr|Mr|Ms|Mrs|No))([.!?]["”')]?)\s+(?=[A-Z\u3400-\u9fff])/g, "$1\n")
+      )
+      .join("\n");
+
+  // 區塊標記別名（中英雙語）：## 重點整理／===重點===／===Highlights=== 等都認。
   const AI_SECTION_ALIASES = {
-    highlights: ["重點", "重點標註", "畫重點", "標註", "highlights", "marks"],
+    highlights: ["重點", "重點標註", "重點整理", "畫重點", "標註", "highlights", "marks"],
     context: ["脈絡", "主線", "論述脈絡", "context", "mainthread", "articlecontext"],
     terms: ["專有名詞", "名詞解釋", "名詞", "terms", "glossary"],
     note: ["摘要", "筆記", "摘要筆記", "summary", "notes"],
-    mindmap: ["心智圖", "mindmap"],
+    mindmap: ["閱讀地圖", "導讀地圖", "心智圖", "心智圖大綱", "mindmap", "readingmap"],
     tags: ["標籤", "tags", "tag", "關鍵字", "keywords"],
     extra: [
       "延伸",
@@ -63,6 +82,8 @@
       names.forEach((name) => aliasToKey.set(name.toLowerCase(), key));
     });
     const headRe = /^\s*(?:[=＝—-]{2,}|[【\[]|#{1,6})\s*([^=＝【】\[\]#\s]{1,14})\s*(?:[=＝—-]{2,}|[】\]])?\s*$/;
+    // 複製畫面文字時 ## 可能整個消失；只接受不會出現在內文的完整標題。
+    const bareHeadings = new Set(["論述脈絡", "脈絡", "名詞解釋", "專有名詞", "重點整理", "重點標註", "閱讀地圖"]);
     const sections = {};
     let currentKey = null;
     let buffer = [];
@@ -72,10 +93,12 @@
       const body = buffer.join("\n").trim();
       if (body) sections[currentKey] = body;
     };
-    for (const line of rawText.split(/\r?\n/)) {
+    for (const line of unescapeAiMarkdown(rawText).split(/\r?\n/)) {
       if (/^\s*(?:```|~~~)/.test(line)) continue;
-      const match = line.replace(/\*\*|__/g, "").match(headRe);
-      const key = match ? aliasToKey.get(match[1].trim().toLowerCase()) : undefined;
+      const plainLine = line.replace(/\*\*|__/g, "");
+      const match = plainLine.match(headRe);
+      const bare = bareHeadings.has(plainLine.trim()) ? plainLine.trim() : "";
+      const key = aliasToKey.get((match ? match[1].trim() : bare).toLowerCase());
       if (key) {
         flush();
         currentKey = key;
@@ -142,7 +165,8 @@
     .replace(/^[-*+•]\s+/, "")
     .replace(/^\d+[.)、]\s*/, "")
     .replace(/\*\*|__/g, "")
-    .replace(/`([^`]+)`/g, "$1");
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^([^：\s]{1,8}：)\s+/, "$1");
 
   const cleanAiQuote = (value) => String(value || "").trim()
     .replace(/^(?:「([\s\S]*)」|“([\s\S]*)”|"([\s\S]*)")$/, (_all, a, b, c) => a ?? b ?? c)
@@ -187,7 +211,7 @@
       const cleanSource = /^(無|沒有|none|n\/a|-|—)$/i.test(source.trim()) ? "" : source.trim();
       items.push({ text, color: resolveColor(tag), reason, extra, source: extra ? cleanSource : "" });
     };
-    const lines = rawText.split(/\r?\n/).map(normalizeAiFieldLine).filter(Boolean);
+    const lines = unescapeAiMarkdown(rawText).split(/\r?\n/).map(normalizeAiFieldLine).filter(Boolean);
       for (const line of lines) {
         const asText = stripPrefix(line, [
           "原文", "原句", "片段", "source", "quote", "excerpt", "text",
@@ -212,7 +236,7 @@
         const asReason = stripPrefix(line, [
           "重點", "摘要", "說明", "理由", "備註", "註解", "解釋", "point", "summary", "note", "reason", "insight",
         ]);
-        if (asReason !== null) { reason = asReason; lastField = "reason"; continue; }
+        if (asReason !== null) { reason = reason && asReason ? `${reason}\n${asReason}` : reason || asReason; lastField = "reason"; continue; }
         const tagMatch = line.match(/#\s*([^\s#:：]+)/);
         if (
           tagMatch &&
@@ -222,7 +246,7 @@
           tag = tagMatch[1].trim();
           lastField = "";
         } else if (lastField === "reason" && !/^(?:#|```|~~~)/.test(line)) {
-          reason += `\n${line}`;
+          reason = reason ? `${reason}\n${line}` : line;
         }
       }
     flush();
@@ -256,9 +280,11 @@
         saveCurrentTerm();
         currentTerm = { text: cleanAiQuote(term[1]), explanation: "" };
       } else if (definition && currentTerm) {
-        currentTerm.explanation = definition[1].trim();
-      } else if (line && currentTerm?.explanation && !/^\s*(?:\d+[.)]|#|```|~~~)/.test(rawLine)) {
-        currentTerm.explanation += `\n${line}`;
+        const value = definition[1].trim();
+        if (value) currentTerm.explanation = currentTerm.explanation ? `${currentTerm.explanation}\n${value}` : value;
+        currentTerm.hasDefinition = true;
+      } else if (line && currentTerm?.hasDefinition && !/^\s*(?:\d+[.)]|#|```|~~~)/.test(rawLine)) {
+        currentTerm.explanation = currentTerm.explanation ? `${currentTerm.explanation}\n${line}` : line;
       }
     });
     saveCurrentTerm();
@@ -286,11 +312,18 @@
       })
       .slice(0, 5)
       .map((item) => ({ text: item.text, explanation: item.explanation }));
-    const sourceLine = String(rawText || "").split(/\r?\n/)
+    const sourceLine = unescapeAiMarkdown(rawText).split(/\r?\n/)
       .map(normalizeAiFieldLine)
       .find((line) => /^(?:來源文章|文章網址|source url)\s*[:：]/i.test(line));
     const sourceUrl = sourceLine?.match(/https?:\/\/[^\s<>)\]]+/i)?.[0] || "";
-    return { context, terms, highlights: highlights.slice(0, 12), sourceUrl };
+    return {
+      context,
+      terms,
+      highlights: highlights.slice(0, 12),
+      sourceUrl,
+      mindmap: sections.mindmap || "",
+      tags: sections.tags || "",
+    };
   };
 
   // Count CJK characters and Latin words separately so English articles are not
@@ -363,7 +396,7 @@
       ? input
           .toLowerCase()
           .replace(/\s+/g, "")
-          .replace(/[.,;:!?"'`()\[\]{}<>«»—–\-。，、；：！？「」『』（）【】…·]/g, "")
+          .replace(/[.,;:!?"'`()\[\]{}<>«»—–\-。，、；：！？「」『』（）【】…·“”‘’]/g, "")
       : "";
 
   // 把 bulk 備份的 pages 陣列正規化成 {url,title,tags,entries,note,mindmap}。
@@ -435,7 +468,7 @@
         const kindPrefix = entry?.kind === "term" ? "〔專有名詞〕 " : "";
         lines.push(`- ${kindPrefix}${text.replace(/\n+/g, " ")}`);
         const note = (entry?.note || "").trim();
-        if (note) lines.push(`  > ${note.replace(/\n+/g, " ")}`);
+        if (note) note.split(/\n+/).forEach((noteLine) => lines.push(`  > ${noteLine}`));
       });
     }
 
@@ -593,6 +626,8 @@
 
   root.HkParsers = {
     isHttpUrl,
+    unescapeAiMarkdown,
+    breakNoteLines,
     AI_SECTION_ALIASES,
     splitAiSections,
     parsePageTags,

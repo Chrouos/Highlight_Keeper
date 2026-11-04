@@ -105,6 +105,20 @@
             上傳到 GitHub
           </button>
         </div>
+        <div class="hk-manager-autosync">
+          <label class="hk-manager-autosync-toggle">
+            <input type="checkbox" id="autoSyncEnabled" />
+            <span data-i18n="manager.autoSync">自動同步</span>
+          </label>
+          <label class="hk-manager-autosync-interval">
+            <span data-i18n="manager.autoSyncEvery">每</span>
+            <input type="number" id="autoSyncMinutes" class="hk-manager-input" min="1" max="1440" step="1" />
+            <span data-i18n="manager.autoSyncUnit">分鐘</span>
+          </label>
+          <button type="button" id="autoSyncNowBtn" class="hk-manager-btn hk-manager-btn-ghost" data-i18n="manager.autoSyncNow">立即同步</button>
+        </div>
+        <p id="autoSyncStatus" class="hk-manager-autosync-status" role="status" aria-live="polite"></p>
+        <div id="autoSyncConflicts" class="hk-manager-autosync-conflicts" hidden></div>
         <div id="githubCategoryList" class="hk-manager-github-categories" style="display: none"></div>
         <p
           id="githubSyncStatus"
@@ -168,6 +182,7 @@
     <script src="parsers.js"></script>
     <script src="shared.js"></script>
     <script src="share-link.js"></script>
+    <script src="auto-sync.js"></script>
     <script src="i18n.js"></script>
     <script src="manager.js" type="module"></script>
   </body>

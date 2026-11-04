@@ -10,36 +10,38 @@
     <main class="app">
       <header class="topbar">
         <div class="heading">
-          <h1 data-i18n="sidebar.title">閱讀導覽</h1>
-          <p id="pageTitle" class="page-title">—</p>
+          <h1 id="pageTitle" class="page-title">—</h1>
+          <p id="pageUrl" class="page-url"></p>
         </div>
-        <button id="refreshBtn" class="icon-button" type="button" data-i18n-title="sidebar.refresh" aria-label="Refresh">↻</button>
+        <button id="refreshBtn" class="icon-button" type="button" data-i18n-title="sidebar.refresh" data-i18n-aria-label="sidebar.refresh" aria-label="重新整理">↻</button>
       </header>
-      <p id="pageUrl" class="page-url"></p>
 
       <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+      <button id="syncNotice" class="sync-notice" type="button" hidden></button>
 
-      <details id="aiControls" class="ai-controls" open>
-        <summary data-i18n="sidebar.aiTools">AI 整理工具</summary>
+      <details id="aiControls" class="card ai-controls" open>
+        <summary data-i18n="sidebar.aiTools">用 AI 整理這篇</summary>
         <div class="action-row">
-          <button id="generateBtn" class="primary-button" type="button" data-i18n="sidebar.generate">整理本文</button>
-          <button id="copyPromptBtn" class="quiet-button" type="button" data-i18n="sidebar.copyPrompt" hidden>複製指令</button>
+          <button id="copyPromptBtn" class="primary-button" type="button" data-i18n="sidebar.copyPrompt">複製 Prompt</button>
           <button id="openWebAiBtn" class="quiet-button" type="button" data-i18n="sidebar.openChatgpt" hidden>開啟 ChatGPT</button>
+          <button id="generateBtn" class="quiet-button" type="button" data-i18n="sidebar.generate" hidden>用 API 一鍵整理</button>
         </div>
-        <button id="settingsBtn" class="text-button" type="button" data-i18n="sidebar.openSettings" hidden>設定 AI</button>
-        <div id="manualPaste" class="manual-paste" hidden>
-          <textarea id="aiResponse" rows="5" data-i18n-aria-label="sidebar.responseLabel" data-i18n-placeholder="sidebar.pastePlaceholder" placeholder="貼上 AI 回覆"></textarea>
-          <button id="applyResponseBtn" class="quiet-button" type="button" data-i18n="sidebar.applyResponse">套用回覆</button>
+        <div class="manual-paste">
+          <textarea id="aiResponse" rows="3" data-i18n-aria-label="sidebar.responseLabel" data-i18n-placeholder="sidebar.pastePlaceholder" placeholder="把 AI 的回覆貼在這裡，貼上後會自動套用"></textarea>
+          <div class="action-row">
+            <button id="applyResponseBtn" class="quiet-button" type="button" data-i18n="sidebar.applyResponse">套用回覆</button>
+            <button id="settingsBtn" class="text-button" type="button" data-i18n="sidebar.openSettings">AI 設定</button>
+          </div>
         </div>
       </details>
 
       <nav class="tabs" role="tablist" data-i18n-aria-label="sidebar.tabsLabel" aria-label="閱讀導覽分頁">
         <button id="tab-context" class="tab" role="tab" aria-selected="true" aria-controls="pane-context" data-tab="context" data-i18n="sidebar.tab.context">脈絡</button>
         <button id="tab-terms" class="tab" role="tab" aria-selected="false" aria-controls="pane-terms" data-tab="terms">
-          <span data-i18n="sidebar.tab.terms">專有名詞</span><span id="termsCount" class="count" hidden></span>
+          <span data-i18n="sidebar.tab.terms">名詞解釋</span><span id="termsCount" class="count" hidden></span>
         </button>
         <button id="tab-highlights" class="tab" role="tab" aria-selected="false" aria-controls="pane-highlights" data-tab="highlights">
-          <span data-i18n="sidebar.tab.highlights">重點標註</span><span id="highlightsCount" class="count" hidden></span>
+          <span data-i18n="sidebar.tab.highlights">重點整理</span><span id="highlightsCount" class="count" hidden></span>
         </button>
         <button id="tab-notes" class="tab" role="tab" aria-selected="false" aria-controls="pane-notes" data-tab="personal-notes" data-i18n="sidebar.tab.notes">我的筆記</button>
       </nav>
@@ -48,16 +50,23 @@
         <h2 data-i18n="sidebar.contextHeading">論述脈絡</h2>
         <p id="contextText" class="context-text"></p>
         <p id="emptyContext" class="empty" data-i18n="sidebar.empty.context">尚無文章脈絡。</p>
+        <div id="mapSection" class="map-section" hidden>
+          <div class="section-head">
+            <h2 data-i18n="sidebar.mapHeading">閱讀地圖</h2>
+            <button id="startGuideBtn" class="quiet-button" type="button" data-i18n="sidebar.startGuide">開始導讀</button>
+          </div>
+          <div id="readingMap" class="reading-map"></div>
+        </div>
       </section>
       <section id="pane-terms" class="pane" role="tabpanel" aria-labelledby="tab-terms" hidden>
-        <h2 data-i18n="sidebar.tab.terms">專有名詞</h2>
+        <h2 data-i18n="sidebar.tab.terms">名詞解釋</h2>
         <div id="termsList" class="item-list"></div>
-        <p id="emptyTerms" class="empty" data-i18n="sidebar.empty.terms">尚無專有名詞。</p>
+        <p id="emptyTerms" class="empty" data-i18n="sidebar.empty.terms">尚無名詞解釋。</p>
       </section>
       <section id="pane-highlights" class="pane" role="tabpanel" aria-labelledby="tab-highlights" hidden>
-        <h2 data-i18n="sidebar.tab.highlights">重點標註</h2>
+        <h2 data-i18n="sidebar.tab.highlights">重點整理</h2>
         <div id="highlightsList" class="item-list"></div>
-        <p id="emptyHighlights" class="empty" data-i18n="sidebar.empty.highlights">尚無重點標註。</p>
+        <p id="emptyHighlights" class="empty" data-i18n="sidebar.empty.highlights">尚無重點整理。</p>
       </section>
       <section id="pane-notes" class="pane notes-pane" role="tabpanel" aria-labelledby="tab-notes" hidden>
         <h2 data-i18n="sidebar.tab.notes">我的筆記</h2>
@@ -65,7 +74,29 @@
         <p id="noteSaveStatus" class="save-status" data-i18n="sidebar.notesSaved">已儲存</p>
       </section>
       <p id="noPage" class="empty unsupported" data-i18n="sidebar.unsupported" hidden>此分頁無法讀取文章內容。</p>
+
+      <button id="deletePageNotesBtn" class="danger-button" type="button" data-i18n="sidebar.deletePageNotes" hidden>刪除這篇文章的筆記</button>
+
+      <details id="moreTools" class="card more-tools">
+        <summary data-i18n="sidebar.more">分享與工具</summary>
+        <div class="action-row">
+          <button id="shareLinkBtn" class="quiet-button" type="button" data-i18n="popup.shareLink" data-i18n-title="popup.shareLinkTitle">複製分享連結</button>
+          <button id="copyNotesBtn" class="quiet-button" type="button" data-i18n="popup.copyNotesShort" data-i18n-title="popup.copyNotesTitle">複製 Markdown</button>
+          <button id="downloadNotesBtn" class="quiet-button" type="button" data-i18n="popup.downloadNotesShort" data-i18n-title="popup.downloadNotesTitle">下載 JSON</button>
+        </div>
+        <div class="action-row">
+          <button id="openToolsBtn" class="quiet-button" type="button" data-i18n="sidebar.openTools">標註工具面板</button>
+          <button id="openManagerBtn" class="quiet-button" type="button" data-i18n="popup.openManager">管理所有筆記</button>
+        </div>
+        <select id="langSelect" class="lang-select" data-i18n-aria-label="popup.langLabel" aria-label="顯示語言">
+          <option value="zh" data-i18n="popup.langZh">繁體中文</option>
+          <option value="en" data-i18n="popup.langEn">English</option>
+        </select>
+      </details>
     </main>
+    <script src="shared.js"></script>
+    <script src="parsers.js"></script>
+    <script src="share-link.js"></script>
     <script src="i18n.js"></script>
     <script src="sidepanel.js"></script>
   </body>

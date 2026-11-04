@@ -74,23 +74,35 @@ const PREVIOUS_BRIEF_AUTO_HIGHLIGHT_PROMPT = `只挑最重要的專有名詞與�
 const PREVIOUS_COMBINED_AUTO_HIGHLIGHT_PROMPT = `只挑最重要的專有名詞與關鍵段落，合計最多 5 個。名詞要說明「它是什麼、在本文扮演什麼角色」，不要只改寫原句；每項最多 35 字。`;
 const DEFAULT_AI_PROMPT = `用 3～5 句講清楚文章主線，串起前因、結果、轉折與結論。不要逐段改寫；說明各段之間為何有關、這件事為何重要。最多 300 個中文字，只寫原文支持的內容。`;
 const DEFAULT_AUTO_HIGHLIGHT_PROMPT = `依文章篇幅挑選重要段落，涵蓋主要章節、方法、證據與限制，不重複同一論點。專有名詞另外計算，不占段落名額；名詞要說明「它是什麼、在本文扮演什麼角色」，不要只改寫原句。`;
-const DEFAULT_READING_GUIDE_PROMPT = `你是一位會講清楚觀念的閱讀老師。標註要少，解釋要足以讓初學者理解。整份回覆放在單一標記為 markdown 的程式碼區塊，方便直接複製；區塊外不加文字。保留來源文章網址與以下三個標題：
+const DEFAULT_READING_GUIDE_PROMPT = `# 任務：製作閱讀導覽
 
-## 論述脈絡
-用 1～2 段說清楚問題從哪裡來、作者怎麼處理、證據支持什麼、限制或取捨在哪裡。自然串起前因、結果與轉折，不逐段翻述；約 250～500 個中文字，短文可以更短。
+你是一位會講清楚觀念的閱讀老師。請依下方文章，帶領初學者順著脈絡讀懂全文。標註要少，解釋要足以讓初學者理解。
 
-## 專有名詞
-只挑理解本文必要的專有名詞，依下方篇幅建議數量，與重點段落分開計算。每個名詞用 2～3 句白話解釋「它是什麼、解決什麼問題、在本文的作用」，必要時加一個小例子。不可只改寫相鄰原句。使用以下 Markdown 格式：
-- **名詞：** 文章中的原詞
-  - **解釋：** 完整的白話說明；一般背景知識須標明「補充」，不要捏造本文沒有的結果
+## 回覆規則
 
-## 重點標註
-依下方篇幅建議數量挑選關鍵段落，涵蓋全文主要章節，不要只挑開頭或結論。同一個論點不重複標；方法、重要實驗結果、數據的意義、部署取捨與限制都應納入考量。名詞不占段落名額。原文保留文章的語言，逐字引用連續文字，不翻譯、不加省略號。用 1～2 句說明「為何這段重要、它和主線的關係」，不能只是重述數字或原句。使用以下 Markdown 格式：
-- **原文：** 文章中的連續原句
-  - **分類：** #分類或色碼
-  - **重點：** 對讀者有幫助的說明
+- 這是「指令＋資料」，請直接產生結果：不要反問、不要確認任務、不要加開場白或結語。
+- 整份回覆放在**單一**標記為 markdown 的程式碼區塊，區塊外不加文字，方便一鍵複製。
+- 第一行、區塊標題與欄位名稱都照「回覆範本」原樣保留，不翻譯、不改寫。
+- 不使用 === 分隔線，Markdown 符號前不加反斜線。
+- 本文主張與背景補充必須分清楚，不要寫無關段落或泛泛而談。
+- 寫給快速掃讀的人：一行只講一件事，句子要短。不要把多個意思擠在同一段，寧可多換行。
 
-本文主張與背景補充必須分清楚，不要寫無關段落或泛泛而談。`;
+## 各區塊要求
+
+### 脈絡
+分成 3～5 個短段落，段落之間空一行，每段最多 2 句：問題從哪裡來、作者怎麼處理、證據支持什麼、限制或取捨在哪裡。自然串起前因、結果與轉折，不逐段翻述；全部約 200～400 個中文字，短文可以更短。
+
+### 名詞解釋
+只挑理解本文必要的專有名詞，與重點段落分開計算。每個名詞分行寫：「解釋」一句白話說它是什麼；「例子」一句具體例子，沒有好例子就省略這行；「在本文」一句說它在這篇的作用，以及本文有沒有證實。每行不超過 40 個中文字。不可只改寫相鄰原句；一般背景知識須標明「補充」，不要捏造本文沒有的結果。
+
+### 重點整理
+挑選關鍵段落，涵蓋全文主要章節，不要只挑開頭或結論。同一個論點不重複標；方法、重要結果、數據的意義、取捨與限制都應納入考量。原文保留文章的語言，逐字引用連續文字，不翻譯、不加省略號。分行寫：「重點」一句說這段在講什麼；「為何重要」一句說它和主線的關係。每行不超過 40 個中文字，不能只是重述數字或原句。
+
+### 閱讀地圖
+用大綱畫出建議的閱讀路線，讓人由上而下就能掌握全文。主幹依原文的論述順序；子節點是父節點的展開、原因、做法或例子。重要分支展開到第 3～4 層，節點 15 字以內，內容只來自原文。
+
+### 標籤
+3～6 個代表全文主題的標籤，半形逗號分隔，不加 # 號。`;
 // 分類預設名依 UI 語言產生（使用者自訂後會覆蓋這些預設）。
 const getDefaultCategories = () => [
   { name: t("cat.motivation"), color: "#ece3fa" },
@@ -187,22 +199,9 @@ let aiSettings = {
   // 延伸補充：讓模型先想過一輪，再補文章「沒寫到」的背景／反面說法／延伸讀物。
   deepResearch: false,
 };
-let isGeneratingNote = false;
-let isAutoHighlighting = false;
-let isChatGPTBridgeWaiting = false;
-let isManualWebAIWaiting = false;
 let previewData = [];
-const CHATGPT_REQUEST_KEY = "hkChatGPTRequest";
-const CHATGPT_RESPONSE_KEY = "hkChatGPTResponse";
 const HIGHLIGHT_RETRY_DELAYS = [450, 1500, 3500];
 const MINDMAP_STORAGE_KEY = "hkMindmaps";
-const DEFAULT_MINDMAP_PROMPT = `你是一位知識結構分析助手。請「完全根據原文內容」，整理出一張能順著脈絡理解知識的心智圖大綱，讓人由上而下讀就能像看懂一篇文章一樣理解整個主題。
-
-請遵守：
-- 主幹要依原文真正的論述流程排序，呈現一條清楚的理解主線（例如：背景／動機 → 核心概念／能力 → 運作方式 → 實際應用／例子 → 限制或安全 → 結論），不要做成零散、彼此無關的分類堆疊。
-- 每一層都要和上一層有明確關係：子節點是對父節點的「展開、原因、做法、例子或數據」，順著看下來知識是連貫推進的。
-- 內容必須來自原文，可改寫得更精簡好懂，但不要加入原文沒有的資訊或自行臆測。
-- 重要分支延伸到第 3～4 層，節點文字精簡（15 字以內），愈深層愈具體。`;
 // While a batch apply / import is running we write storage many times; this
 // flag stops chrome.storage.onChanged from re-rendering the panel mid-batch.
 let panelRefreshSuppressed = false;
@@ -721,14 +720,6 @@ const updateAiKeyVisibility = () => {
   }
   const webInfo = highlightPanelEls?.aiWebInfo;
   if (webInfo) webInfo.textContent = t(aiSettings.provider === "gemini-web" ? "panel.geminiWebInfo" : "panel.chatgptInfo");
-  const hlPaste = highlightPanelEls?.aiChatGPTHlPasteArea;
-  const hlApply = highlightPanelEls?.aiChatGPTHlApplyBtn;
-  const notePaste = highlightPanelEls?.aiChatGPTNotePasteArea;
-  const noteApply = highlightPanelEls?.aiChatGPTNoteApplyBtn;
-  if (hlPaste) hlPaste.hidden = !isWebProvider;
-  if (hlApply) hlApply.hidden = !isWebProvider;
-  if (notePaste) notePaste.hidden = !isWebProvider;
-  if (noteApply) noteApply.hidden = !isWebProvider;
 };
 
 const populateAiModelSelect = () => {
@@ -763,36 +754,6 @@ const setAiPanelStatus = (message, isError = false) => {
   if (!statusEl) return;
   statusEl.textContent = message || "";
   statusEl.classList.toggle("is-error", Boolean(isError));
-};
-
-const updateGenerateAvailability = () => {
-  const generateBtn = highlightPanelEls?.aiGenerateBtn;
-  const autoHighlightBtn = highlightPanelEls?.aiAutoHighlightBtn;
-  const provider = aiSettings.provider;
-  const key = provider === "openai" ? aiSettings.openaiKey : aiSettings.geminiKey;
-  const hasKey = ["chatgpt", "gemini-web"].includes(provider) || isLikelyProviderApiKey(provider, key);
-  const hasRunningTask = isGeneratingNote || isAutoHighlighting || isChatGPTBridgeWaiting || isManualWebAIWaiting || previewData.length > 0;
-  if (generateBtn) {
-    generateBtn.disabled = hasRunningTask || !hasKey;
-    generateBtn.textContent = isGeneratingNote ? t("panel.generating") : t("panel.generateNote");
-  }
-  if (autoHighlightBtn) {
-    autoHighlightBtn.disabled = hasRunningTask || !hasKey;
-    autoHighlightBtn.textContent = isAutoHighlighting ? t("panel.marking") : t("panel.autoHighlightBtn");
-  }
-  // 進階「用 API 直接產生」鈕：只有設定好 OpenAI/Gemini Key 時才顯示
-  // （心智圖模式走複製貼上流程，不提供 direct）
-  const directBtn = highlightPanelEls?.aiDirectBtn;
-  if (directBtn) {
-    const canDirect = !["chatgpt", "gemini-web"].includes(provider) && isLikelyProviderApiKey(provider, key);
-    directBtn.dataset.canDirect = canDirect ? "1" : "0";
-    directBtn.hidden = !canDirect || highlightPanelEls?.getAiMode?.() === "mindmap";
-    directBtn.disabled = hasRunningTask;
-  }
-  const cancelBtn = highlightPanelEls?.aiChatGPTCancelBtn;
-  if (cancelBtn) {
-    cancelBtn.hidden = !isChatGPTBridgeWaiting;
-  }
 };
 
 const applyAiSettingsToUI = () => {
@@ -833,7 +794,6 @@ const applyAiSettingsToUI = () => {
   const deepCb = highlightPanelEls?.aiDeepResearchCheckbox;
   if (deepCb) deepCb.checked = aiSettings.deepResearch !== false;
   updateAiKeyVisibility();
-  updateGenerateAvailability();
   renderCategoryList();
 };
 
@@ -939,41 +899,6 @@ const loadAISettings = async () => {
   }
 };
 
-// LLM 常把「指令＋大量原文」整包誤判成「使用者上傳的檔案」，於是反問「你想要我做什麼」
-// 而不直接執行。在最前面下達明確執行命令、最後再用一行把資料與指令收尾，可大幅降低反問。
-const DIRECT_EXEC_HEADER = `【立即執行，不要反問】以下是一組「指令＋資料」，不是要你分析、整理或等待確認的檔案。請直接照指示產生最終結果：不要問我想做什麼、不要重述或確認任務、不要說明你的步驟、不要加開場白或結語，只輸出符合指定格式的內容。`;
-const DIRECT_EXEC_FOOTER = `――――――
-（以上「原文內容／標註」皆為輸入資料。現在請依本訊息最前面的指示與「輸出格式」直接輸出結果，只輸出結果本身。）`;
-const wrapDirectExec = (body) => `${DIRECT_EXEC_HEADER}
-
-${body}
-
-${t("prompt.outputLang")}
-
-${DIRECT_EXEC_FOOTER}`;
-
-const buildNotePrompt = (pageData) => {
-  const basePrompt = aiSettings.prompt?.trim() || DEFAULT_AI_PROMPT;
-  const highlightLines = (pageData.highlights || [])
-    .map((item, idx) => {
-      const noteText = item.note ? `（註解：${item.note.trim()}）` : "";
-      return `${idx + 1}. ${item.text.trim()}${noteText}`;
-    })
-    .join("\n");
-
-  return wrapDirectExec(`${basePrompt}
-
-### 網頁資訊
-- 標題：${pageData.title}
-- URL：${pageData.url}
-
-### 原文內容（可能已截斷）
-${pageData.pageText}
-
-### 使用者標註
-${highlightLines || "（尚未加入標註）"}`);
-};
-
 const normalizeWhitespace = (input) =>
   typeof input === "string" ? input.replace(/\s+/g, " ").trim() : "";
 
@@ -1014,127 +939,94 @@ const sortPaletteByUsage = (palette, counts = {}) => {
   });
 };
 
-const buildAutoHighlightBody = (pageData, palette, usageCounts) => {
-  const limits = HkParsers.getReadingGuideLimits(pageData.pageText);
-  const basePrompt =
-    aiSettings.autoHighlightPrompt?.trim() || DEFAULT_AUTO_HIGHLIGHT_PROMPT;
-  const highlightLines = (pageData.highlights || [])
-    .map((item, idx) => {
-      const text = normalizeWhitespace(item.text);
-      const noteText = item.note ? `（註解：${item.note.trim()}）` : "";
-      return `${idx + 1}. ${text}${noteText}`;
-    })
-    .join("\n");
-
-  const categories = Array.isArray(aiSettings.categories) && aiSettings.categories.length
-    ? aiSettings.categories
-    : null;
-
-  let colorSection;
-  let taskExtra = "";
-  let tagInstruction;
-  if (categories) {
-    const catLines = categories.map((c) => `- #${c.name}（${c.color}）`).join("\n");
-    colorSection = `### 標記分類（請依語義從中選一個，用「#分類名稱」標示）
-${catLines}`;
-    tagInstruction = "從上方分類選一個最貼切的，寫成「#分類名稱」";
-    taskExtra = `- 從分類中挑最重要的片段；不必每個分類都用，長文應涵蓋主要章節。`;
-  } else {
-    const colorLines = palette
-      .map((color, index) => {
-        const usage = usageCounts?.[color] || 0;
-        return `- #${color}（歷史使用次數：${usage}）`;
-      })
-      .join("\n");
-    colorSection = `### 可用顏色（依使用習慣排序，用「#色碼」標示）
-${colorLines || "- #fff5b8（歷史使用次數：0）"}`;
-    tagInstruction = "從上方色碼選一個，寫成「#色碼」（例如 #fff5b8）";
-    taskExtra = `- 優先選能代表主線的段落與必要名詞，避免重複相同論點。`;
-  }
-
-  // 延伸掛在「每個重點」裡面，而不是另開一段：這樣讀的時候補充就在那句話旁邊。
-  const deep = aiSettings.deepResearch === true;
-  const deepRule = deep
-    ? `
-每個標註可加一行延伸補充，限一句且不超過 30 字；沒有可靠補充就省略。`
-    : "";
-  const deepFormatLine = deep
-    ? "\n延伸：原文沒說、但讀到這句會想知道的一句話（沒有就省略這兩行）\n來源：可查證的名字或搜尋關鍵詞（不確定就寫「無」，不要寫網址）"
-    : "";
-  const deepExampleLine = deep
-    ? "\n延伸：這個說法多半指 2020 後的生成式模型；製造業自動化其實在更早的 PLC 時代就開始了，兩者常被混為一談。\n來源：Brynjolfsson & McAfee, The Second Machine Age"
-    : "";
-
-  return `${basePrompt}
-
-### 任務要求
-- 依篇幅挑選 ${limits.highlightsMin}～${limits.highlightsMax} 段重點，另可選最多 ${limits.termsMax} 個必要名詞，名詞不占段落名額。短文可少選，不要湊數。
-- 每個重點必須是「原文中可直接找到」的連續文字。
-- 不要回傳與「已有標註」重複的內容。
-- 專有名詞只挑理解本文必要的詞；段落只挑推進主線、轉折或結論的句子，兩類不可重疊。
-- 必須只使用下方提供的分類 / 顏色。
-- 「重點」用 20 字內直接說明核心，不加前綴或背景；${deepRule}
-${taskExtra}
-
-${colorSection}
-
-### 輸出格式（請勿使用 JSON。每個重點一個區塊，區塊之間空一行）
-原文：要標註的原文片段（必須是原文中可直接找到的連續文字）
-#分類（${tagInstruction}）
-重點：用一句話直接摘要這段原文的核心觀點或資訊（不要加任何前綴）${deepFormatLine}
-
-範例：
-原文：人工智慧正在改變所有產業
-${categories ? `#${categories[0]?.name || "重點"}` : palette[0] || "#fff5b8"}
-重點：AI 已成為產業變革的核心動力${deepExampleLine}
-
-### 網頁資訊
-- 標題：${pageData.title}
-- URL：${pageData.url}
-
-### 原文內容（可能已截斷）
-${pageData.pageText}
-
-### 已有標註
-${highlightLines || "（尚未加入標註）"}
-`;
+// 所有入口共用：閱讀導覽要讀的頁面資料（設定「只標選取的文字」時改用選取範圍）。
+const collectGuidePageData = async () => {
+  const selection = aiSettings.selectionOnly ? window.getSelection()?.toString()?.trim() : "";
+  return {
+    title: document.title,
+    url: pageKey,
+    pageText: selection || getPagePlainText(),
+    highlights: await collectPageHighlights(),
+  };
 };
 
-const buildAutoHighlightPrompt = (pageData, palette, usageCounts) =>
-  wrapDirectExec(buildAutoHighlightBody(pageData, palette, usageCounts));
-
-const buildReadingGuidePrompt = (pageData, palette) => {
+// 整個擴充功能唯一的 Prompt：一次取得脈絡、名詞解釋、重點整理、閱讀地圖與標籤。
+const buildReadingGuidePrompt = (pageData, palette, existingTags = []) => {
   const limits = HkParsers.getReadingGuideLimits(pageData.pageText);
   const customInstructions = [
     aiSettings.prompt?.trim() && aiSettings.prompt.trim() !== DEFAULT_AI_PROMPT
-      ? `文章脈絡補充要求：\n${aiSettings.prompt.trim()}`
+      ? `- 脈絡補充要求：${aiSettings.prompt.trim()}`
       : "",
     aiSettings.autoHighlightPrompt?.trim() && aiSettings.autoHighlightPrompt.trim() !== DEFAULT_AUTO_HIGHLIGHT_PROMPT
-      ? `標註補充要求：\n${aiSettings.autoHighlightPrompt.trim()}`
+      ? `- 標註補充要求：${aiSettings.autoHighlightPrompt.trim()}`
       : "",
-  ].filter(Boolean).join("\n\n");
+  ].filter(Boolean).join("\n");
   const categoryLines = Array.isArray(aiSettings.categories) && aiSettings.categories.length
     ? aiSettings.categories.map((category) => `- #${category.name} (${category.color})`).join("\n")
-    : sanitizePalette(palette).map((color) => `- #${color}`).join("\n");
+    : sanitizePalette(palette).map((color) => `- ${color}`).join("\n");
   const existing = (pageData.highlights || [])
     .map((item) => `- ${normalizeWhitespace(item.text)}`)
     .filter((line) => line.length > 2)
     .join("\n");
+  // 延伸掛在各重點底下，讀的時候補充就在那句話旁邊。
+  const deepFields = aiSettings.deepResearch === true
+    ? "\n  - **延伸：** 原文沒說、但值得知道的一句話（沒有就省略）\n  - **來源：** 可查證的名字或搜尋關鍵詞（不確定就省略，不要寫網址）"
+    : "";
   return `${DEFAULT_READING_GUIDE_PROMPT}
-回覆的 Markdown 區塊第一行必須原樣保留：來源文章：${pageData.url}
-篇幅建議：重點段落 ${limits.highlightsMin}～${limits.highlightsMax} 段；專有名詞最多 ${limits.termsMax} 個，另外計算。若短文沒有足夠的獨立重點，可少選，不要湊數；長文需覆蓋分散在全文的重要章節。
-${customInstructions ? `\n\n使用者自訂要求：\n${customInstructions}` : ""}
 
-可用分類與顏色（重點標註區使用）：
+## 回覆範本
+
+~~~markdown
+來源文章：${pageData.url}
+
+## 脈絡
+第一段：問題從哪裡來。
+
+第二段：作者怎麼處理。
+
+第三段：證據與限制。
+
+## 名詞解釋
+- **名詞：** A/B 測試
+  - **解釋：** 把使用者分到不同版本，比較哪個表現好。
+  - **例子：** 部分請求用新模型，其餘維持舊版。
+  - **在本文：** 被列為流量變化的可能原因，但沒有證據證實。
+
+## 重點整理
+- **原文：** 文章中的連續原句
+  - **分類：** #分類或色碼
+  - **重點：** 這段在講什麼
+  - **為何重要：** 它和主線的關係${deepFields}
+
+## 閱讀地圖
+# 文章主題
+- 背景與問題
+  - 面向
+    - 具體例子
+- 核心做法
+- 結論與限制
+
+## 標籤
+標籤一, 標籤二, 標籤三
+~~~
+
+## 這篇文章的設定
+
+- 重點整理：${limits.highlightsMin}～${limits.highlightsMax} 段；名詞解釋：最多 ${limits.termsMax} 個。短文沒有足夠的獨立重點可少選，不要湊數；長文需覆蓋分散在全文的重要章節。
+- ${t("prompt.outputLang")}
+${customInstructions ? `${customInstructions}\n` : ""}
+### 可用分類與顏色
 ${categoryLines || "- #fff5b8"}
-
-文章標題：${pageData.title}
-文章網址：${pageData.url}
-
-已有標註（請避免重複）：
+${existingTags.length ? `\n### 既有標籤（語意相符時優先沿用）\n${existingTags.join("、")}\n` : ""}
+### 已有標註（請避免重複）
 ${existing || "（無）"}
 
-文章全文：
+## 文章資料
+
+- 標題：${pageData.title}
+- 網址：${pageData.url}
+
+### 文章全文
 ${pageData.pageText}`;
 };
 
@@ -1163,6 +1055,19 @@ const saveReadingGuideContext = async (context, provider, model, prompt, targetP
   };
 };
 
+// 預覽中按取消要回到套用前的樣子，不只撤掉標記。
+let previewUndo = null;
+const capturePreviewUndo = async (targetPageKey) => {
+  const stored = await chrome.storage.local.get(["hkGeneratedNotes", MINDMAP_STORAGE_KEY, PAGE_META_KEY]);
+  return {
+    pageKey: targetPageKey,
+    note: stored.hkGeneratedNotes?.[targetPageKey],
+    mindmap: stored[MINDMAP_STORAGE_KEY]?.[targetPageKey],
+    meta: stored[PAGE_META_KEY]?.[targetPageKey],
+    entries: await getStoredHighlights(targetPageKey),
+  };
+};
+
 const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatgpt", model = "chatgpt-web", targetPageKey = pageKey) => {
   if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
   const parsed = HkParsers.parseReadingGuideResponse(rawText, {
@@ -1170,12 +1075,13 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
     toHexColor,
     defaultColor: DEFAULT_COLOR,
   });
-  if (!parsed.context && !parsed.terms.length && !parsed.highlights.length) {
+  if (!parsed.context && !parsed.terms.length && !parsed.highlights.length && !parsed.mindmap) {
     throw new Error(t("sidebar.parseError"));
   }
   if (!HkParsers.matchesReadingGuideSource(parsed, targetPageKey, getPagePlainText())) {
     throw new Error(t("sidebar.sourceMismatch"));
   }
+  const undoSnapshot = previewUndo || await capturePreviewUndo(targetPageKey);
   const latestPalette = await refreshPaletteFromStorage();
   if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
   const usageCounts = await collectColorUsageCounts();
@@ -1232,11 +1138,22 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
     if (previewing) showPreviewConfirmBar(previewData.length);
     else await ensurePageMetaTitle(pageKey, document.title);
   }
-  const unmatchedKeys = new Set(unmatchedTasks.map((item) => HkParsers.looseKey(item.text)));
-  const savedGuideItems = guideItems.map((item) => ({ ...item, unavailable: unmatchedKeys.has(HkParsers.looseKey(item.text)) }));
+  const unmatchedByKey = new Map(unmatchedTasks.map((item) => [HkParsers.looseKey(item.text), item]));
+  const unmatchedKeys = new Set(unmatchedByKey.keys());
+  const isCovered = (item) => Boolean(unmatchedByKey.get(HkParsers.looseKey(item.text))?.covered);
+  const savedGuideItems = guideItems.map((item) => ({
+    ...item,
+    unavailable: unmatchedKeys.has(HkParsers.looseKey(item.text)),
+    ...(isCovered(item) ? { covered: true } : {}),
+  }));
+  if (previewData.some((item) => item.data.url === targetPageKey)) previewUndo = undoSnapshot;
   await saveReadingGuideContext(parsed.context, provider, model, prompt, targetPageKey,
     unmatchedTasks.filter((item) => item.kind === "term"),
     unmatchedTasks.filter((item) => item.kind !== "term"), savedGuideItems);
+  if (parsed.mindmap && parseMindmapOutline(parsed.mindmap)) {
+    await saveMindmap(parsed.mindmap, parseMindmapOutline(parsed.mindmap).title);
+  }
+  if (parsed.tags) await applyAiPageTags(parsed.tags);
   return {
     success: true,
     context: parsed.context,
@@ -1244,13 +1161,14 @@ const applyReadingGuideResponse = async (rawText, prompt = "", provider = "chatg
       text: item.text,
       explanation: item.reason,
       ...(unmatchedKeys.has(HkParsers.looseKey(item.text)) ? { unavailable: true } : {}),
+      ...(item.covered ? { covered: true } : {}),
     })),
     highlights: savedGuideItems.filter((item) => item.kind !== "term").map((item) => ({
       ...item,
       ...(unmatchedKeys.has(HkParsers.looseKey(item.text)) ? { unavailable: true } : {}),
     })),
     appliedCount,
-    unmatchedCount: unmatchedTasks.length,
+    unmatchedCount: unmatchedTasks.filter((item) => !item.covered).length,
     previewCount: previewData.filter((item) => item.data.url === targetPageKey).length,
     previewing,
   };
@@ -1278,88 +1196,6 @@ const collectExistingTagsByUsage = async (limit = 30) => {
   }
 };
 
-// ── Combined（重點＋摘要）與心智圖 Prompt ────────────────────
-// One prompt → one response containing both highlight blocks and a summary,
-// separated by `===重點===` / `===摘要===` section markers.
-const buildCombinedPrompt = (pageData, palette, usageCounts, existingTags = []) => {
-  const highlightBody = buildAutoHighlightBody(pageData, palette, usageCounts);
-  const notePrompt = aiSettings.prompt?.trim() || DEFAULT_AI_PROMPT;
-  const existingTagLines = existingTags.length
-    ? `- 既有標籤（依使用頻率排序）：${existingTags.join("、")}
-- 優先從既有標籤中挑選語意相符的；真的沒有合適的才建立新標籤，讓同主題的頁面收斂到同一個標籤下。`
-    : "";
-  return wrapDirectExec(`${highlightBody}
-
-### 額外任務：摘要筆記
-${notePrompt}
-
-### 額外任務：頁面標籤
-- 另外給出 3～6 個能代表整篇主題的標籤（topic tag），方便日後分類與搜尋。
-${existingTagLines}
-- 用半形逗號分隔，例如：AI, 產業變革, 機器學習；不要加 # 號、不要編號、不要解釋。
-
-
-### 最終輸出格式（三個區塊都要，使用以下分隔線，不要加其他標題）
-===重點===
-（依前述「輸出格式」列出所有重點區塊，延伸就寫在各自的重點裡）
-
-===摘要===
-（五百字以內、有脈絡的筆記內容）
-
-===標籤===
-（3～6 個主題標籤，半形逗號分隔）`);
-};
-
-const buildMindmapPrompt = (pageData) => {
-  const basePrompt = aiSettings.mindmapPrompt?.trim() || DEFAULT_MINDMAP_PROMPT;
-  const highlightLines = (pageData.highlights || [])
-    .map((item, idx) => {
-      const noteText = item.note ? `（註解：${item.note.trim()}）` : "";
-      return `${idx + 1}. ${normalizeWhitespace(item.text)}${noteText}`;
-    })
-    .join("\n");
-  const noteData = highlightPanelState.notesByPage?.[pageKey];
-  const noteSection = noteData?.note
-    ? `### 既有摘要筆記\n${noteData.note}\n`
-    : "";
-
-  return wrapDirectExec(`${basePrompt}
-
-### 組織原則
-- 以下方「原文內容」為唯一依據與主結構，主幹順序要貼合原文的論述流程。
-- 「使用者畫的重點」只是讀者特別在意的段落，請確保涵蓋並放在對應位置，但不要因此打亂原文脈絡或漏掉其他重要環節。
-
-### 輸出格式（嚴格遵守：第一行為「# 根節點主題」，其餘為「- 」開頭的清單，每深一層多縮排兩個空格，不要輸出任何其他文字。請盡量展開到第 3～4 層）
-# 文章主題
-- 背景／動機（主線起點）
-  - 面向 A
-    - 重點
-      - 具體例子或數據
-- 核心概念／能力
-  - 面向 B
-    - 重點
-- 實際應用／例子
-  - 面向 C
-    - 重點
-      - 補充說明
-- 結論／影響
-
-### 網頁資訊
-- 標題：${pageData.title}
-- URL：${pageData.url}
-
-### 原文內容（主要依據，可能已截斷）
-${pageData.pageText}
-
-${noteSection}### 使用者畫的重點（須涵蓋的讀者關注段落）
-${highlightLines || "（尚未有標註，請完全依原文脈絡組織）"}`);
-};
-
-// Split an AI response into named sections by `===重點===`-style marker lines.
-// Tolerates ＝, 【】, [] and markdown headings around the keyword.
-// 純解析邏輯抽到 parsers.js（HkParsers），這裡保留同名薄包裝，呼叫端不變。
-const splitAiSections = (rawText) => HkParsers.splitAiSections(rawText);
-
 // Parse a `# root` + indented `- ` outline into a tree.
 const parseMindmapOutline = (rawText) =>
   HkParsers.parseMindmapOutline(rawText, document.title || t("mindmap.title"));
@@ -1384,327 +1220,6 @@ const saveMindmap = async (outlineText, title) => {
   };
   await storage.set({ [MINDMAP_STORAGE_KEY]: maps });
 };
-
-// ── 心智圖 overlay ───────────────────────────────────────
-let mindmapOverlay = null;
-const MINDMAP_BRANCH_COLORS = [
-  "#c9a227",
-  "#6f9c72",
-  "#5b8bbf",
-  "#b07a9b",
-  "#c68a5a",
-  "#8b7bbd",
-];
-
-const updateMindmapAvailability = (hasMap) => {
-  const btn = highlightPanelEls?.aiMindmapViewBtn;
-  if (btn) btn.hidden = !hasMap;
-};
-
-const closeMindmapOverlay = () => {
-  if (!mindmapOverlay) return;
-  mindmapOverlay.remove();
-  mindmapOverlay = null;
-  document.removeEventListener("keydown", handleMindmapKeydown, true);
-};
-
-const handleMindmapKeydown = (event) => {
-  if (event.key === "Escape") {
-    event.stopPropagation();
-    closeMindmapOverlay();
-  }
-};
-
-const buildMindmapNodeElement = (node, depth, branchColor) => {
-  const wrap = document.createElement("div");
-  wrap.className = `hk-mm-node hk-mm-depth-${Math.min(depth, 4)}`;
-  if (branchColor) wrap.style.setProperty("--hk-mm-branch", branchColor);
-
-  const label = document.createElement("button");
-  label.type = "button";
-  label.className = "hk-mm-label";
-  label.textContent = node.label;
-  wrap.appendChild(label);
-
-  const children = Array.isArray(node.children) ? node.children : [];
-  if (children.length) {
-    const kids = document.createElement("div");
-    kids.className = "hk-mm-children";
-    children.forEach((child, index) => {
-      const childColor =
-        depth === 0
-          ? MINDMAP_BRANCH_COLORS[index % MINDMAP_BRANCH_COLORS.length]
-          : branchColor;
-      kids.appendChild(buildMindmapNodeElement(child, depth + 1, childColor));
-    });
-    wrap.appendChild(kids);
-    label.dataset.count = String(children.length);
-    label.addEventListener("click", () => {
-      wrap.classList.toggle("is-collapsed");
-    });
-  } else {
-    label.classList.add("is-leaf");
-  }
-  return wrap;
-};
-
-const openMindmapOverlay = (tree, meta = {}) => {
-  closeMindmapOverlay();
-  const overlay = document.createElement("div");
-  overlay.className = "hk-mindmap-overlay";
-  overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-label", t("mindmap.title"));
-
-  const head = document.createElement("div");
-  head.className = "hk-mindmap-head";
-
-  const title = document.createElement("h2");
-  title.className = "hk-mindmap-title";
-  title.textContent = t("mindmap.title");
-
-  const metaEl = document.createElement("span");
-  metaEl.className = "hk-mindmap-meta";
-  if (meta.generatedAt) metaEl.textContent = formatTimestamp(meta.generatedAt);
-
-  const copyOutlineBtn = document.createElement("button");
-  copyOutlineBtn.type = "button";
-  copyOutlineBtn.className = "hk-mindmap-action";
-  copyOutlineBtn.textContent = t("mindmap.copyOutline");
-  copyOutlineBtn.addEventListener("click", async () => {
-    try {
-      const outline = meta.outline || "";
-      await navigator.clipboard.writeText(outline);
-      copyOutlineBtn.textContent = t("mindmap.copied");
-      window.setTimeout(() => {
-        copyOutlineBtn.textContent = t("mindmap.copyOutline");
-      }, 1600);
-    } catch (_e) {
-      copyOutlineBtn.textContent = t("mindmap.copyFail");
-    }
-  });
-
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.className = "hk-mindmap-close";
-  closeBtn.setAttribute("aria-label", t("mindmap.close"));
-  closeBtn.textContent = "×";
-  closeBtn.addEventListener("click", closeMindmapOverlay);
-
-  head.appendChild(title);
-  head.appendChild(metaEl);
-  if (meta.outline) head.appendChild(copyOutlineBtn);
-  head.appendChild(closeBtn);
-
-  const canvas = document.createElement("div");
-  canvas.className = "hk-mindmap-canvas";
-  canvas.appendChild(
-    buildMindmapNodeElement(
-      { label: tree.title, children: tree.children },
-      0,
-      null
-    )
-  );
-
-  overlay.appendChild(head);
-  overlay.appendChild(canvas);
-  document.body.appendChild(overlay);
-  mindmapOverlay = overlay;
-  document.addEventListener("keydown", handleMindmapKeydown, true);
-};
-
-const openStoredMindmap = async () => {
-  const maps = await getStoredMindmaps();
-  const saved = maps[pageKey];
-  if (!saved?.outline) throw new Error(t("mindmap.errNone"));
-  const tree = parseMindmapOutline(saved.outline);
-  if (!tree) throw new Error(t("mindmap.errCorrupt"));
-  openMindmapOverlay(tree, saved);
-};
-
-// Escape stray double quotes that appear inside a JSON string literal but were
-// not properly escaped by the LLM. We scan char-by-char and track structural
-// context (object vs array, key vs value position) so we can distinguish a
-// real closing quote from content that happens to look like `"x", "y"`.
-const escapeStrayJsonQuotes = (input) => {
-  const out = [];
-  const stack = []; // 'obj' | 'arr'
-  const expectKey = []; // parallel to stack; only meaningful for 'obj'
-  let inString = false;
-  let escape = false;
-  let stringCtx = "root"; // 'obj-key' | 'obj-val' | 'arr' | 'root' at string open
-
-  const currentCtx = () => {
-    const top = stack[stack.length - 1];
-    if (!top) return "root";
-    if (top === "arr") return "arr";
-    return expectKey[expectKey.length - 1] ? "obj-key" : "obj-val";
-  };
-
-  // Look ahead from index `from` (just after the candidate closing `"` and a
-  // following `,`) to see if it matches `"<key>"\s*:` — the only valid shape
-  // after a comma inside an object.
-  const looksLikeNextObjectKey = (from) => {
-    let k = from;
-    while (k < input.length && /\s/.test(input[k])) k++;
-    if (input[k] !== '"') return false;
-    let m = k + 1;
-    let esc = false;
-    while (m < input.length) {
-      if (esc) { esc = false; m++; continue; }
-      if (input[m] === "\\") { esc = true; m++; continue; }
-      if (input[m] === '"') break;
-      m++;
-    }
-    if (m >= input.length) return false;
-    let n = m + 1;
-    while (n < input.length && /\s/.test(input[n])) n++;
-    return input[n] === ":";
-  };
-
-  for (let i = 0; i < input.length; i++) {
-    const c = input[i];
-
-    if (escape) { out.push(c); escape = false; continue; }
-    if (c === "\\") { out.push(c); escape = true; continue; }
-
-    if (inString) {
-      if (c !== '"') { out.push(c); continue; }
-      let j = i + 1;
-      while (j < input.length && /\s/.test(input[j])) j++;
-      const next = input[j];
-      const closeString = () => { inString = false; out.push(c); };
-      const escapeQuote = () => { out.push("\\"); out.push(c); };
-
-      // Verify a `}` or `]` is actually structural by peeking past it: a real
-      // structural close is followed by another structural token or EOF, not
-      // arbitrary content.
-      const followedByStructural = (from) => {
-        let k = from;
-        while (k < input.length && /\s/.test(input[k])) k++;
-        const ch = input[k];
-        return ch === undefined || ch === "," || ch === "}" || ch === "]";
-      };
-
-      if (stringCtx === "obj-key") {
-        if (next === ":") closeString(); else escapeQuote();
-        continue;
-      }
-      if (stringCtx === "obj-val") {
-        if (next === ",") {
-          if (looksLikeNextObjectKey(j + 1)) closeString(); else escapeQuote();
-          continue;
-        }
-        if (next === "}") {
-          if (followedByStructural(j + 1)) closeString(); else escapeQuote();
-          continue;
-        }
-        escapeQuote();
-        continue;
-      }
-      if (stringCtx === "arr") {
-        if (next === ",") { closeString(); continue; }
-        if (next === "]") {
-          if (followedByStructural(j + 1)) closeString(); else escapeQuote();
-          continue;
-        }
-        escapeQuote();
-        continue;
-      }
-      // root: only end-of-input is a clear close
-      if (next === undefined) closeString(); else escapeQuote();
-      continue;
-    }
-
-    if (c === '"') {
-      stringCtx = currentCtx();
-      inString = true;
-      out.push(c);
-      continue;
-    }
-    if (c === "{") { stack.push("obj"); expectKey.push(true); out.push(c); continue; }
-    if (c === "[") { stack.push("arr"); expectKey.push(false); out.push(c); continue; }
-    if (c === "}" || c === "]") { stack.pop(); expectKey.pop(); out.push(c); continue; }
-    if (c === ":") {
-      if (stack[stack.length - 1] === "obj") expectKey[expectKey.length - 1] = false;
-      out.push(c); continue;
-    }
-    if (c === ",") {
-      if (stack[stack.length - 1] === "obj") expectKey[expectKey.length - 1] = true;
-      out.push(c); continue;
-    }
-    out.push(c);
-  }
-  return out.join("");
-};
-
-const repairLlmJson = (text) => {
-  let s = text;
-  const fenceMatch = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenceMatch?.[1]) s = fenceMatch[1];
-  s = s.trim();
-  const firstBrace = s.indexOf("{");
-  const firstBracket = s.indexOf("[");
-  let start = -1;
-  if (firstBrace >= 0 && firstBracket >= 0) start = Math.min(firstBrace, firstBracket);
-  else start = Math.max(firstBrace, firstBracket);
-  if (start > 0) s = s.slice(start);
-  s = s.replace(/,(\s*[}\]])/g, "$1");
-  return escapeStrayJsonQuotes(s);
-};
-
-const parseJsonFromModelResponse = (rawText) => {
-  if (typeof rawText !== "string" || !rawText.trim()) {
-    throw new Error(t("ai.errResponseEmpty"));
-  }
-  const trimmed = rawText.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch (_error) {
-    // keep parsing below
-  }
-
-  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fencedMatch?.[1]) {
-    try {
-      return JSON.parse(fencedMatch[1].trim());
-    } catch (_error) {
-      // keep parsing below
-    }
-  }
-
-  const firstBrace = trimmed.indexOf("{");
-  const lastBrace = trimmed.lastIndexOf("}");
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    const candidate = trimmed.slice(firstBrace, lastBrace + 1);
-    try {
-      return JSON.parse(candidate);
-    } catch (_error) {
-      // keep parsing below
-    }
-  }
-
-  try {
-    return JSON.parse(repairLlmJson(trimmed));
-  } catch (_error) {
-    // fall through to throw
-  }
-  throw new Error(t("ai.errInvalidJson"));
-};
-
-// Parse the non-JSON highlight format produced by the copy/paste flow:
-//   原文：<片段>
-//   #分類名稱        (or #色碼)
-//   重點：<一句話>
-// Blocks are separated by blank lines. Each `#tag` is resolved to a hex color
-// via aiSettings.categories (by name, case-insensitive); a raw #rrggbb is used
-// directly. Returns [{ text, color, reason }] — the same shape the JSON path
-// produces, so it can flow straight into normalizeAutoHighlightItems.
-const parseHighlightBlocks = (rawText) =>
-  HkParsers.parseHighlightBlocks(rawText, {
-    categories: aiSettings.categories,
-    toHexColor,
-    defaultColor: DEFAULT_COLOR,
-  });
 
 const normalizeAutoHighlightItems = (payload, palette) => {
   const source = Array.isArray(payload)
@@ -1928,6 +1443,43 @@ const applyAutoHighlightRange = async (range, color, reason, extra = "", source 
 // index once, locate every span, apply from the end of the document backwards
 // (so earlier raw offsets stay valid while the DOM mutates), then persist all
 // entries with a single storage write.
+// AI 引用時常改動空白與標點（直引號／彎引號、破折號、中英文之間的空格、跨段落）。
+// 比對時把這些差異摺疊掉，字元一對一對應回原文位置。
+const foldForMatching = (char) => {
+  if (/[\s\u200b-\u200d\ufeff]/.test(char)) return "";
+  if (/['‘’＇]/.test(char)) return "'";
+  if (/["“”＂]/.test(char)) return '"';
+  if (/[-‐-―−]/.test(char)) return "-";
+  const lower = char.toLowerCase();
+  return lower.length === 1 ? lower : char;
+};
+
+const buildFoldedIndex = (searchIndex) => {
+  if (searchIndex.folded) return searchIndex.folded;
+  const raw = searchIndex.text || "";
+  const toRaw = [];
+  let text = "";
+  for (let i = 0; i < raw.length; i += 1) {
+    const folded = foldForMatching(raw[i]);
+    if (!folded) continue;
+    text += folded;
+    toRaw.push(i);
+  }
+  searchIndex.folded = { text, toRaw };
+  return searchIndex.folded;
+};
+
+const findFoldedSpan = (searchIndex, targetText, takenIntervals) => {
+  const needle = [...String(targetText || "")].map(foldForMatching).join("");
+  if (!needle) return null;
+  const { text, toRaw } = buildFoldedIndex(searchIndex);
+  for (const start of findIndexesInText(text, needle)) {
+    const span = { startRaw: toRaw[start], endRaw: toRaw[start + needle.length - 1] + 1 };
+    if (!takenIntervals.some((iv) => span.startRaw < iv.endRaw && span.endRaw > iv.startRaw)) return span;
+  }
+  return null;
+};
+
 const findSpanForTextInIndex = (searchIndex, targetText, takenIntervals) => {
   const normalizedNeedle = normalizeWhitespace(targetText);
   if (!normalizedNeedle || !searchIndex?.normalizedText) return null;
@@ -1955,7 +1507,7 @@ const findSpanForTextInIndex = (searchIndex, targetText, takenIntervals) => {
       return rawSpan;
     }
   }
-  return null;
+  return findFoldedSpan(searchIndex, targetText, takenIntervals);
 };
 
 const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
@@ -1969,10 +1521,16 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
   const unmatched = [];
   const takenIntervals = [];
   if (searchIndex) {
-    for (const task of tasks) {
+    // 段落優先、長的優先：名詞常出現在重點句裡，不能讓名詞把整句擠掉。
+    const ordered = [...tasks].sort((a, b) =>
+      (a.kind === "term") - (b.kind === "term") || String(b.text).length - String(a.text).length
+    );
+    for (const task of ordered) {
       const span = findSpanForTextInIndex(searchIndex, task.text, takenIntervals);
       if (!span) {
         skippedCount += 1;
+        // 文字其實在頁面上，只是落在別的標記裡：不是「找不到」。
+        task.covered = Boolean(findSpanForTextInIndex(searchIndex, task.text, []));
         unmatched.push(task);
         continue;
       }
@@ -2011,6 +1569,7 @@ const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
         rangeTouchesExistingHighlight(range)
       ) {
         skippedCount += 1;
+        task.covered = rangeTouchesExistingHighlight(range);
         unmatched.push(task);
         continue;
       }
@@ -2176,9 +1735,74 @@ const saveGeneratedNote = async (pageUrl, notePayload) => {
 
 const clearPageHighlights = async () => {
   document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach(unwrapHighlightElement);
+  previewData = [];
+  previewUndo = null;
+  hidePreviewConfirmBar();
   await setStoredHighlights([], pageKey);
   await refreshHighlightPanelIfVisible();
   setAiPanelStatus(t("ai.statusClearedAndReady"));
+};
+
+// 刪除側欄的單一項目：頁面標記、預覽與 AI 導覽清單都要一起移除，否則會以「不在頁面上」再出現。
+const deleteGuideItem = async ({ text, kind }) => {
+  const sameItem = (item) => {
+    if (HkParsers.looseKey(item?.text || "") !== HkParsers.looseKey(text || "")) return false;
+    return kind === "term" ? item.kind === "term" : item.kind !== "term";
+  };
+  const removeMarks = (id) => {
+    document.querySelectorAll(`[${HIGHLIGHT_ATTR}="${id}"]`).forEach(unwrapHighlightElement);
+  };
+  const entries = await getStoredHighlights();
+  entries.filter(sameItem).forEach((item) => removeMarks(item.id));
+  if (entries.some(sameItem)) await setStoredHighlights(entries.filter((item) => !sameItem(item)));
+  previewData = previewData.filter((item) => {
+    if (!sameItem(item.data)) return true;
+    removeMarks(item.data.id);
+    return false;
+  });
+  if (previewData.length) showPreviewConfirmBar(previewData.length);
+  else {
+    previewUndo = null;
+    hidePreviewConfirmBar();
+  }
+  const stored = await chrome.storage.local.get("hkGeneratedNotes");
+  const note = stored?.hkGeneratedNotes?.[pageKey];
+  if (note) {
+    const keepTerm = (item) => !sameItem({ ...item, kind: "term" });
+    const keepPassage = (item) => !sameItem({ ...item, kind: "passage" });
+    const next = {
+      ...note,
+      guideTerms: (note.guideTerms || []).filter(keepTerm),
+      unlocatedTerms: (note.unlocatedTerms || []).filter(keepTerm),
+      guideHighlights: (note.guideHighlights || []).filter(keepPassage),
+      unlocatedHighlights: (note.unlocatedHighlights || []).filter(keepPassage),
+    };
+    highlightPanelState.notesByPage = { ...highlightPanelState.notesByPage, [pageKey]: next };
+    await chrome.storage.local.set({ hkGeneratedNotes: { ...stored.hkGeneratedNotes, [pageKey]: next } });
+  }
+  await refreshHighlightPanelIfVisible();
+};
+
+// 刪除這篇文章的全部筆記：標記、脈絡、名詞、地圖、標籤與個人筆記。
+const deletePageNotes = async () => {
+  document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach(unwrapHighlightElement);
+  previewData = [];
+  previewUndo = null;
+  hidePreviewConfirmBar();
+  destroyGuidedBar();
+  const keys = [PAGE_META_KEY, "hkGeneratedNotes", MINDMAP_STORAGE_KEY, "hkPersonalNotes"];
+  const stored = await chrome.storage.local.get(keys);
+  const updates = {};
+  keys.forEach((key) => {
+    if (!stored[key]?.[pageKey]) return;
+    const { [pageKey]: _removed, ...rest } = stored[key];
+    updates[key] = rest;
+  });
+  if (Object.keys(updates).length) await chrome.storage.local.set(updates);
+  await chrome.storage.local.remove(pageKey);
+  const { [pageKey]: _note, ...notes } = highlightPanelState.notesByPage || {};
+  highlightPanelState.notesByPage = notes;
+  await refreshHighlightPanelIfVisible();
 };
 
 const applyPreviewHighlight = (range, color, reason, extra = "", source = "", kind) => {
@@ -2244,8 +1868,8 @@ const hidePreviewConfirmBar = () => {
 const confirmPreviewHighlights = async () => {
   const toSave = [...previewData];
   previewData = [];
+  previewUndo = null;
   hidePreviewConfirmBar();
-  updateGenerateAvailability();
   const entries = [];
   toSave.forEach((item) => {
     document
@@ -2265,98 +1889,52 @@ const confirmPreviewHighlights = async () => {
   await ensurePageMetaTitle(pageKey, document.title);
   await refreshHighlightPanelIfVisible();
   setAiPanelStatus(t("ai.applied", { count: toSave.length }));
+  notifyPageChanged();
 };
 
-const cancelPreviewHighlights = () => {
+const restorePreviewUndo = async (undo) => {
+  const key = undo.pageKey;
+  const stored = await chrome.storage.local.get(["hkGeneratedNotes", MINDMAP_STORAGE_KEY, PAGE_META_KEY]);
+  const restore = (map, value) => {
+    const next = { ...(map || {}) };
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+    return next;
+  };
+  const notes = restore(stored.hkGeneratedNotes, undo.note);
+  highlightPanelState.notesByPage = notes;
+  await chrome.storage.local.set({
+    hkGeneratedNotes: notes,
+    [MINDMAP_STORAGE_KEY]: restore(stored[MINDMAP_STORAGE_KEY], undo.mindmap),
+    [PAGE_META_KEY]: restore(stored[PAGE_META_KEY], undo.meta),
+  });
+  // 重新套用時可能改過既有標記的註解，也一起還原。
+  await setStoredHighlights(undo.entries, key);
+  undo.entries.forEach((entry) => setAllMarksMetadata(entry.id, { note: entry.note, kind: entry.kind }));
+};
+
+// 側欄不一定收得到 storage 事件（內容沒變時），明確通知它重讀。
+const notifyPageChanged = () => {
+  chrome.runtime.sendMessage({ type: "HK_PAGE_CHANGED", pageKey }).catch(() => {});
+};
+
+const cancelPreviewHighlights = async () => {
   const toRemove = [...previewData];
+  const undo = previewUndo;
   previewData = [];
+  previewUndo = null;
   hidePreviewConfirmBar();
-  updateGenerateAvailability();
-  toRemove.forEach((item) => unwrapHighlightElement(item.el));
+  toRemove.forEach((item) => {
+    document.querySelectorAll(`[${HIGHLIGHT_ATTR}="${item.data.id}"]`).forEach(unwrapHighlightElement);
+  });
+  try {
+    if (undo?.pageKey === pageKey) await restorePreviewUndo(undo);
+  } catch (error) {
+    console.debug("還原預覽前的筆記失敗", error);
+  }
+  await refreshHighlightPanelIfVisible();
   setAiPanelStatus(t("ai.statusPreviewCancelled"));
-};
-
-const cancelChatGPTBridge = async () => {
-  isChatGPTBridgeWaiting = false;
-  try {
-    await chrome.storage.local.remove([CHATGPT_REQUEST_KEY]);
-  } catch (_e) {}
-  updateGenerateAvailability();
-  setAiPanelStatus("");
-};
-
-const launchChatGPTBridge = async (type) => {
-  if (isChatGPTBridgeWaiting) return;
-  isChatGPTBridgeWaiting = true;
-  updateGenerateAvailability();
-  setAiPanelStatus(t("ai.statusPreparing"));
-  try {
-    const pageData = {
-      title: document.title,
-      url: pageKey,
-      pageText: getPagePlainText(),
-      highlights: await collectPageHighlights(),
-    };
-    let prompt;
-    if (type === "note") {
-      prompt = buildNotePrompt(pageData);
-    } else {
-      const latestPalette = await refreshPaletteFromStorage();
-      const usageCounts = await collectColorUsageCounts();
-      const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-      const existingTags = await collectExistingTagsByUsage();
-      // 與 popup／面板「複製 Prompt」統一：一次取得重點＋摘要＋標籤三區塊。
-      prompt = buildCombinedPrompt(pageData, preferredPalette, usageCounts, existingTags);
-    }
-    const requestId = `hk-${Date.now()}`;
-    await chrome.storage.local.set({
-      [CHATGPT_REQUEST_KEY]: { requestId, type, prompt, sourceUrl: pageKey },
-    });
-    try {
-      await navigator.clipboard.writeText(prompt);
-    } catch (_e) {}
-    window.open("https://chatgpt.com/", "_blank");
-    setAiPanelStatus(t("ai.statusChatgptOpened"));
-  } catch (error) {
-    isChatGPTBridgeWaiting = false;
-    updateGenerateAvailability();
-    setAiPanelStatus(error?.message || t("ai.errChatgptBridge"), true);
-  }
-};
-
-const launchGeminiWeb = async (type) => {
-  if (isManualWebAIWaiting) return;
-  const geminiTab = window.open("about:blank", "_blank");
-  isManualWebAIWaiting = true;
-  updateGenerateAvailability();
-  setAiPanelStatus(t("ai.statusPreparing"));
-  try {
-    const pageData = {
-      title: document.title,
-      url: pageKey,
-      pageText: getPagePlainText(),
-      highlights: await collectPageHighlights(),
-    };
-    let prompt;
-    if (type === "note") {
-      prompt = buildNotePrompt(pageData);
-    } else {
-      const latestPalette = await refreshPaletteFromStorage();
-      const usageCounts = await collectColorUsageCounts();
-      const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-      const existingTags = await collectExistingTagsByUsage();
-      prompt = buildCombinedPrompt(pageData, preferredPalette, usageCounts, existingTags);
-    }
-    await navigator.clipboard.writeText(prompt);
-    if (geminiTab) geminiTab.location.href = "https://gemini.google.com/app";
-    setAiPanelStatus(t("ai.statusGeminiOpened"));
-  } catch (error) {
-    geminiTab?.close();
-    setAiPanelStatus(error?.message || t("ai.errChatgptBridge"), true);
-  } finally {
-    isManualWebAIWaiting = false;
-    updateGenerateAvailability();
-  }
+  notifyPageChanged();
 };
 
 // AI 回傳的「標籤」區塊：解析後併入目前頁面既有標籤（聯集，不覆蓋手動加的），
@@ -2391,48 +1969,7 @@ const applyNotePayload = async (noteText, { context } = {}) => {
     [pageKey]: notePayload,
   };
   await saveGeneratedNote(pageKey, notePayload);
-  updateAiNoteSection(notePayload);
-  // 摘要產生／貼回後，若面板開著就自動切到「摘要」分頁，直接看得到。
-  if (highlightPanelVisible) {
-    highlightPanelState.activeTab = "ai-note";
-    applyHighlightPanelTabState();
-  }
   return notePayload;
-};
-
-// Returns {appliedCount, skippedCount, previewing}
-const applyHighlightResponseText = async (text) => {
-  const latestPalette = await refreshPaletteFromStorage();
-  const usageCounts = await collectColorUsageCounts();
-  const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-  // Prefer the non-JSON block format; fall back to legacy JSON.
-  const blockItems = parseHighlightBlocks(text);
-  const parsedPayload = blockItems.length
-    ? blockItems
-    : parseJsonFromModelResponse(text);
-  const tasks = normalizeAutoHighlightItems(parsedPayload, preferredPalette);
-  if (!tasks.length) throw new Error(t("ai.errNoUsableHighlights"));
-  const usePreview = aiSettings.usePreview;
-  const { appliedCount, skippedCount } = await applyAutoHighlightTasksBatch(
-    tasks,
-    usePreview
-  );
-  if (!appliedCount) throw new Error(t("ai.errNoMatchingText"));
-  const previewing = usePreview && previewData.length > 0;
-  if (previewing) {
-    showPreviewConfirmBar(previewData.length);
-  } else {
-    await ensurePageMetaTitle(pageKey, document.title);
-  }
-  return { appliedCount, skippedCount, previewing };
-};
-
-const applyMindmapResponseText = async (text) => {
-  const tree = parseMindmapOutline(text);
-  if (!tree) throw new Error(t("mindmap.errParse"));
-  await saveMindmap(text, tree.title);
-  updateMindmapAvailability(true);
-  openMindmapOverlay(tree, { outline: text, generatedAt: Date.now() });
 };
 
 // 套用「分享的筆記」到當前頁面：標註走 AI 套用管線（文字重新定位、
@@ -2483,7 +2020,6 @@ const applySharedPayload = async (payload, { overwrite = false } = {}) => {
       const tree = parseMindmapOutline(outline);
       if (tree) {
         await saveMindmap(outline, tree.title);
-        updateMindmapAvailability(true);
       }
     } catch (mapError) {
       console.debug("寫入分享心智圖失敗", mapError);
@@ -2505,365 +2041,24 @@ const applySharedPayload = async (payload, { overwrite = false } = {}) => {
   return { highlight, noteImported: Boolean(noteText), tagsAdded };
 };
 
-// Outline heuristics: mostly list lines, no 原文： blocks.
-const looksLikeMindmapOutline = (text) => HkParsers.looksLikeMindmapOutline(text);
-
-// 把「延伸」區塊掛回對應的標註註解。對不上的丟回呼叫端，接在摘要後面。
-// 回傳 {attached, orphans[]}。
-const applyExtraToHighlights = async (extraText) => {
-  const blocks = HkParsers.parseExtraBlocks(extraText);
-  if (!blocks.length) return { attached: 0, orphans: [] };
-
-  const entries = await getStoredHighlights();
-  const indexed = entries.map((entry) => ({
-    entry,
-    key: HkParsers.looseKey(entry.text || ""),
-  }));
-
-  const label = t("ai.extraNotePrefix");
-  const orphans = [];
-  let attached = 0;
-
-  for (const block of blocks) {
-    const key = HkParsers.looseKey(block.text);
-    if (!key) continue;
-    // 先找完全相同，再退而求其次找互相包含的（AI 常只抄半句或多抄一句）。
-    const hit =
-      indexed.find((item) => item.key === key) ||
-      indexed.find(
-        (item) =>
-          item.key.length > 8 &&
-          (item.key.includes(key) || key.includes(item.key))
-      );
-    if (!hit) {
-      orphans.push(block);
-      continue;
-    }
-    const line = `${label}${block.extra}`;
-    const existing = (hit.entry.note || "").trim();
-    // 重複套用同一份回覆時不要疊加同一行。
-    if (existing.includes(block.extra)) continue;
-    const nextNote = existing ? `${existing}\n${line}` : line;
-    const ok = await updateHighlightEntry(hit.entry.id, { note: nextNote });
-    if (ok) {
-      hit.entry.note = nextNote;
-      setAllMarksMetadata(hit.entry.id, { note: nextNote });
-      attached += 1;
-    }
-  }
-  return { attached, orphans };
-};
-
-// 套用一段 AI 回應：智慧判斷重點／摘要／心智圖／標籤區塊並寫入。
-// 回傳結果摘要 {mindmap | highlight, noteImported, tagsAdded}；失敗會 throw。
-// ChatGPT 貼回（bridge）與 popup 直接貼上都共用這條。
-const applyAiResponseSections = async (text, { type } = {}) => {
-  // 先認「複製本頁筆記」的分享 Markdown（別人貼過來的筆記），
-  // 命中就轉成分享 payload 走同一條匯入管線。
-  const sharedMd = HkParsers.parseSharedMarkdown(text);
-  if (sharedMd) {
-    const applied = await applySharedPayload({
-      title: sharedMd.title,
-      tags: sharedMd.tags,
-      hl: sharedMd.items.map((item) => ({ text: item.text, note: item.note, kind: item.kind })),
-      note: sharedMd.summary,
-      context: sharedMd.context,
-      ...(typeof sharedMd.personalNote === "string" ? { personalNote: sharedMd.personalNote } : {}),
-      mindmap: sharedMd.outline,
-    });
-    // 貼的是別頁的筆記 → 照套但提醒（文字定位可能找不到原文）。
-    const otherPage =
-      sharedMd.url && normalizePageKey(sharedMd.url) !== pageKey;
-    return {
-      highlight: applied.highlight,
-      noteImported: applied.noteImported,
-      tagsAdded: applied.tagsAdded,
-      sharedOtherPage: otherPage,
-    };
-  }
-
-  const sections = splitAiSections(text);
-  const isMindmap =
-    type === "mindmap" ||
-    (sections?.mindmap && !sections.highlights && !sections.note) ||
-    (!sections && looksLikeMindmapOutline(text));
-  if (isMindmap) {
-    await applyMindmapResponseText(sections?.mindmap ?? text);
-    return { mindmap: true };
-  }
-
-  const highlightText = sections?.highlights ?? (type === "note" ? null : text);
-  const baseNote = sections?.note ?? (type === "note" ? text : null);
-  const extraText = sections?.extra?.trim();
-
-  let highlight = null;
-  if (highlightText) {
-    setAiPanelStatus(t("ai.statusApplyingHighlights"));
-    highlight = await applyHighlightResponseText(highlightText);
-  }
-
-  // 延伸要在標註寫入之後才掛得上去（要先有 entry 才能寫 note）。
-  // 預覽模式下標註還沒真的落地，這時先不掛，整段退回摘要尾巴。
-  let extraAttached = 0;
-  let orphanText = "";
-  if (extraText) {
-    if (highlight?.previewing) {
-      orphanText = extraText;
-    } else {
-      try {
-        const res = await applyExtraToHighlights(extraText);
-        extraAttached = res.attached;
-        if (res.orphans.length) {
-          orphanText = res.orphans
-            .map((o) => `- ${o.text}\n  ${o.extra}`)
-            .join("\n");
-        }
-      } catch (extraError) {
-        console.debug("掛上延伸補充失敗", extraError);
-        orphanText = extraText;
-      }
-    }
-  }
-
-  // 對不上句子的延伸不要丟掉，接在摘要後面至少看得到。
-  const noteText =
-    orphanText && baseNote
-      ? `${baseNote.trim()}\n\n## ${t("ai.extraHeading")}\n${orphanText}`
-      : orphanText || baseNote;
-
-  if (noteText) {
-    await applyNotePayload(noteText);
-  }
-  let tagsAdded = 0;
-  if (sections?.tags) {
-    try {
-      tagsAdded = await applyAiPageTags(sections.tags);
-    } catch (tagError) {
-      console.debug("匯入 AI 標籤失敗", tagError);
-    }
-  }
-  // 三區塊之外若還帶了心智圖大綱，一併靜默寫入（先前會被忽略）。
-  if (sections?.mindmap && (highlightText || noteText)) {
-    try {
-      const tree = parseMindmapOutline(sections.mindmap);
-      if (tree) {
-        await saveMindmap(sections.mindmap, tree.title);
-        updateMindmapAvailability(true);
-      }
-    } catch (mapError) {
-      console.debug("寫入心智圖大綱失敗", mapError);
-    }
-  }
-  if (!highlightText && !noteText) {
-    throw new Error(t("ai.errUnrecognized"));
-  }
+// 貼上的是別人分享的筆記 Markdown：轉成分享 payload 走同一條匯入管線。
+const importSharedMarkdown = async (shared) => {
+  const applied = await applySharedPayload({
+    title: shared.title,
+    tags: shared.tags,
+    hl: shared.items.map((item) => ({ text: item.text, note: item.note, kind: item.kind })),
+    note: shared.summary,
+    context: shared.context,
+    ...(typeof shared.personalNote === "string" ? { personalNote: shared.personalNote } : {}),
+    mindmap: shared.outline,
+  });
+  const otherPage = shared.url && normalizePageKey(shared.url) !== pageKey;
+  const summary = t("ai.appliedCount", { applied: applied.highlight?.appliedCount || 0 });
   return {
-    highlight,
-    noteImported: Boolean(noteText),
-    tagsAdded,
-    extraAttached,
+    success: true,
+    shared: true,
+    summary: (otherPage ? t("share.mdOtherPage") : "") + summary,
   };
-};
-
-// 把套用結果組成一行可顯示的狀態文字（面板與 popup 共用）。
-const summarizeAiApplyResult = (res) => {
-  if (res?.mindmap) return t("mindmap.done");
-  // 貼上的是別頁的分享筆記 → 前置提醒（原文文字在本頁可能找不到）。
-  const otherPagePrefix = res.sharedOtherPage ? t("share.mdOtherPage") : "";
-  const tagSuffix =
-    (res.tagsAdded ? t("ai.tagsImportedSuffix", { count: res.tagsAdded }) : "") +
-    (res.extraAttached
-      ? t("ai.extraAttachedSuffix", { count: res.extraAttached })
-      : "");
-  if (res.highlight?.previewing) {
-    return (
-      t("ai.statusPreviewN", { count: previewData.length }) +
-      (res.noteImported ? t("ai.summaryImportedSuffix") : "") +
-      tagSuffix
-    );
-  }
-  if (res.highlight) {
-    const parts = [t("ai.appliedCount", { applied: res.highlight.appliedCount })];
-    if (res.highlight.skippedCount)
-      parts.push(t("ai.skippedCount", { skipped: res.highlight.skippedCount }));
-    if (res.noteImported) parts.push(t("ai.summaryImported"));
-    if (res.tagsAdded) parts.push(t("ai.tagsImported", { count: res.tagsAdded }));
-    if (res.extraAttached)
-      parts.push(t("ai.extraAttached", { count: res.extraAttached }));
-    return otherPagePrefix + parts.join("，");
-  }
-  return otherPagePrefix + t("ai.noteImported") + tagSuffix;
-};
-
-const handleChatGPTResponse = async (responseData) => {
-  if (!responseData?.text || !responseData?.requestId) return;
-  isChatGPTBridgeWaiting = false;
-  updateGenerateAvailability();
-  try {
-    await chrome.storage.local.remove([CHATGPT_REQUEST_KEY, CHATGPT_RESPONSE_KEY]);
-  } catch (_e) {}
-  const { type, text } = responseData;
-  try {
-    const res = await applyAiResponseSections(text, { type });
-    if (!res.mindmap) await refreshHighlightPanelIfVisible();
-    setAiPanelStatus(summarizeAiApplyResult(res));
-  } catch (error) {
-    setAiPanelStatus(error?.message || t("ai.errImport"), true);
-  }
-};
-
-const handleGenerateAiNote = async () => {
-  if (isGeneratingNote || !highlightPanelEls?.aiGenerateBtn) return;
-  if (aiSettings.provider === "chatgpt") {
-    return launchChatGPTBridge("note");
-  }
-  if (aiSettings.provider === "gemini-web") return launchGeminiWeb("note");
-  const provider = aiSettings.provider;
-  const apiKey =
-    provider === "openai"
-      ? aiSettings.openaiKey?.trim()
-      : aiSettings.geminiKey?.trim();
-
-  if (!isLikelyProviderApiKey(provider, apiKey)) {
-    setAiPanelStatus(t("ai.errNoApiKey"), true);
-    updateGenerateAvailability();
-    return;
-  }
-
-  try {
-    isGeneratingNote = true;
-    updateGenerateAvailability();
-    setAiPanelStatus(t("ai.statusGeneratingNote"));
-    const pageData = {
-      title: document.title,
-      url: pageKey,
-      pageText: getPagePlainText(),
-      highlights: await collectPageHighlights(),
-    };
-    const prompt = buildNotePrompt(pageData);
-    const noteText =
-      provider === "openai"
-        ? await callOpenAI(apiKey, prompt)
-        : await callGemini(apiKey, prompt);
-
-    const notePayload = {
-      note: noteText,
-      provider,
-      model: provider === "openai" ? aiSettings.openaiModel : aiSettings.geminiModel,
-      prompt,
-      generatedAt: Date.now(),
-      url: pageData.url,
-    };
-
-    highlightPanelState.notesByPage = {
-      ...highlightPanelState.notesByPage,
-      [pageData.url]: notePayload,
-    };
-    if (highlightPanelState.activeKey !== pageKey) {
-      highlightPanelState.activeKey = pageKey;
-    }
-    highlightPanelState.activeTab = "ai-note";
-    applyHighlightPanelTabState();
-    await saveGeneratedNote(pageData.url, notePayload);
-    updateAiNoteSection(notePayload);
-    setAiPanelStatus(t("ai.statusNoteDone"));
-  } catch (error) {
-    console.debug("產生 AI 筆記失敗", error);
-    setAiPanelStatus(error?.message || t("ai.errGenerateNote"), true);
-  } finally {
-    isGeneratingNote = false;
-    updateGenerateAvailability();
-  }
-};
-
-const handleGenerateAiHighlights = async () => {
-  if (isAutoHighlighting || isGeneratingNote || previewData.length || !highlightPanelEls?.aiAutoHighlightBtn) {
-    return;
-  }
-  if (aiSettings.provider === "chatgpt") {
-    return launchChatGPTBridge("highlight");
-  }
-  if (aiSettings.provider === "gemini-web") return launchGeminiWeb("highlight");
-  const provider = aiSettings.provider;
-  const apiKey =
-    provider === "openai"
-      ? aiSettings.openaiKey?.trim()
-      : aiSettings.geminiKey?.trim();
-
-  if (!isLikelyProviderApiKey(provider, apiKey)) {
-    setAiPanelStatus(t("ai.errNoApiKey"), true);
-    updateGenerateAvailability();
-    return;
-  }
-
-  try {
-    isAutoHighlighting = true;
-    updateGenerateAvailability();
-    setAiPanelStatus(t("ai.statusAnalyzing"));
-
-    let scopedText = getPagePlainText();
-    if (aiSettings.selectionOnly) {
-      const selText = window.getSelection()?.toString()?.trim();
-      if (selText) {
-        scopedText = selText;
-      } else {
-        setAiPanelStatus(t("ai.statusFallbackWholePage"));
-      }
-    }
-
-    const pageData = {
-      title: document.title,
-      url: pageKey,
-      pageText: scopedText,
-      highlights: await collectPageHighlights(),
-    };
-    const latestPalette = await refreshPaletteFromStorage();
-    const usageCounts = await collectColorUsageCounts();
-    const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-    const prompt = buildAutoHighlightPrompt(pageData, preferredPalette, usageCounts);
-    const rawResponse =
-      provider === "openai"
-        ? await callOpenAI(apiKey, prompt, {
-            jsonMode: true,
-            systemPrompt:
-              "You are a strict JSON extraction assistant. Return only valid JSON without markdown.",
-          })
-        : await callGemini(apiKey, prompt, { jsonMode: true });
-    const parsedPayload = parseJsonFromModelResponse(rawResponse);
-    const tasks = normalizeAutoHighlightItems(parsedPayload, preferredPalette);
-    if (!tasks.length) {
-      throw new Error(t("ai.errNoUsableItems"));
-    }
-
-    const usePreview = aiSettings.usePreview;
-    const { appliedCount, skippedCount } = await applyAutoHighlightTasksBatch(
-      tasks,
-      usePreview
-    );
-
-    if (!appliedCount) {
-      throw new Error(t("ai.errNoMatchAdjust"));
-    }
-
-    if (usePreview && previewData.length) {
-      showPreviewConfirmBar(previewData.length);
-      setAiPanelStatus(t("ai.statusPreviewN", { count: previewData.length }));
-    } else {
-      await ensurePageMetaTitle(pageKey, document.title);
-      await refreshHighlightPanelIfVisible();
-      setAiPanelStatus(
-        skippedCount
-          ? t("ai.statusAppliedWithSkip", { applied: appliedCount, skipped: skippedCount })
-          : t("ai.statusAppliedN", { applied: appliedCount })
-      );
-    }
-  } catch (error) {
-    console.debug("AI 自動畫重點失敗", error);
-    setAiPanelStatus(error?.message || t("ai.errAutoHighlight"), true);
-  } finally {
-    isAutoHighlighting = false;
-    updateGenerateAvailability();
-  }
 };
 
 const formatTimestamp = (value) => {
@@ -2969,41 +2164,22 @@ const setHighlightPanelSide = async (side, persist = true) => {
 };
 
 const applyHighlightPanelTabState = () => {
-  // "archive" 仍併入本頁；"ai-note" 重新作為獨立可見的「摘要」分頁。
-  const visibleTabs = ["page", "search", "ai-note"];
-  const legacyRedirect = { archive: "page" };
-  let resolved = highlightPanelState.activeTab;
-  if (legacyRedirect[resolved]) resolved = legacyRedirect[resolved];
-  if (!visibleTabs.includes(resolved)) resolved = "page";
+  const visibleTabs = ["page", "search"];
+  const resolved = visibleTabs.includes(highlightPanelState.activeTab)
+    ? highlightPanelState.activeTab
+    : "page";
   highlightPanelState.activeTab = resolved;
 
-  // 摘要分頁是「閱讀」用途：把上方的 AI 複製貼上卡片收起，讓摘要拿到整個面板高度。
-  if (highlightPanelEls?.aiCard) {
-    highlightPanelEls.aiCard.style.display =
-      resolved === "ai-note" ? "none" : "";
-  }
-
   const { tabButtons, tabPanels } = highlightPanelEls ?? {};
-  const buttonMap = {
-    page: tabButtons?.page,
-    search: tabButtons?.search,
-    "ai-note": tabButtons?.ai,
-  };
-  const panelMap = {
-    page: tabPanels?.page,
-    search: tabPanels?.search,
-    "ai-note": tabPanels?.ai,
-  };
-
   visibleTabs.forEach((tab) => {
     const isActive = resolved === tab;
-    const btn = buttonMap[tab];
+    const btn = tabButtons?.[tab];
     if (btn) {
       btn.classList.toggle("is-active", isActive);
       btn.setAttribute("aria-selected", isActive ? "true" : "false");
       btn.setAttribute("tabindex", isActive ? "0" : "-1");
     }
-    const panel = panelMap[tab];
+    const panel = tabPanels?.[tab];
     if (panel) {
       panel.classList.toggle("is-active", isActive);
       panel.hidden = !isActive;
@@ -3357,9 +2533,6 @@ const setPanelStatus = (message, isError = false) => {
       }
     }, 2400);
   }
-  if (highlightPanelState.activeTab === "archive") {
-    setArchiveStatus(message, isError);
-  }
 };
 
 const setArchiveStatus = (message, isError = false) => {
@@ -3413,116 +2586,6 @@ const deleteHighlightFromPanel = async (entry) => {
   } catch (error) {
     console.debug("刪除標註失敗", error);
     setPanelStatus(t("ai.errDeleteHighlight"), true);
-  }
-};
-
-// Render a stored note for display. Most notes are prose, but legacy notes (or
-// a highlight JSON pasted into note mode) can be raw JSON — convert those into a
-// readable numbered list instead of dumping braces at the user.
-const formatNoteForDisplay = (raw) => {
-  if (typeof raw !== "string") return "";
-  const trimmed = raw.trim();
-  if (!/^[[{]/.test(trimmed)) return raw;
-  let data = null;
-  try {
-    data = JSON.parse(trimmed);
-  } catch (_e) {
-    try {
-      data = parseJsonFromModelResponse(trimmed);
-    } catch (_e2) {
-      data = null;
-    }
-  }
-  const items = Array.isArray(data)
-    ? data
-    : Array.isArray(data?.highlights)
-    ? data.highlights
-    : null;
-  if (!items) return raw;
-  const lines = items
-    .map((it) => {
-      const text = (it?.text ?? "").toString().trim();
-      const reason = (it?.reason ?? "").toString().trim();
-      if (!text && !reason) return "";
-      if (text && reason) return `• ${text}\n  → ${reason}`;
-      return `• ${text || reason}`;
-    })
-    .filter(Boolean);
-  return lines.length ? lines.join("\n\n") : raw;
-};
-
-const updateAiNoteSection = (noteData) => {
-  const {
-    aiNoteSection,
-    aiNoteContent,
-    aiNoteMeta,
-    aiNoteCopyBtn,
-    aiNoteEmpty,
-  } = highlightPanelEls ?? {};
-  if (!aiNoteSection || !aiNoteContent || !aiNoteMeta || !aiNoteCopyBtn) {
-    return;
-  }
-
-  if (aiNoteCopyBtn._hkResetTimer) {
-    window.clearTimeout(aiNoteCopyBtn._hkResetTimer);
-    aiNoteCopyBtn._hkResetTimer = null;
-  }
-  aiNoteCopyBtn.classList.remove("is-error");
-
-  if (noteData?.note) {
-    const displayNote = formatNoteForDisplay(noteData.note);
-    aiNoteSection.style.display = "flex";
-    aiNoteContent.textContent = displayNote;
-    aiNoteContent.style.display = "block";
-    aiNoteEmpty.style.display = "none";
-    const providerLabel =
-      noteData.provider === "openai"
-        ? "OpenAI"
-        : noteData.provider === "chatgpt"
-        ? "ChatGPT"
-        : noteData.provider === "gemini-web"
-        ? "Gemini 網頁版"
-        : "Gemini API";
-    const modelLabel =
-      noteData.model && !["chatgpt-web", "gemini-web"].includes(noteData.model)
-        ? `${providerLabel} · ${noteData.model}`
-        : providerLabel;
-    const generatedLabel = noteData.generatedAt
-      ? `${modelLabel} · ${formatTimestamp(noteData.generatedAt)}`
-      : modelLabel;
-    aiNoteMeta.textContent = generatedLabel;
-    aiNoteCopyBtn.disabled = false;
-    aiNoteCopyBtn.textContent = t("panel.aiNotesCopy");
-    aiNoteCopyBtn.onclick = async () => {
-      if (aiNoteCopyBtn._hkResetTimer) {
-        window.clearTimeout(aiNoteCopyBtn._hkResetTimer);
-        aiNoteCopyBtn._hkResetTimer = null;
-      }
-      try {
-        await navigator.clipboard.writeText(displayNote);
-        aiNoteCopyBtn.textContent = t("panel.aiNotesCopied");
-      } catch (error) {
-        console.debug("複製 AI 筆記失敗", error);
-        aiNoteCopyBtn.textContent = t("panel.aiNotesCopyFail");
-        aiNoteCopyBtn.classList.add("is-error");
-      } finally {
-        aiNoteCopyBtn._hkResetTimer = window.setTimeout(() => {
-          aiNoteCopyBtn.textContent = t("panel.aiNotesCopy");
-          aiNoteCopyBtn.classList.remove("is-error");
-          aiNoteCopyBtn._hkResetTimer = null;
-        }, 1800);
-      }
-    };
-  } else {
-    // 常駐顯示：沒有摘要時改顯示提示，而非整張卡片隱藏。
-    aiNoteSection.style.display = "flex";
-    aiNoteContent.textContent = "";
-    aiNoteContent.style.display = "none";
-    aiNoteEmpty.style.display = "block";
-    aiNoteMeta.textContent = "";
-    aiNoteCopyBtn.disabled = true;
-    aiNoteCopyBtn.onclick = null;
-    aiNoteCopyBtn.textContent = t("panel.aiNotesCopy");
   }
 };
 
@@ -4121,7 +3184,7 @@ const createPanelEntryElement = (entry, options = {}) => {
     // 掃列表時一眼分得出「這是原文在講什麼」與「這是額外補的」。
     const extraPrefix = t("ai.extraNotePrefix");
     const sourcePrefix = t("ai.sourceNotePrefix");
-    noteText.split("\n").forEach((line) => {
+    HkParsers.breakNoteLines(noteText).split("\n").forEach((line) => {
       const trimmed = line.trim();
       if (!trimmed) return;
 
@@ -4461,23 +3524,6 @@ const ensureHighlightPanel = () => {
     );
   });
 
-  const archiveTabBtn = document.createElement("button");
-  archiveTabBtn.type = "button";
-  archiveTabBtn.className = "hk-panel-tab-btn";
-  archiveTabBtn.id = "hk-panel-tab-archive";
-  archiveTabBtn.setAttribute("role", "tab");
-  archiveTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-archive");
-  archiveTabBtn.dataset.tabLegacy = "1";
-  archiveTabBtn.textContent = t("panel.tabArchive");
-  archiveTabBtn.addEventListener("click", () => {
-    if (highlightPanelState.activeTab === "archive") return;
-    highlightPanelState.activeTab = "archive";
-    applyHighlightPanelTabState();
-    renderHighlightPanel().catch((error) =>
-      console.debug("重新整理標註面板失敗", error)
-    );
-  });
-
   const searchTabBtn = document.createElement("button");
   searchTabBtn.type = "button";
   searchTabBtn.className = "hk-panel-tab-btn";
@@ -4494,26 +3540,8 @@ const ensureHighlightPanel = () => {
     );
   });
 
-  const aiTabBtn = document.createElement("button");
-  aiTabBtn.type = "button";
-  aiTabBtn.className = "hk-panel-tab-btn";
-  aiTabBtn.id = "hk-panel-tab-ai-note";
-  aiTabBtn.setAttribute("role", "tab");
-  aiTabBtn.setAttribute("aria-controls", "hk-panel-tabpanel-ai-note");
-  aiTabBtn.textContent = t("panel.tabSummary");
-  aiTabBtn.addEventListener("click", () => {
-    if (highlightPanelState.activeTab === "ai-note") return;
-    highlightPanelState.activeTab = "ai-note";
-    applyHighlightPanelTabState();
-    renderHighlightPanel().catch((error) =>
-      console.debug("重新整理標註面板失敗", error)
-    );
-  });
-
   tabs.appendChild(pageTabBtn);
-  tabs.appendChild(archiveTabBtn);
   tabs.appendChild(searchTabBtn);
-  tabs.appendChild(aiTabBtn);
 
   const pageTabPanel = document.createElement("div");
   pageTabPanel.className = "hk-panel-tab-content hk-panel-tab-content-page";
@@ -4521,23 +3549,11 @@ const ensureHighlightPanel = () => {
   pageTabPanel.setAttribute("role", "tabpanel");
   pageTabPanel.setAttribute("aria-labelledby", pageTabBtn.id);
 
-  const archiveTabPanel = document.createElement("div");
-  archiveTabPanel.className = "hk-panel-tab-content hk-panel-tab-content-archive";
-  archiveTabPanel.id = "hk-panel-tabpanel-archive";
-  archiveTabPanel.setAttribute("role", "tabpanel");
-  archiveTabPanel.setAttribute("aria-labelledby", archiveTabBtn.id);
-
   const searchTabPanel = document.createElement("div");
   searchTabPanel.className = "hk-panel-tab-content hk-panel-tab-content-search";
   searchTabPanel.id = "hk-panel-tabpanel-search";
   searchTabPanel.setAttribute("role", "tabpanel");
   searchTabPanel.setAttribute("aria-labelledby", searchTabBtn.id);
-
-  const aiTabPanel = document.createElement("div");
-  aiTabPanel.className = "hk-panel-tab-content hk-panel-tab-content-ai";
-  aiTabPanel.id = "hk-panel-tabpanel-ai-note";
-  aiTabPanel.setAttribute("role", "tabpanel");
-  aiTabPanel.setAttribute("aria-labelledby", aiTabBtn.id);
 
   const searchControls = document.createElement("div");
   searchControls.className = "hk-panel-controls";
@@ -4821,14 +3837,7 @@ const ensureHighlightPanel = () => {
   const chatgptInfo = document.createElement("p");
   chatgptInfo.className = "hk-panel-ai-chatgpt-info";
   chatgptInfo.textContent = t("panel.chatgptInfo");
-  const chatgptCancelBtn = document.createElement("button");
-  chatgptCancelBtn.type = "button";
-  chatgptCancelBtn.className = "hk-panel-ai-chatgpt-cancel";
-  chatgptCancelBtn.textContent = t("panel.chatgptCancel");
-  chatgptCancelBtn.hidden = true;
-  chatgptCancelBtn.addEventListener("click", () => cancelChatGPTBridge());
   chatgptGroup.appendChild(chatgptInfo);
-  chatgptGroup.appendChild(chatgptCancelBtn);
   chatgptGroup.hidden = true;
 
   aiKeyGroupsContainer.appendChild(openaiGroup);
@@ -4872,27 +3881,6 @@ const ensureHighlightPanel = () => {
   autoHighlightPromptTextarea.rows = 3;
   autoHighlightPromptField.appendChild(autoHighlightPromptLabel);
   autoHighlightPromptField.appendChild(autoHighlightPromptTextarea);
-
-  const aiAutoHighlightBtn = document.createElement("button");
-  aiAutoHighlightBtn.type = "button";
-  aiAutoHighlightBtn.className = "hk-panel-ai-generate hk-panel-ai-auto-highlight";
-  aiAutoHighlightBtn.textContent = t("panel.autoHighlightBtn");
-
-  // ChatGPT manual paste for highlight
-  const chatgptHlPasteArea = document.createElement("textarea");
-  chatgptHlPasteArea.className = "hk-panel-ai-textarea hk-panel-ai-chatgpt-paste-area";
-  chatgptHlPasteArea.rows = 3;
-  chatgptHlPasteArea.placeholder = t("panel.chatgptPasteHl");
-  const chatgptHlApplyBtn = document.createElement("button");
-  chatgptHlApplyBtn.type = "button";
-  chatgptHlApplyBtn.className = "hk-panel-ai-chatgpt-apply-btn";
-  chatgptHlApplyBtn.textContent = t("panel.applyHighlights");
-  chatgptHlApplyBtn.addEventListener("click", () => {
-    const text = chatgptHlPasteArea.value.trim();
-    if (!text) { setAiPanelStatus(t("ai.pasteFirst"), true); return; }
-    handleChatGPTResponse({ requestId: "manual", type: "highlight", text, sourceUrl: pageKey });
-    chatgptHlPasteArea.value = "";
-  });
 
   // Category editor
   const catField = document.createElement("div");
@@ -4971,9 +3959,6 @@ const ensureHighlightPanel = () => {
   aiHighlightBlock.appendChild(catField);
   aiHighlightBlock.appendChild(autoHighlightPromptField);
   aiHighlightBlock.appendChild(hlOptionsRow);
-  aiHighlightBlock.appendChild(aiAutoHighlightBtn);
-  aiHighlightBlock.appendChild(chatgptHlPasteArea);
-  aiHighlightBlock.appendChild(chatgptHlApplyBtn);
   aiSettingsSection.appendChild(aiHighlightBlock);
 
   // ── AI 摘要筆記 block ────────────────────────────────
@@ -5005,64 +3990,9 @@ const ensureHighlightPanel = () => {
   promptField.appendChild(promptLabel);
   promptField.appendChild(promptTextarea);
 
-  const aiGenerateBtn = document.createElement("button");
-  aiGenerateBtn.type = "button";
-  aiGenerateBtn.className = "hk-panel-ai-generate";
-  aiGenerateBtn.textContent = t("panel.generateNote");
-
-  // ChatGPT manual paste for note
-  const chatgptNotePasteArea = document.createElement("textarea");
-  chatgptNotePasteArea.className = "hk-panel-ai-textarea hk-panel-ai-chatgpt-paste-area";
-  chatgptNotePasteArea.rows = 3;
-  chatgptNotePasteArea.placeholder = t("panel.chatgptPasteNote");
-  const chatgptNoteApplyBtn = document.createElement("button");
-  chatgptNoteApplyBtn.type = "button";
-  chatgptNoteApplyBtn.className = "hk-panel-ai-chatgpt-apply-btn";
-  chatgptNoteApplyBtn.textContent = t("panel.applyNote");
-  chatgptNoteApplyBtn.addEventListener("click", () => {
-    const text = chatgptNotePasteArea.value.trim();
-    if (!text) { setAiPanelStatus(t("ai.pasteFirst"), true); return; }
-    handleChatGPTResponse({ requestId: "manual", type: "note", text, sourceUrl: pageKey });
-    chatgptNotePasteArea.value = "";
-  });
-
   aiNoteGenBlock.appendChild(aiNoteGenHead);
   aiNoteGenBlock.appendChild(promptField);
-  aiNoteGenBlock.appendChild(aiGenerateBtn);
-  aiNoteGenBlock.appendChild(chatgptNotePasteArea);
-  aiNoteGenBlock.appendChild(chatgptNoteApplyBtn);
   aiSettingsSection.appendChild(aiNoteGenBlock);
-
-  // 摘要卡：常駐在本頁頂部、可一鍵收合，讓人隨時快速看整頁摘要。
-  const aiNoteSection = document.createElement("section");
-  aiNoteSection.className = "hk-panel-ai-note";
-  const aiNoteHeader = document.createElement("div");
-  aiNoteHeader.className = "hk-panel-ai-note-header";
-  const aiNoteTitle = document.createElement("span");
-  aiNoteTitle.className = "hk-panel-ai-note-title";
-  aiNoteTitle.textContent = t("panel.aiNotesTitle");
-  const aiNoteMeta = document.createElement("span");
-  aiNoteMeta.className = "hk-panel-ai-note-meta";
-  const aiNoteCopyBtn = document.createElement("button");
-  aiNoteCopyBtn.type = "button";
-  aiNoteCopyBtn.className = "hk-panel-ai-note-copy";
-  aiNoteCopyBtn.textContent = t("panel.aiNotesCopy");
-  aiNoteCopyBtn.disabled = true;
-  aiNoteHeader.appendChild(aiNoteTitle);
-  aiNoteHeader.appendChild(aiNoteMeta);
-  aiNoteHeader.appendChild(aiNoteCopyBtn);
-  const aiNoteBody = document.createElement("div");
-  aiNoteBody.className = "hk-panel-ai-note-body";
-  const aiNoteContent = document.createElement("pre");
-  aiNoteContent.className = "hk-panel-ai-note-content";
-  aiNoteContent.textContent = "";
-  const aiNoteEmpty = document.createElement("div");
-  aiNoteEmpty.className = "hk-panel-ai-note-empty";
-  aiNoteEmpty.textContent = t("panel.emptyNote");
-  aiNoteBody.appendChild(aiNoteContent);
-  aiNoteBody.appendChild(aiNoteEmpty);
-  aiNoteSection.appendChild(aiNoteHeader);
-  aiNoteSection.appendChild(aiNoteBody);
 
   // 失聯（orphan）標註提示：重整後找不到對應文字時常駐顯示在本頁清單上方。
   const pageOrphanNotice = document.createElement("div");
@@ -5083,189 +4013,22 @@ const ensureHighlightPanel = () => {
   searchPlaceholder.className = "hk-panel-placeholder";
   searchPlaceholder.textContent = t("panel.emptySearch");
 
-  // ── AI 工作流卡片（最外層）：① 複製 Prompt → ② 貼回即套用 ──
-  // 單一流程：一個 Prompt 同時取得整頁重點、摘要與標籤。
-  // 心智圖改走獨立的副次動作（見下方 aiMindmapCopyBtn），主流程不再有模式切換。
-  const aiMode = "combined";
-  const aiCard = document.createElement("div");
-  aiCard.className = "hk-ai-card";
+  // 閱讀內容與 AI 流程都在側欄；這裡只放入口，面板專注在工具。
+  const toolCard = document.createElement("div");
+  toolCard.className = "hk-tool-card";
 
-  const aiCardHint = document.createElement("p");
-  aiCardHint.className = "hk-ai-hint";
-  aiCardHint.textContent = t("aiCard.hint");
-
-  // 步驟一：複製 Prompt
-  const aiStep1 = document.createElement("div");
-  aiStep1.className = "hk-ai-step";
-  const aiStep1Num = document.createElement("span");
-  aiStep1Num.className = "hk-ai-step-num";
-  aiStep1Num.textContent = "1";
-  const aiCopyBtn = document.createElement("button");
-  aiCopyBtn.type = "button";
-  aiCopyBtn.className = "hk-ai-copy-btn";
-  aiCopyBtn.textContent = t("bridge.copyPrompt");
-  aiStep1.appendChild(aiStep1Num);
-  aiStep1.appendChild(aiCopyBtn);
-
-  // 步驟二：貼回（paste 即自動套用）
-  const aiStep2 = document.createElement("div");
-  aiStep2.className = "hk-ai-step";
-  const aiStep2Num = document.createElement("span");
-  aiStep2Num.className = "hk-ai-step-num";
-  aiStep2Num.textContent = "2";
-  const aiPasteArea = document.createElement("textarea");
-  aiPasteArea.className = "hk-ai-paste";
-  aiPasteArea.rows = 2;
-  aiPasteArea.placeholder = t("aiCard.pastePlaceholder");
-  aiStep2.appendChild(aiStep2Num);
-  aiStep2.appendChild(aiPasteArea);
-
-  const aiApplyBtn = document.createElement("button");
-  aiApplyBtn.type = "button";
-  aiApplyBtn.className = "hk-ai-apply";
-  aiApplyBtn.textContent = t("aiCard.apply");
-
-  // 進階：有 API Key 時可一鍵直接產生
-  const aiDirectBtn = document.createElement("button");
-  aiDirectBtn.type = "button";
-  aiDirectBtn.className = "hk-ai-direct";
-  aiDirectBtn.textContent = t("aiCard.directGenerate");
-  aiDirectBtn.hidden = true;
-
-  // 次要動作：查看心智圖／指引閱讀
-  const aiMindmapViewBtn = document.createElement("button");
-  aiMindmapViewBtn.type = "button";
-  aiMindmapViewBtn.className = "hk-ai-secondary hk-ai-mindmap-view";
-  aiMindmapViewBtn.textContent = t("mindmap.view");
-  aiMindmapViewBtn.hidden = true;
-  aiMindmapViewBtn.addEventListener("click", () => {
-    openStoredMindmap().catch((error) =>
-      setAiPanelStatus(error?.message || t("mindmap.errOpen"), true)
+  const openGuideBtn = document.createElement("button");
+  openGuideBtn.type = "button";
+  openGuideBtn.className = "hk-tool-open-guide";
+  openGuideBtn.textContent = t("panel.openGuide");
+  openGuideBtn.addEventListener("click", () => {
+    chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL" }).catch((error) =>
+      setAiPanelStatus(error?.message || t("sidebar.settingsError"), true)
     );
   });
 
-  const actionGuidedReadingBtn = document.createElement("button");
-  actionGuidedReadingBtn.type = "button";
-  actionGuidedReadingBtn.className = "hk-ai-secondary hk-ai-guided";
-  actionGuidedReadingBtn.textContent = t("aiCard.guidedReading");
-  actionGuidedReadingBtn.addEventListener("click", () => startGuidedReading());
-
-  // 一鍵清除本頁標記（從設定抽屜拉到面板明顯處）
-  const aiClearPageBtn = document.createElement("button");
-  aiClearPageBtn.type = "button";
-  aiClearPageBtn.className = "hk-ai-secondary hk-ai-clear-page";
-  aiClearPageBtn.textContent = "🗑 " + t("panel.clearPageShort");
-  aiClearPageBtn.title = t("panel.clearPageTitle");
-  aiClearPageBtn.addEventListener("click", async () => {
-    if (!window.confirm(t("panel.clearConfirm"))) return;
-    try {
-      await clearPageHighlights();
-    } catch (error) {
-      setAiPanelStatus(error?.message || t("popup.errClear"), true);
-    }
-  });
-
-  // 心智圖 Prompt：獨立副次動作，不影響主流程（重點＋摘要）
-  const aiMindmapCopyBtn = document.createElement("button");
-  aiMindmapCopyBtn.type = "button";
-  aiMindmapCopyBtn.className = "hk-ai-secondary hk-ai-mindmap-copy";
-  aiMindmapCopyBtn.textContent = t("mindmap.copyPrompt");
-
-  // 依模式組出 Prompt（combined = 重點＋摘要，mindmap = 心智圖大綱）
-  const buildAiPrompt = async (mode) => {
-    const pageData = {
-      title: document.title,
-      url: pageKey,
-      pageText: getPagePlainText(),
-      highlights: await collectPageHighlights(),
-    };
-    if (mode === "mindmap") return buildMindmapPrompt(pageData);
-    const latestPalette = await refreshPaletteFromStorage();
-    const usageCounts = await collectColorUsageCounts();
-    const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-    const existingTags = await collectExistingTagsByUsage();
-    return buildCombinedPrompt(pageData, preferredPalette, usageCounts, existingTags);
-  };
-
-  const flashCopyBtn = (msg) => {
-    aiCopyBtn.textContent = msg;
-    aiCopyBtn.classList.add("is-done");
-    window.setTimeout(() => {
-      aiCopyBtn.textContent = t("bridge.copyPrompt");
-      aiCopyBtn.classList.remove("is-done");
-    }, 1600);
-  };
-
-  aiCopyBtn.addEventListener("click", async () => {
-    try {
-      const prompt = await buildAiPrompt("combined");
-      await navigator.clipboard.writeText(prompt);
-      flashCopyBtn("已複製 ✓");
-      setAiPanelStatus(t("aiCard.copiedHint"));
-    } catch (error) {
-      setAiPanelStatus(error?.message || t("bridge.copyFail"), true);
-    }
-  });
-
-  aiMindmapCopyBtn.addEventListener("click", async () => {
-    try {
-      const prompt = await buildAiPrompt("mindmap");
-      await navigator.clipboard.writeText(prompt);
-      setAiPanelStatus(t("aiCard.mindmapCopiedHint"));
-    } catch (error) {
-      setAiPanelStatus(error?.message || t("bridge.copyFail"), true);
-    }
-  });
-
-  const applyPastedAiResponse = () => {
-    const text = aiPasteArea.value.trim();
-    if (!text) {
-      setAiPanelStatus(t("aiCard.pasteFirst"), true);
-      return;
-    }
-    aiPasteArea.value = "";
-    handleChatGPTResponse({
-      requestId: "manual",
-      type: aiMode,
-      text,
-      sourceUrl: pageKey,
-    });
-  };
-
-  // 貼上即自動套用（setTimeout 讓 textarea 先吃到剪貼簿內容）
-  aiPasteArea.addEventListener("paste", () => {
-    window.setTimeout(() => {
-      if (aiPasteArea.value.trim()) {
-        setAiPanelStatus(t("aiCard.pasteDetected"));
-        applyPastedAiResponse();
-      }
-    }, 30);
-  });
-  aiApplyBtn.addEventListener("click", applyPastedAiResponse);
-
-  aiDirectBtn.addEventListener("click", async () => {
-    await handleGenerateAiHighlights();
-    await handleGenerateAiNote();
-  });
-
-  const aiCardActions = document.createElement("div");
-  aiCardActions.className = "hk-ai-actions";
-  aiCardActions.appendChild(aiApplyBtn);
-  aiCardActions.appendChild(aiDirectBtn);
-
-  const aiCardSecondary = document.createElement("div");
-  aiCardSecondary.className = "hk-ai-secondary-row";
-  aiCardSecondary.appendChild(aiMindmapCopyBtn);
-  aiCardSecondary.appendChild(aiMindmapViewBtn);
-  aiCardSecondary.appendChild(actionGuidedReadingBtn);
-  aiCardSecondary.appendChild(aiClearPageBtn);
-
-  aiCard.appendChild(aiCardHint);
-  aiCard.appendChild(aiStep1);
-  aiCard.appendChild(aiStep2);
-  aiCard.appendChild(aiCardActions);
-  aiCard.appendChild(aiStatus);
-  aiCard.appendChild(aiCardSecondary);
+  toolCard.appendChild(openGuideBtn);
+  toolCard.appendChild(aiStatus);
 
   // ── 色票管理（原本在 popup，重做後放進設定抽屜）────────
   const paletteSection = document.createElement("div");
@@ -5401,42 +4164,23 @@ const ensureHighlightPanel = () => {
   drawerCloseBtn.addEventListener("click", () => toggleDrawer(false));
 
   // ── Assemble panel ─────────────────────────────────────
-  // AI 卡片放在最外層（header 下、分頁上），任何分頁都看得到、隨時可貼
   panel.appendChild(header);
-  panel.appendChild(aiCard);
+  panel.appendChild(toolCard);
   panel.appendChild(tabs);
-  aiTabPanel.appendChild(aiNoteSection);
-  // 摘要分頁下方：本頁重點清單，點一筆跳到原文並閃爍，方便對照快讀。
-  const summaryJumpList = document.createElement("div");
-  summaryJumpList.className = "hk-summary-jump";
-  summaryJumpList.style.display = "none";
-  aiTabPanel.appendChild(summaryJumpList);
   pageTabPanel.appendChild(pageOrphanNotice);
   pageTabPanel.appendChild(pageList);
   pageTabPanel.appendChild(pagePlaceholder);
   searchTabPanel.appendChild(searchControls);
   searchTabPanel.appendChild(searchList);
   searchTabPanel.appendChild(searchPlaceholder);
-  // archive tabpanel kept in memory (unused) for backwards compat with legacy
-  // state values; ai tabpanel now hosts the visible「摘要」tab.
   panel.appendChild(pageTabPanel);
   panel.appendChild(searchTabPanel);
-  panel.appendChild(aiTabPanel);
   panel.appendChild(drawer);
 
   highlightPanel = panel;
   highlightPanelEls = {
     container: panel,
     dragHandle: header,
-    aiCard,
-    getAiMode: () => aiMode,
-    aiCopyBtn,
-    aiPasteArea,
-    aiApplyBtn,
-    aiDirectBtn,
-    aiMindmapCopyBtn,
-    aiMindmapViewBtn,
-    actionGuidedReadingBtn,
     settingsBtn,
     drawer,
     drawerCloseBtn,
@@ -5463,12 +4207,6 @@ const ensureHighlightPanel = () => {
     exportStatus,
     archiveStatus,
     aiSettingsSection,
-    aiNoteSection,
-    aiNoteContent,
-    aiNoteMeta,
-    aiNoteCopyBtn,
-    aiNoteEmpty,
-    summaryJumpList,
     aiProviderSelect,
     aiModelSelect,
     aiPromptField: promptTextarea,
@@ -5477,14 +4215,7 @@ const ensureHighlightPanel = () => {
     aiGeminiKeyInput: geminiInput,
     aiKeyGroups: [openaiGroup, geminiGroup, chatgptGroup],
     aiWebInfo: chatgptInfo,
-    aiChatGPTCancelBtn: chatgptCancelBtn,
-    aiGenerateBtn,
-    aiAutoHighlightBtn,
     aiStatus,
-    aiChatGPTHlPasteArea: chatgptHlPasteArea,
-    aiChatGPTHlApplyBtn: chatgptHlApplyBtn,
-    aiChatGPTNotePasteArea: chatgptNotePasteArea,
-    aiChatGPTNoteApplyBtn: chatgptNoteApplyBtn,
     aiCatList: catList,
     aiPreviewCheckbox: previewCheckbox,
     aiSelOnlyCheckbox: selOnlyCheckbox,
@@ -5495,26 +4226,20 @@ const ensureHighlightPanel = () => {
     },
     tabButtons: {
       page: pageTabBtn,
-      archive: archiveTabBtn,
       search: searchTabBtn,
-      ai: aiTabBtn,
     },
     tabPanels: {
       page: pageTabPanel,
-      archive: archiveTabPanel,
       search: searchTabPanel,
-      ai: aiTabPanel,
     },
   };
 
   aiProviderSelect.addEventListener("change", (event) => {
     const v = event.target.value;
     const value = ["gemini", "chatgpt", "gemini-web"].includes(v) ? v : "openai";
-    if (isChatGPTBridgeWaiting) cancelChatGPTBridge();
     aiSettings.provider = value;
     populateAiModelSelect();
     updateAiKeyVisibility();
-    updateGenerateAvailability();
     persistAISettings();
   });
 
@@ -5529,13 +4254,11 @@ const ensureHighlightPanel = () => {
 
   openaiInput.addEventListener("input", (event) => {
     aiSettings.openaiKey = event.target.value;
-    updateGenerateAvailability();
     schedulePersistAISettings();
   });
 
   geminiInput.addEventListener("input", (event) => {
     aiSettings.geminiKey = event.target.value;
-    updateGenerateAvailability();
     schedulePersistAISettings();
   });
 
@@ -5549,9 +4272,6 @@ const ensureHighlightPanel = () => {
     schedulePersistAISettings();
   });
 
-  aiGenerateBtn.addEventListener("click", handleGenerateAiNote);
-  aiAutoHighlightBtn.addEventListener("click", handleGenerateAiHighlights);
-
   document.body.appendChild(panel);
   applyHighlightPanelSideClasses();
   applyHighlightPanelTabState();
@@ -5563,9 +4283,6 @@ const ensureHighlightPanel = () => {
     .then(() => renderPanelPalette())
     .catch(() => {});
   setAiPanelStatus("");
-  getStoredMindmaps()
-    .then((maps) => updateMindmapAvailability(Boolean(maps[pageKey])))
-    .catch(() => {});
   return panel;
 };
 
@@ -5604,44 +4321,6 @@ const renderPanelViews = () => {
   }
 
   applyHighlightPanelTabState();
-  updateAiNoteSection(highlightPanelState.notesByPage[pageKey]);
-  renderSummaryJumpList(pageEntries);
-};
-
-// 摘要分頁下方的「跳到重點」清單：列出本頁標註，點擊捲動並閃爍原文。
-const renderSummaryJumpList = (entries) => {
-  const el = highlightPanelEls?.summaryJumpList;
-  if (!el) return;
-  el.innerHTML = "";
-  const list = Array.isArray(entries) ? entries.filter((e) => e?.id) : [];
-  if (!list.length) {
-    el.style.display = "none";
-    return;
-  }
-  el.style.display = "flex";
-  const head = document.createElement("div");
-  head.className = "hk-summary-jump-head";
-  head.textContent = t("panel.summaryJumpHeading", { count: list.length });
-  el.appendChild(head);
-  list.forEach((entry) => {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "hk-summary-jump-item";
-    if (entry.color) item.style.borderLeftColor = entry.color;
-    const txt = document.createElement("span");
-    txt.className = "hk-summary-jump-text";
-    txt.textContent = (entry.text || "").trim();
-    item.appendChild(txt);
-    const reason = (entry.note || "").trim();
-    if (reason) {
-      const note = document.createElement("span");
-      note.className = "hk-summary-jump-note";
-      note.textContent = reason;
-      item.appendChild(note);
-    }
-    item.addEventListener("click", () => focusHighlightElement(entry.id));
-    el.appendChild(item);
-  });
 };
 
 const renderHighlightPanel = async () => {
@@ -5689,12 +4368,10 @@ const openHighlightPanel = async (options = {}) => {
     applyHighlightPanelSideClasses();
   }
 
-  if (view === "ai-note") {
-    highlightPanelState.activeTab = "ai-note";
+  if (view === "settings") {
+    highlightPanelEls?.toggleDrawer?.(true);
   } else if (view === "search") {
     highlightPanelState.activeTab = "search";
-  } else if (view === "archive") {
-    highlightPanelState.activeTab = "archive";
   } else if (view === "highlights" || view === "page") {
     highlightPanelState.activeTab = "page";
   }
@@ -6074,19 +4751,6 @@ chrome.storage?.onChanged.addListener((changes, areaName) => {
   }
   if (changes.hkGeneratedNotes) {
     highlightPanelState.notesByPage = changes.hkGeneratedNotes.newValue ?? {};
-    if (highlightPanelVisible) {
-      updateAiNoteSection(highlightPanelState.notesByPage[pageKey]);
-    }
-  }
-  if (changes[CHATGPT_RESPONSE_KEY]) {
-    const responseData = changes[CHATGPT_RESPONSE_KEY].newValue;
-    if (responseData?.sourceUrl === pageKey && isChatGPTBridgeWaiting) {
-      handleChatGPTResponse(responseData);
-    }
-  }
-  if (changes[MINDMAP_STORAGE_KEY]) {
-    const maps = changes[MINDMAP_STORAGE_KEY].newValue ?? {};
-    updateMindmapAvailability(Boolean(maps[pageKey]));
   }
   {
     const affectedKeys = Object.keys(changes);
@@ -7740,17 +6404,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
         const requestPageKey = pageKey;
-        const pageData = {
-          title: document.title,
-          url: requestPageKey,
-          pageText: getPagePlainText(),
-          highlights: await collectPageHighlights(),
-        };
+        const pageData = await collectGuidePageData();
         const palette = await refreshPaletteFromStorage();
+        const existingTags = await collectExistingTagsByUsage();
         if (requestPageKey !== pageKey) throw new Error(t("sidebar.extractError"));
         sendResponse({
           success: true,
-          prompt: buildReadingGuidePrompt(pageData, palette),
+          prompt: buildReadingGuidePrompt(pageData, palette, existingTags),
           pageKey: requestPageKey,
           provider: aiSettings.provider,
           configured: ["chatgpt", "gemini-web"].includes(aiSettings.provider) || Boolean(
@@ -7778,15 +6438,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const apiKey = provider === "openai" ? aiSettings.openaiKey?.trim() : aiSettings.geminiKey?.trim();
         if (!isLikelyProviderApiKey(provider, apiKey)) throw new Error(t("ai.errNoApiKey"));
         const requestPageKey = pageKey;
-        const pageData = {
-          title: document.title,
-          url: requestPageKey,
-          pageText: getPagePlainText(),
-          highlights: await collectPageHighlights(),
-        };
+        const pageData = await collectGuidePageData();
         const palette = await refreshPaletteFromStorage();
+        const existingTags = await collectExistingTagsByUsage();
         if (requestPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
-        const prompt = buildReadingGuidePrompt(pageData, palette);
+        const prompt = buildReadingGuidePrompt(pageData, palette, existingTags);
         const model = provider === "openai" ? aiSettings.openaiModel : aiSettings.geminiModel;
         const response = provider === "openai"
           ? await callOpenAI(apiKey, prompt)
@@ -7806,6 +6462,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (message.pageKey && message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
         const text = typeof message.text === "string" ? message.text.trim() : "";
         if (!text) throw new Error(t("sidebar.parseError"));
+        const shared = HkParsers.parseSharedMarkdown(HkParsers.unescapeAiMarkdown(text));
+        if (shared) {
+          sendResponse(await importSharedMarkdown(shared));
+          return;
+        }
         const requestPageKey = pageKey;
         const provider = message.provider === "gemini-web" ? "gemini-web" : "chatgpt";
         const model = provider === "gemini-web" ? "gemini-web" : "chatgpt-web";
@@ -7821,18 +6482,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
         const entries = await getStoredHighlights();
-        const targetText = normalizeWhitespace(message.text || "").toLowerCase();
+        const targetText = HkParsers.looseKey(message.text || "");
         const entry = entries.find((item) => {
-          if (normalizeWhitespace(item?.text || "").toLowerCase() !== targetText) return false;
+          if (HkParsers.looseKey(item?.text || "") !== targetText) return false;
           if (message.kind === "term") return item.kind === "term";
           return !message.kind || item.kind === "passage" || !item.kind;
         });
         const preview = previewData.find((item) =>
-          normalizeWhitespace(item.data?.text || "").toLowerCase() === targetText &&
+          HkParsers.looseKey(item.data?.text || "") === targetText &&
           (!message.kind || item.data?.kind === message.kind)
         );
         const targetEntry = entry || preview?.data;
-        if (!targetEntry) throw new Error(t("sidebar.noMatch"));
+        if (!targetEntry) {
+          // 名詞落在重點句裡時沒有自己的標記，改跳到包含它的那個標記。
+          const container = [...document.querySelectorAll(`.${HIGHLIGHT_CLASS}`)].find((el) =>
+            HkParsers.looseKey(el.textContent || "").includes(targetText)
+          );
+          if (!container || !targetText) throw new Error(t("sidebar.noMatch"));
+          focusHighlightElement(container.getAttribute(HIGHLIGHT_ATTR));
+          sendResponse({ success: true });
+          return;
+        }
         const target = document.querySelector(`[${HIGHLIGHT_ATTR}="${targetEntry.id}"]`);
         if (!target) throw new Error(t("sidebar.noMatch"));
         focusHighlightElement(targetEntry.id);
@@ -7851,7 +6521,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           title: document.title,
           url: pageKey,
           pageText: getPagePlainText(),
-          highlights,
+          // 存了但頁面上找不到標記的，讓側欄標示出來，不要看起來一切正常。
+          highlights: highlights.map((item) => ({
+            ...item,
+            notOnPage: !document.querySelector(`[${HIGHLIGHT_ATTR}="${item.id}"]`),
+          })),
           previewHighlights: previewData.map((item) => item.data),
         };
         sendResponse({ success: true, data: payload });
@@ -7863,94 +6537,29 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "OPEN_AI_SETTINGS") {
-    openHighlightPanel({ view: "ai-note" });
+    openHighlightPanel({ view: "settings" });
     sendResponse({ success: true });
     return false;
   }
-  if (message?.type === "BUILD_AI_HIGHLIGHT_PROMPT") {
+  if (message?.type === "DELETE_GUIDE_ITEM" || message?.type === "DELETE_PAGE_NOTES") {
     (async () => {
       try {
-        const pageData = {
-          title: document.title,
-          url: pageKey,
-          pageText: getPagePlainText(),
-          highlights: await collectPageHighlights(),
-        };
-        const latestPalette = await refreshPaletteFromStorage();
-        const usageCounts = await collectColorUsageCounts();
-        const preferredPalette = sortPaletteByUsage(latestPalette, usageCounts);
-        const existingTags = await collectExistingTagsByUsage();
-        // 與頁面面板共用同一個 Prompt：一次取得重點＋摘要＋標籤。
-        const prompt = buildCombinedPrompt(
-          pageData,
-          preferredPalette,
-          usageCounts,
-          existingTags
-        );
-        sendResponse({ success: true, prompt, count: pageData.highlights.length });
+        if (message.pageKey && message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
+        if (message.type === "DELETE_GUIDE_ITEM") await deleteGuideItem(message);
+        else await deletePageNotes();
+        sendResponse({ success: true });
       } catch (error) {
-        console.debug("建立畫重點 Prompt 失敗", error);
-        sendResponse({ success: false, error: error?.message || "無法建立 Prompt" });
+        console.debug("刪除筆記失敗", error);
+        sendResponse({ success: false, error: error?.message });
       }
     })();
     return true;
   }
-  if (message?.type === "BUILD_MINDMAP_PROMPT") {
-    // popup 的「改複製心智圖 Prompt」：與面板的心智圖鈕共用同一組 Prompt。
-    (async () => {
-      try {
-        const pageData = {
-          title: document.title,
-          url: pageKey,
-          pageText: getPagePlainText(),
-          highlights: await collectPageHighlights(),
-        };
-        const prompt = buildMindmapPrompt(pageData);
-        sendResponse({ success: true, prompt });
-      } catch (error) {
-        console.debug("建立心智圖 Prompt 失敗", error);
-        sendResponse({ success: false, error: error?.message || "無法建立 Prompt" });
-      }
-    })();
-    return true;
-  }
-  if (message?.type === "APPLY_AI_RESPONSE") {
-    // popup 直接貼上 AI 回覆 → 不用開面板就套用（重點／摘要／心智圖／標籤）。
-    (async () => {
-      try {
-        const text = typeof message.text === "string" ? message.text.trim() : "";
-        if (!text) throw new Error(t("ai.errUnrecognized"));
-        const res = await applyAiResponseSections(text, {});
-        if (!res.mindmap) await refreshHighlightPanelIfVisible();
-        const summary = summarizeAiApplyResult(res);
-        setAiPanelStatus(summary);
-        sendResponse({ success: true, summary });
-      } catch (error) {
-        console.debug("套用貼上的 AI 回覆失敗", error);
-        sendResponse({ success: false, error: error?.message || t("ai.errImport") });
-      }
-    })();
-    return true;
-  }
-  if (message?.type === "SHOW_AI_NOTE") {
-    const payload = message.payload || {};
-    const targetKey = payload.url || pageKey;
-    highlightPanelState.notesByPage = {
-      ...highlightPanelState.notesByPage,
-      [targetKey]: payload,
-    };
-    if (message.focusPanel) {
-      highlightPanelState.activeKey = targetKey;
-      highlightPanelState.activeTab = "ai-note";
-    }
-    openHighlightPanel({
-      pageKey: targetKey,
-      view: message.focusPanel ? "ai-note" : highlightPanelState.activeTab,
-    }).then(() => {
-      updateAiNoteSection(payload);
-    });
-    sendResponse?.({ success: true });
-    return true;
+  if (message?.type === "START_GUIDED_READING") {
+    const hasSteps = collectGuidedSteps().length > 0;
+    if (hasSteps) startGuidedReading();
+    sendResponse({ success: hasSteps });
+    return false;
   }
   if (message?.type === "OPEN_PAGE_PANEL") {
     openHighlightPanel({
@@ -7978,23 +6587,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((error) =>
         sendResponse({ success: false, error: error?.message })
       );
-    return true;
-  }
-  if (message?.type === "TRIGGER_AI_AUTO_HIGHLIGHT") {
-    openHighlightPanel({ view: "ai-note" })
-      .then(() => {
-        highlightPanelState.activeTab = "ai-note";
-        applyHighlightPanelTabState();
-        return handleGenerateAiHighlights();
-      })
-      .then(() => sendResponse({ success: true }))
-      .catch((error) => sendResponse({ success: false, error: error?.message }));
-    return true;
-  }
-  if (message?.type === "CLEAR_PAGE_HIGHLIGHTS") {
-    clearPageHighlights()
-      .then(() => sendResponse({ success: true }))
-      .catch((error) => sendResponse({ success: false, error: error?.message }));
     return true;
   }
   if (message?.type === "APPLY_HIGHLIGHT") {
@@ -8442,7 +7034,7 @@ const ensureNoteTooltip = () => {
 const showNoteTooltip = (text, targetEl) => {
   if (!text || !targetEl) return;
   const tooltip = ensureNoteTooltip();
-  tooltip.textContent = text;
+  tooltip.textContent = HkParsers.breakNoteLines(text);
 
   // measure while invisible to avoid position flash
   tooltip.style.visibility = "hidden";
@@ -8528,7 +7120,7 @@ const renderGuidedBar = () => {
 
   bar.querySelector(".hk-guided-dot").style.backgroundColor = color;
   bar.querySelector(".hk-guided-text").textContent = text.length > 80 ? text.slice(0, 80) + "…" : text;
-  bar.querySelector(".hk-guided-note").textContent = note || "";
+  bar.querySelector(".hk-guided-note").textContent = HkParsers.breakNoteLines(note);
   bar.querySelector(".hk-guided-note").style.display = note ? "block" : "none";
   bar.querySelector(".hk-guided-counter").textContent = `${index + 1} / ${steps.length}`;
   bar.querySelector(".hk-guided-prev").disabled = index === 0;
@@ -8808,183 +7400,3 @@ const handleBulkImportChange = (event) => {
   const files = event.target.files;
   mergeBulkImportPayload(files);
 };
-
-// ── ChatGPT Web Bridge (runs on chatgpt.com) ─────────────
-const scrapeChatGPTResponse = () => {
-  const selectors = [
-    '[data-message-author-role="assistant"] .markdown',
-    '[data-message-author-role="assistant"]',
-    'article[data-testid*="conversation-turn"]',
-  ];
-  for (const sel of selectors) {
-    const els = document.querySelectorAll(sel);
-    if (els.length) {
-      const text = els[els.length - 1].innerText?.trim();
-      if (text) return text;
-    }
-  }
-  return null;
-};
-
-const autoPastePromptToChatGPT = (prompt) => {
-  const SELECTORS = [
-    "#prompt-textarea",
-    'div[contenteditable="true"][data-id]',
-    'div[contenteditable="true"].ProseMirror',
-    'div[contenteditable="true"]',
-  ];
-  const findInput = () => {
-    for (const sel of SELECTORS) {
-      const el = document.querySelector(sel);
-      if (el) return el;
-    }
-    return null;
-  };
-  const tryPaste = () => {
-    const el = findInput();
-    if (!el) return false;
-    el.focus();
-    if (el.tagName === "TEXTAREA") {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-      if (setter) {
-        setter.call(el, prompt);
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        return true;
-      }
-    } else {
-      el.textContent = "";
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-      document.execCommand("insertText", false, prompt);
-      return true;
-    }
-    return false;
-  };
-  if (!tryPaste()) {
-    let attempts = 0;
-    const timer = setInterval(() => {
-      if (tryPaste() || ++attempts > 20) clearInterval(timer);
-    }, 500);
-  }
-};
-
-const showChatGPTImportBanner = (request) => {
-  const existing = document.getElementById("hk-chatgpt-banner");
-  if (existing) existing.remove();
-
-  const banner = document.createElement("div");
-  banner.id = "hk-chatgpt-banner";
-  banner.className = "hk-chatgpt-banner";
-  banner.style.position = "fixed";
-
-  const info = document.createElement("span");
-  info.className = "hk-chatgpt-banner-info";
-  info.textContent =
-    request.type === "note"
-      ? t("bridge.bannerNote")
-      : t("bridge.bannerHighlights");
-
-  const copyBtn = document.createElement("button");
-  copyBtn.type = "button";
-  copyBtn.className = "hk-chatgpt-import-btn";
-  copyBtn.style.background = "#2563eb";
-  copyBtn.textContent = t("bridge.copyPrompt");
-  copyBtn.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(request.prompt);
-      copyBtn.textContent = t("bridge.copied");
-      setTimeout(() => { copyBtn.textContent = "複製 Prompt"; }, 2000);
-    } catch (_e) {
-      copyBtn.textContent = t("bridge.copyFail");
-    }
-  });
-
-  const importBtn = document.createElement("button");
-  importBtn.type = "button";
-  importBtn.className = "hk-chatgpt-import-btn";
-  importBtn.textContent = request.type === "note" ? t("bridge.importNote") : t("bridge.importHighlights");
-
-  importBtn.addEventListener("click", async () => {
-    const response = scrapeChatGPTResponse();
-    if (!response) {
-      importBtn.textContent = t("bridge.noResponse");
-      setTimeout(() => {
-        importBtn.textContent = request.type === "note" ? t("bridge.importNote") : t("bridge.importHighlights");
-      }, 2500);
-      return;
-    }
-    importBtn.disabled = true;
-    importBtn.textContent = t("bridge.importing");
-    try {
-      await chrome.storage.local.set({
-        [CHATGPT_RESPONSE_KEY]: {
-          requestId: request.requestId,
-          type: request.type,
-          text: response,
-          sourceUrl: request.sourceUrl,
-        },
-      });
-      banner.innerHTML = "";
-      const doneMsg = document.createElement("span");
-      doneMsg.style.cssText = "margin: auto; font-weight: 600;";
-      doneMsg.textContent = t("bridge.importSuccess");
-      banner.appendChild(doneMsg);
-      banner.style.background = "#166534";
-    } catch (_err) {
-      importBtn.disabled = false;
-      importBtn.textContent = t("bridge.importFail");
-    }
-  });
-
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.className = "hk-chatgpt-close-btn";
-  closeBtn.title = t("bridge.closeTitle");
-  closeBtn.textContent = "✕";
-  closeBtn.addEventListener("click", async () => {
-    banner.remove();
-    try {
-      await chrome.storage.local.remove([CHATGPT_REQUEST_KEY]);
-    } catch (_e) {}
-  });
-
-  banner.appendChild(info);
-  banner.appendChild(copyBtn);
-  banner.appendChild(importBtn);
-  banner.appendChild(closeBtn);
-  document.body.appendChild(banner);
-
-  // Try to auto-fill the ChatGPT input box
-  autoPastePromptToChatGPT(request.prompt);
-};
-
-const initChatGPTBridgePage = async () => {
-  if (!window.location.hostname.endsWith("chatgpt.com")) return;
-
-  // Check on page load (newly opened tab)
-  try {
-    const stored = await chrome.storage.local.get(CHATGPT_REQUEST_KEY);
-    const request = stored?.[CHATGPT_REQUEST_KEY];
-    if (request?.requestId) showChatGPTImportBanner(request);
-  } catch (_e) {}
-
-  // Also react when already-open tab receives a new request
-  chrome.storage?.onChanged.addListener((changes, area) => {
-    if (area !== "local") return;
-    if (changes[CHATGPT_REQUEST_KEY]) {
-      const request = changes[CHATGPT_REQUEST_KEY].newValue;
-      if (request?.requestId) {
-        showChatGPTImportBanner(request);
-      } else {
-        document.getElementById("hk-chatgpt-banner")?.remove();
-      }
-    }
-  });
-};
-
-initChatGPTBridgePage();

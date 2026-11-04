@@ -1,4 +1,4 @@
-/* 共用工具：網址正規化（popup 與 contentScript 共用，避免各複製一份）。
+/* 共用工具：網址正規化（側欄、manager 與 contentScript 共用，避免各複製一份）。
    以一般 script 在各情境最先載入，掛在 window.HkUrlKey。 */
 (function (root) {
   // 舊版追蹤／信件參數清單（保留匯出，向後相容；新版改用白名單比對）。

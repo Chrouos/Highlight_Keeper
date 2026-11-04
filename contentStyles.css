@@ -39,57 +39,13 @@
 }
 
 /* ── 摘要分頁：跳到重點清單 ───────────────────────────── */
-.hk-summary-jump {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 4px;
-}
-.hk-summary-jump-head {
-  font-family: var(--hk-serif);
-  font-style: italic;
-  font-size: calc(11.5px * var(--hk-panel-font-scale, 1));
-  color: var(--hk-ink-soft);
-  margin-bottom: 2px;
-}
-.hk-summary-jump-item {
-  appearance: none;
-  text-align: left;
-  border: 1px solid var(--hk-rule);
-  border-left: 3px solid var(--hk-accent);
-  border-radius: 6px;
-  background: var(--hk-paper-lit);
-  padding: 8px 10px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  transition: background 0.15s, border-color 0.15s;
-}
-.hk-summary-jump-item:hover {
-  background: var(--hk-accent-lit);
-  border-color: var(--hk-accent-soft);
-}
-.hk-summary-jump-text {
-  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
-  line-height: 1.5;
-  color: var(--hk-ink);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.hk-summary-jump-note {
-  font-size: calc(11px * var(--hk-panel-font-scale, 1));
-  line-height: 1.4;
-  color: var(--hk-ink-soft);
-}
 
 /* ── Highlight mark ───────────────────────────────────── */
 .hk-highlight {
   background-color: var(--hk-highlight-color, #fff5b8) !important;
   background-image: none !important;
-  color: inherit !important;
+  /* 標註是淺色底：深色網頁的淺色字疊上去會看不見，文字固定用深色。 */
+  color: #1f1e1b !important;
   border-radius: 2px;
   padding: 0 0.1em;
   box-decoration-break: clone;
@@ -109,6 +65,7 @@
    set their own background / pill / outline; neutralise them so the highlight
    reads as one continuous mark instead of looking split at links & punctuation. */
 .hk-highlight * {
+  color: inherit !important;
   background-color: transparent !important;
   background-image: none !important;
   box-shadow: none !important;
@@ -643,173 +600,12 @@
 
 /* ── Primary AI action strip ──────────────────────────── */
 /* ── 統一 AI 卡片（複製 → 貼到 GPT → 貼回） ──────────────── */
-.hk-ai-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 18px 16px;
-  border-bottom: 1px solid var(--hk-rule);
-  background: var(--hk-paper-lit);
-}
 
 /* 步驟列：圓形編號 + 主要操作 */
-.hk-ai-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.hk-ai-step-num {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  margin-top: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1px solid var(--hk-rule-strong);
-  background: var(--hk-paper);
-  color: var(--hk-accent);
-  font-family: var(--hk-serif);
-  font-size: calc(12px * var(--hk-panel-font-scale, 1));
-  font-weight: 700;
-  font-style: italic;
-}
-
-.hk-ai-copy-btn {
-  appearance: none;
-  flex: 1;
-  border: none;
-  border-radius: 9px;
-  padding: 9px 14px;
-  cursor: pointer;
-  font-family: var(--hk-sans);
-  font-size: calc(13px * var(--hk-panel-font-scale, 1));
-  font-weight: 600;
-  /* !important：部分網站有 button{background:none!important} 之類的全域樣式，
-     會把主要按鈕的底色洗掉導致「複製 Prompt」看起來不見了，這裡強制固定。 */
-  color: #fff !important;
-  background: var(--hk-accent) !important;
-  transition: background 0.15s, transform 0.05s;
-}
-
-.hk-ai-copy-btn:hover { background: var(--hk-accent-soft) !important; }
-.hk-ai-copy-btn:active { transform: translateY(1px); }
-.hk-ai-copy-btn.is-done { background: #2f7d32 !important; }
-
-.hk-ai-hint {
-  margin: 0;
-  font-family: var(--hk-serif);
-  font-style: italic;
-  font-size: calc(11.5px * var(--hk-panel-font-scale, 1));
-  color: var(--hk-ink-faint);
-  line-height: 1.4;
-}
 
 /* status now lives inside the card — strip the old banner chrome */
-.hk-ai-card .hk-panel-status-banner {
-  padding: 0;
-  border: none;
-  background: transparent;
-}
-
-.hk-ai-paste {
-  flex: 1;
-  resize: vertical;
-  min-height: 40px;
-  max-height: 200px;
-  padding: 8px 10px;
-  border: 1.5px dashed var(--hk-rule-strong);
-  border-radius: 8px;
-  background: var(--hk-paper);
-  color: var(--hk-ink);
-  font-family: var(--hk-sans);
-  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
-  line-height: 1.5;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.hk-ai-paste::placeholder { color: var(--hk-ink-faint); }
-
-.hk-ai-paste:focus-visible {
-  outline: none;
-  border-color: var(--hk-accent-soft);
-  border-style: solid;
-  background: var(--hk-paper-lit);
-  box-shadow: 0 0 0 3px rgba(180, 109, 46, 0.15);
-}
-
-.hk-ai-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.hk-ai-apply {
-  appearance: none;
-  flex: 1;
-  min-width: 88px;
-  border: 1px solid var(--hk-accent);
-  border-radius: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-  font-family: var(--hk-sans);
-  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
-  font-weight: 600;
-  color: var(--hk-accent);
-  background: transparent;
-  transition: background 0.15s, color 0.15s;
-}
-
-.hk-ai-apply:hover { background: var(--hk-accent); color: #fff; }
-
-.hk-ai-direct {
-  appearance: none;
-  border: 1px dashed var(--hk-rule);
-  border-radius: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-  font-family: var(--hk-sans);
-  font-size: calc(12px * var(--hk-panel-font-scale, 1));
-  color: var(--hk-ink-soft);
-  background: transparent;
-  transition: border-color 0.15s, color 0.15s;
-}
-
-.hk-ai-direct:hover { border-color: var(--hk-accent-soft); color: var(--hk-accent); }
-.hk-ai-direct:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.hk-ai-secondary-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-}
-
-.hk-ai-secondary {
-  appearance: none;
-  border: none;
-  background: transparent;
-  padding: 4px;
-  cursor: pointer;
-  font-family: var(--hk-sans);
-  font-size: calc(12px * var(--hk-panel-font-scale, 1));
-  font-weight: 500;
-  color: var(--hk-ink-soft);
-  transition: color 0.15s;
-}
-
-.hk-ai-secondary:hover { color: var(--hk-accent); }
 
 /* 清除本頁：用危險色提示，避免誤點後才發現 */
-.hk-ai-clear-page { color: var(--hk-danger, #b3261e); margin-left: auto; }
-.hk-ai-clear-page:hover { color: #8c1d18; }
-
-.hk-ai-mindmap-view {
-  color: var(--hk-accent);
-  font-weight: 600;
-}
 
 /* ── Tabs (typographic segmented) ─────────────────────── */
 .hk-panel-tabs {
@@ -862,10 +658,6 @@
 }
 
 /* Old 4-tab buttons hidden — kept in DOM for compat but no visual */
-.hk-panel-tab-btn[data-tab-legacy] {
-  display: none;
-}
-
 .hk-panel-tab-content {
   display: none;
   flex-direction: column;
@@ -891,11 +683,6 @@
 .hk-panel-tab-content .hk-panel-list { flex: 1; min-height: 0; }
 /* 摘要分頁：自然高度、整個分頁捲動（摘要在上、跳到重點清單在下），
    拿掉常駐卡時的 260px 上限，字放大些好讀 */
-.hk-panel-tab-content-ai .hk-panel-ai-note-content {
-  max-height: none;
-  font-size: calc(14px * var(--hk-panel-font-scale, 1));
-  line-height: 1.65;
-}
 
 /* ── Search & filter controls ─────────────────────────── */
 .hk-panel-controls {
@@ -1346,54 +1133,7 @@
   line-height: 1.55;
 }
 
-.hk-panel-ai-chatgpt-paste-area {
-  min-height: 60px;
-  font-size: calc(12px * var(--hk-panel-font-scale, 1));
-}
-
 /* In-drawer generate buttons — secondary style */
-.hk-panel-ai-generate,
-.hk-panel-ai-chatgpt-apply-btn {
-  appearance: none;
-  border: 1px solid var(--hk-ink);
-  border-radius: 2px;
-  /* !important：防止有 button{background:none!important} 的網站把底色洗掉，
-     使白色文字落在透明底上而整顆按鈕「消失」。 */
-  background: var(--hk-ink) !important;
-  color: var(--hk-paper-lit) !important;
-  font-family: var(--hk-sans);
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 9px 16px;
-  font-size: calc(11px * var(--hk-panel-font-scale, 1));
-  cursor: pointer;
-  width: 100%;
-  transition: background 0.18s, color 0.18s, border-color 0.18s;
-}
-
-.hk-panel-ai-generate:disabled,
-.hk-panel-ai-chatgpt-apply-btn:disabled {
-  border-color: var(--hk-rule-strong);
-  background: var(--hk-paper) !important;
-  color: var(--hk-ink-faint) !important;
-  cursor: not-allowed;
-}
-
-.hk-panel-ai-generate:not(:disabled):hover,
-.hk-panel-ai-generate:not(:disabled):focus-visible,
-.hk-panel-ai-chatgpt-apply-btn:not(:disabled):hover,
-.hk-panel-ai-chatgpt-apply-btn:not(:disabled):focus-visible {
-  background: var(--hk-accent) !important;
-  border-color: var(--hk-accent);
-  color: var(--hk-paper-lit) !important;
-  outline: none;
-}
-
-.hk-panel-ai-auto-highlight {
-  border-color: var(--hk-accent);
-  background: var(--hk-accent);
-}
 
 .hk-panel-ai-chatgpt-info {
   margin: 0;
@@ -1406,112 +1146,7 @@
   color: var(--hk-ink-soft);
 }
 
-.hk-panel-ai-chatgpt-cancel {
-  align-self: flex-start;
-  margin-top: 6px;
-  border: 1px solid var(--hk-rule-strong);
-  background: transparent;
-  padding: 4px 12px;
-  font-family: var(--hk-sans);
-  font-size: calc(11px * var(--hk-panel-font-scale, 1));
-  color: var(--hk-ink-soft);
-  cursor: pointer;
-  border-radius: 2px;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.hk-panel-ai-chatgpt-cancel:hover { color: var(--hk-accent); border-color: var(--hk-accent); }
-
 /* ── AI note display ──────────────────────────────────── */
-.hk-panel-ai-note {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
-  border: 1px solid var(--hk-rule);
-  border-left: 3px solid var(--hk-accent);
-  background: var(--hk-paper-lit);
-}
-
-.hk-panel-ai-note-header {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-
-
-.hk-panel-ai-note-title {
-  font-family: var(--hk-serif);
-  font-size: calc(13px * var(--hk-panel-font-scale, 1));
-  font-weight: 600;
-  font-style: italic;
-  color: var(--hk-ink);
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-
-.hk-panel-ai-note-meta {
-  font-family: var(--hk-mono);
-  font-size: calc(10px * var(--hk-panel-font-scale, 1));
-  color: var(--hk-ink-faint);
-  margin-left: auto;
-}
-
-.hk-panel-ai-note-copy {
-  appearance: none;
-  border: 1px solid var(--hk-rule-strong);
-  border-radius: 2px;
-  background: transparent;
-  color: var(--hk-ink-soft);
-  font-family: var(--hk-sans);
-  font-size: calc(11px * var(--hk-panel-font-scale, 1));
-  font-weight: 500;
-  padding: 4px 10px;
-  cursor: pointer;
-  letter-spacing: 0.02em;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
-}
-
-.hk-panel-ai-note-copy:hover:not(:disabled),
-.hk-panel-ai-note-copy:focus-visible:not(:disabled) {
-  border-color: var(--hk-accent);
-  color: var(--hk-accent);
-  outline: none;
-}
-
-.hk-panel-ai-note-copy:disabled {
-  border-color: var(--hk-rule);
-  color: var(--hk-ink-faint);
-  cursor: not-allowed;
-}
-
-.hk-panel-ai-note-copy.is-error {
-  border-color: var(--hk-danger);
-  color: var(--hk-danger);
-}
-
-.hk-panel-ai-note-content {
-  display: none;
-  margin: 0;
-  font-family: var(--hk-serif);
-  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--hk-ink);
-  max-height: 260px;
-  overflow-y: auto;
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-
-.hk-panel-ai-note-empty {
-  font-family: var(--hk-serif);
-  font-style: italic;
-  font-size: calc(13px * var(--hk-panel-font-scale, 1));
-  color: var(--hk-ink-faint);
-}
 
 /* ── Highlight list — editorial card style ───────────── */
 .hk-panel-list {
@@ -2050,74 +1685,6 @@
 }
 
 /* ── ChatGPT bridge floating card ─────────────────────── */
-.hk-chatgpt-banner {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 2147483647;
-  background: #1a7f64;
-  color: #fff;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px 16px;
-  border-radius: 14px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 13px;
-  line-height: 1.5;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.16);
-  max-width: 280px;
-  min-width: 220px;
-}
-
-.hk-chatgpt-banner-info {
-  font-size: 13px;
-  line-height: 1.55;
-  white-space: pre-line;
-}
-
-.hk-chatgpt-import-btn {
-  background: #fff;
-  color: #1a7f64;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  width: 100%;
-  text-align: center;
-  transition: opacity 0.15s ease;
-}
-
-.hk-chatgpt-import-btn:hover:not(:disabled) {
-  opacity: 0.85;
-}
-
-.hk-chatgpt-import-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.hk-chatgpt-close-btn {
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.7);
-  border: none;
-  font-size: 15px;
-  cursor: pointer;
-  padding: 2px 5px;
-  line-height: 1;
-  border-radius: 4px;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-
-.hk-chatgpt-close-btn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.18);
-}
 
 /* info text in the AI settings panel for chatgpt provider */
 .hk-panel-ai-chatgpt-info {
@@ -2131,42 +1698,9 @@
   margin-top: 8px;
 }
 
-.hk-panel-ai-chatgpt-cancel {
-  align-self: flex-start;
-  background: transparent;
-  border: 1.5px solid #d97706;
-  color: #d97706;
-  border-radius: 8px;
-  padding: 5px 12px;
-  font-size: calc(12px * var(--hk-panel-font-scale, 1));
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.hk-panel-ai-chatgpt-cancel:hover {
-  background: #fef3c7;
-}
-
 .hk-panel-ai-chatgpt-apply-row {
   display: flex;
   gap: 6px;
-}
-
-.hk-panel-ai-chatgpt-apply-btn {
-  flex: 1;
-  border: 1.5px solid #1a7f64;
-  color: #1a7f64;
-  background: transparent;
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: calc(12px * var(--hk-panel-font-scale, 1));
-  cursor: pointer;
-  font-weight: 600;
-  transition: background 0.15s ease;
-}
-
-.hk-panel-ai-chatgpt-apply-btn:hover {
-  background: #f0fdf4;
 }
 
 /* ── Note tooltip ─────────────────────────────────────── */
@@ -2378,206 +1912,19 @@
   background-size: 3px 3px;
 }
 
-.hk-mindmap-head {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 22px;
-  border-bottom: 1px solid var(--hk-mm-rule);
-  background: var(--hk-mm-paper-lit);
-}
-
-.hk-mindmap-title {
-  margin: 0;
-  flex: 1;
-  font-family: "Source Serif Pro", "Noto Serif TC", Georgia, serif;
-  font-style: italic;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--hk-mm-ink);
-}
-
-.hk-mindmap-meta {
-  font-size: 12px;
-  color: var(--hk-mm-ink-faint);
-}
-
-.hk-mindmap-action {
-  appearance: none;
-  border: 1px solid var(--hk-mm-rule-strong);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--hk-mm-ink-soft);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 12px;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-
-.hk-mindmap-action:hover {
-  color: var(--hk-mm-accent);
-  border-color: var(--hk-mm-accent);
-}
-
-.hk-mindmap-close {
-  appearance: none;
-  border: none;
-  background: transparent;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  font-size: 22px;
-  line-height: 1;
-  color: var(--hk-mm-ink-soft);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.hk-mindmap-close:hover {
-  color: var(--hk-mm-accent);
-  background: var(--hk-mm-rule);
-}
-
-.hk-mindmap-canvas {
-  position: relative;
-  flex: 1;
-  overflow: auto;
-  padding: 40px 48px;
-  display: flex;
-  align-items: safe center;
-}
-
 /* ── Tree nodes ── */
-.hk-mm-node {
-  display: flex;
-  align-items: center;
-  position: relative;
-  padding: 3px 0;
-}
-
-.hk-mm-label {
-  appearance: none;
-  border: 1px solid var(--hk-mm-rule-strong);
-  border-left: 3px solid var(--hk-mm-branch, var(--hk-mm-rule-strong));
-  border-radius: 8px;
-  background: var(--hk-mm-paper-lit);
-  color: var(--hk-mm-ink);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.4;
-  padding: 6px 12px;
-  max-width: 260px;
-  text-align: left;
-  cursor: pointer;
-  flex-shrink: 0;
-  box-shadow: 0 1px 3px rgba(26, 20, 16, 0.08);
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.12s;
-}
-
-.hk-mm-label:hover {
-  box-shadow: 0 3px 10px rgba(26, 20, 16, 0.14);
-  transform: translateY(-1px);
-}
-
-.hk-mm-label.is-leaf { cursor: default; }
-.hk-mm-label.is-leaf:hover { transform: none; }
 
 /* root node */
-.hk-mm-depth-0 > .hk-mm-label {
-  background: var(--hk-mm-accent);
-  border-color: var(--hk-mm-accent);
-  color: #fff;
-  font-family: "Source Serif Pro", "Noto Serif TC", Georgia, serif;
-  font-size: 16px;
-  font-weight: 700;
-  padding: 10px 18px;
-  border-radius: 10px;
-  max-width: 300px;
-}
-
-.hk-mm-depth-1 > .hk-mm-label { font-weight: 600; }
-
-.hk-mm-depth-3 > .hk-mm-label,
-.hk-mm-depth-4 > .hk-mm-label {
-  font-size: 12px;
-  color: var(--hk-mm-ink-soft);
-  background: transparent;
-  box-shadow: none;
-}
 
 /* children column + elbow connectors */
-.hk-mm-children {
-  display: flex;
-  flex-direction: column;
-  margin-left: 34px;
-  position: relative;
-}
 
 /* stub from parent label into the rail */
-.hk-mm-children::before {
-  content: "";
-  position: absolute;
-  left: -34px;
-  top: 50%;
-  width: 17px;
-  height: 2px;
-  background: var(--hk-mm-line);
-}
 
 /* vertical rail through each child row */
-.hk-mm-children > .hk-mm-node::before {
-  content: "";
-  position: absolute;
-  left: -17px;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--hk-mm-line);
-}
-
-.hk-mm-children > .hk-mm-node:first-child::before { top: 50%; }
-.hk-mm-children > .hk-mm-node:last-child::before { bottom: 50%; }
-.hk-mm-children > .hk-mm-node:only-child::before {
-  top: 50%;
-  bottom: auto;
-  height: 2px;
-}
 
 /* horizontal arm from rail to each child */
-.hk-mm-children > .hk-mm-node::after {
-  content: "";
-  position: absolute;
-  left: -17px;
-  top: 50%;
-  width: 17px;
-  height: 2px;
-  background: var(--hk-mm-line);
-}
 
 /* collapsed state: hide children, show +N badge */
-.hk-mm-node.is-collapsed > .hk-mm-children { display: none; }
-
-.hk-mm-node.is-collapsed > .hk-mm-label::after {
-  content: " +" attr(data-count);
-  color: var(--hk-mm-accent);
-  font-weight: 700;
-  font-size: 11px;
-}
-
-.hk-mm-node.is-collapsed.hk-mm-depth-0 > .hk-mm-label::after { color: #fff; }
-
-@media (max-width: 720px) {
-  .hk-mindmap-canvas { padding: 24px 16px; }
-  .hk-mm-label { max-width: 180px; font-size: 12px; }
-  .hk-mm-children { margin-left: 22px; }
-  .hk-mm-children::before { left: -22px; width: 11px; }
-  .hk-mm-children > .hk-mm-node::before { left: -11px; }
-  .hk-mm-children > .hk-mm-node::after { left: -11px; width: 11px; }
-}
 
 /* ════════════════════════════════════════════════════════
    ▓▓ NOTION-MINIMAL REDESIGN LAYER ▓▓
@@ -2589,7 +1936,7 @@
 
 :where(.hk-page-panel, .hk-floating-toolbar, .hk-highlight-menu,
   .hk-translate-card, .hk-guided-bar, .hk-mindmap-overlay, .hk-toast,
-  .hk-preview-bar, .hk-chatgpt-banner) {
+  .hk-preview-bar) {
   --hkn-bg: #ffffff;
   --hkn-sub: #f7f7f5;
   --hkn-hover: #efefed;
@@ -2667,135 +2014,6 @@
 }
 
 /* ── AI card（複製 → 貼回）─────────────────────────────── */
-.hk-page-panel .hk-ai-card {
-  margin: 0;
-  padding: 12px 14px;
-  border: none;
-  border-bottom: 1px solid var(--hkn-line);
-  border-radius: 0;
-  background: var(--hkn-sub);
-  gap: 8px;
-}
-
-.hk-page-panel .hk-ai-hint {
-  font-family: var(--hkn-font);
-  font-style: normal;
-  font-size: calc(12px * var(--hk-panel-font-scale, 1));
-  color: var(--hkn-soft);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.hk-page-panel .hk-ai-step {
-  gap: 8px;
-  align-items: center;
-}
-
-.hk-page-panel .hk-ai-step-num {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1px solid var(--hkn-line-strong);
-  background: var(--hkn-bg);
-  color: var(--hkn-faint);
-  font-family: var(--hkn-font);
-  font-style: normal;
-  font-size: calc(11px * var(--hk-panel-font-scale, 1));
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.hk-page-panel .hk-ai-copy-btn {
-  flex: 1;
-  padding: 7px 12px;
-  border: none !important;
-  border-radius: 6px;
-  background: var(--hkn-ink) !important;
-  color: #fff !important;
-  font-family: var(--hkn-font);
-  font-size: calc(13px * var(--hk-panel-font-scale, 1));
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  cursor: pointer;
-}
-
-.hk-page-panel .hk-ai-copy-btn:hover { background: #4b4844 !important; }
-.hk-page-panel .hk-ai-copy-btn.is-done { background: var(--hkn-green) !important; }
-
-.hk-page-panel .hk-ai-paste {
-  flex: 1;
-  padding: 8px 10px;
-  border: 1px solid var(--hkn-line-strong);
-  border-radius: 6px;
-  background: var(--hkn-bg);
-  color: var(--hkn-ink);
-  font-family: var(--hkn-font);
-  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
-  line-height: 1.5;
-  resize: vertical;
-}
-
-.hk-page-panel .hk-ai-paste:focus,
-.hk-page-panel .hk-ai-paste:focus-visible {
-  outline: none;
-  border-color: var(--hkn-blue);
-  box-shadow: 0 0 0 2px var(--hkn-blue-lit);
-}
-
-.hk-page-panel .hk-ai-actions { gap: 6px; }
-
-.hk-page-panel .hk-ai-apply,
-.hk-page-panel .hk-ai-direct {
-  padding: 6px 12px;
-  border: 1px solid var(--hkn-line-strong);
-  border-radius: 6px;
-  background: var(--hkn-bg);
-  color: var(--hkn-ink);
-  font-family: var(--hkn-font);
-  font-size: calc(12.5px * var(--hk-panel-font-scale, 1));
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-  cursor: pointer;
-}
-
-.hk-page-panel .hk-ai-apply:hover,
-.hk-page-panel .hk-ai-direct:hover {
-  background: var(--hkn-hover);
-  border-color: var(--hkn-line-strong);
-  color: var(--hkn-ink);
-}
-
-.hk-page-panel .hk-ai-secondary-row {
-  gap: 4px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.hk-page-panel .hk-ai-secondary {
-  padding: 3px 7px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--hkn-faint);
-  font-family: var(--hkn-font);
-  font-size: calc(11.5px * var(--hk-panel-font-scale, 1));
-  letter-spacing: 0;
-  text-transform: none;
-  cursor: pointer;
-}
-
-.hk-page-panel .hk-ai-secondary:hover {
-  background: var(--hkn-hover);
-  color: var(--hkn-ink);
-}
-
-.hk-page-panel .hk-ai-clear-page { color: var(--hkn-red); margin-left: auto; }
-.hk-page-panel .hk-ai-clear-page:hover { background: #fdecec; color: #c53030; }
 
 /* ── Tabs ─────────────────────────────────────────────── */
 .hk-page-panel .hk-panel-tabs {
@@ -3027,37 +2245,8 @@
 }
 
 /* ── Summary tab ──────────────────────────────────────── */
-.hk-page-panel .hk-panel-ai-note {
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
-}
-
-.hk-page-panel .hk-panel-ai-note-title {
-  font-family: var(--hkn-font);
-  font-style: normal;
-  font-weight: 600;
-  font-size: calc(12px * var(--hk-panel-font-scale, 1));
-  color: var(--hkn-soft);
-  letter-spacing: 0.02em;
-}
-
-.hk-page-panel .hk-panel-ai-note-content {
-  font-family: var(--hkn-font);
-  font-size: calc(13px * var(--hk-panel-font-scale, 1));
-  line-height: 1.65;
-  color: var(--hkn-ink);
-  border: none;
-  background: transparent;
-  padding: 0;
-}
-
-.hk-page-panel .hk-panel-ai-note-copy,
 .hk-page-panel .hk-panel-export-btn,
 .hk-page-panel .hk-panel-import-label,
-.hk-page-panel .hk-panel-ai-generate,
-.hk-page-panel .hk-panel-ai-chatgpt-apply-btn,
 .hk-page-panel .hk-panel-ai-cat-add,
 .hk-page-panel .hk-panel-ai-cat-reset,
 .hk-page-panel .hk-panel-tag-add {
@@ -3075,12 +2264,8 @@
   cursor: pointer;
   transition: background 120ms ease;
 }
-
-.hk-page-panel .hk-panel-ai-note-copy:hover:not(:disabled),
 .hk-page-panel .hk-panel-export-btn:hover,
 .hk-page-panel .hk-panel-import-label:hover,
-.hk-page-panel .hk-panel-ai-generate:not(:disabled):hover,
-.hk-page-panel .hk-panel-ai-chatgpt-apply-btn:not(:disabled):hover,
 .hk-page-panel .hk-panel-ai-cat-add:hover,
 .hk-page-panel .hk-panel-ai-cat-reset:hover,
 .hk-page-panel .hk-panel-tag-add:hover {
@@ -3088,22 +2273,6 @@
   color: var(--hkn-ink);
   border-color: var(--hkn-line-strong);
 }
-
-.hk-page-panel .hk-summary-jump-head {
-  font-family: var(--hkn-font);
-  font-style: normal;
-  font-weight: 600;
-  color: var(--hkn-soft);
-}
-
-.hk-page-panel .hk-summary-jump-item {
-  border: 1px solid var(--hkn-line);
-  border-left: 3px solid var(--hk-color, var(--hkn-line-strong));
-  border-radius: 6px;
-  background: var(--hkn-bg);
-}
-
-.hk-page-panel .hk-summary-jump-item:hover { background: var(--hkn-sub); }
 
 /* ── Settings drawer ──────────────────────────────────── */
 .hk-page-panel .hk-panel-drawer {
@@ -3490,48 +2659,6 @@
 
 .hk-mindmap-overlay::before { display: none; }
 
-.hk-mindmap-head {
-  border-bottom: 1px solid var(--hkn-line);
-  background: var(--hkn-bg);
-}
-
-.hk-mindmap-title {
-  font-family: var(--hkn-font);
-  font-style: normal;
-  font-weight: 600;
-  color: var(--hkn-ink);
-}
-
-.hk-mindmap-action,
-.hk-mindmap-close {
-  border: 1px solid var(--hkn-line-strong);
-  border-radius: 6px;
-  background: var(--hkn-bg);
-  color: var(--hkn-soft);
-  font-family: var(--hkn-font);
-  font-size: 12.5px;
-}
-
-.hk-mindmap-action:hover,
-.hk-mindmap-close:hover { background: var(--hkn-hover); color: var(--hkn-ink); }
-
-.hk-mm-label {
-  border: 1px solid var(--hkn-line-strong);
-  border-radius: 6px;
-  background: var(--hkn-bg);
-  font-family: var(--hkn-font);
-  color: var(--hkn-ink);
-  box-shadow: none;
-}
-
-.hk-mm-label:hover { transform: none; background: var(--hkn-sub); }
-
-.hk-mm-depth-0 > .hk-mm-label {
-  background: var(--hkn-ink);
-  border-color: var(--hkn-ink);
-  color: #fff;
-}
-
 /* ════════════════════════════════════════════════════════
    ▓▓ 面板內外一致化 ▓▓
    舊版是「編輯室」風：斜體小標、0.12em 寬字距全大寫、圓角 2px。
@@ -3548,8 +2675,7 @@
 
 /* 2. 小標統一：11px / 600 / 0.06em，不再有 0.12em 的寬字距 */
 .hk-page-panel :where(.hk-panel-page-tags-header, .hk-panel-ai-block-title,
-  .hk-panel-list-header, .hk-panel-ai-note-title, .hk-panel-drawer-section-title,
-  .hk-summary-jump-head, .hk-menu-header, .hk-menu-label) {
+  .hk-panel-list-header, .hk-panel-drawer-section-title, .hk-menu-header, .hk-menu-label) {
   font-size: calc(11px * var(--hk-panel-font-scale, 1));
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -3558,7 +2684,7 @@
 }
 
 /* 3. 正文級文字統一字距（舊版某些區塊帶 0.02～0.04em） */
-.hk-page-panel :where(.hk-panel-text, .hk-panel-ai-note-content,
+.hk-page-panel :where(.hk-panel-text,
   .hk-panel-item-note, .hk-panel-placeholder, .hk-panel-archive-hint,
   .hk-panel-ai-block-desc, .hk-panel-ai-label, .hk-panel-page-tags-hint,
   .hk-panel-ai-chatgpt-info) {
@@ -3569,7 +2695,6 @@
 .hk-page-panel .hk-panel-drawer { border-radius: 10px; }
 
 .hk-page-panel :where(.hk-panel-ai-cat-name, .hk-panel-ai-cat-color,
-  .hk-panel-ai-chatgpt-paste-area, .hk-panel-ai-chatgpt-cancel,
   .hk-panel-import-label, .hk-panel-clear-page-btn,
   .hk-panel-guided-reading-btn, .hk-panel-list-clear) {
   border-radius: 6px;
@@ -3587,7 +2712,7 @@
 
 /* 6. 抽屜內的容器一律無邊框無底色，靠 section 分隔線分組 */
 .hk-page-panel :where(.hk-panel-archive, .hk-panel-page-tags,
-  .hk-panel-ai-settings, .hk-panel-ai-note) {
+  .hk-panel-ai-settings) {
   border: none;
   background: transparent;
   padding: 0;
@@ -3690,7 +2815,6 @@
 }
 
 /* 9. 摘要分頁的「延伸補充」小標（AI 回覆用 ## 開頭，這裡只是行距） */
-.hk-page-panel .hk-panel-ai-note-content { white-space: pre-wrap; }
 
 /* 舊標註重上色：資料型操作，用比「加入色票」更低調的樣式 */
 .hk-panel-palette-recolor {
@@ -3752,4 +2876,99 @@
 .hk-page-panel .hk-note-line-source:hover {
   color: var(--hkn-blue);
   border-bottom-color: var(--hkn-blue);
+}
+
+/* 面板只放工具；閱讀內容與 AI 流程都在側欄。 */
+.hk-tool-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hkn-line, rgba(0, 0, 0, 0.08));
+}
+
+.hk-tool-open-guide {
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid #d99d36;
+  border-radius: 8px;
+  background: #f5c76c;
+  color: #35250c;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.hk-tool-open-guide:hover {
+  background: #f0bb52;
+}
+
+.hk-tool-open-guide:focus-visible {
+  outline: 2px solid #526c8e;
+  outline-offset: 2px;
+}
+
+.hk-preview-bar[hidden] {
+  display: none;
+}
+
+/* 導覽列與預覽列疊在各種網頁上：一律實心底、清楚邊框與高對比文字。 */
+.hk-guided-bar,
+.hk-preview-bar {
+  background: #ffffff !important;
+  color: #1f1e1b !important;
+  opacity: 1;
+  border: 1px solid #b9b8b3 !important;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.32), 0 2px 8px rgba(0, 0, 0, 0.18) !important;
+}
+
+.hk-guided-text,
+.hk-preview-bar-msg {
+  color: #1f1e1b !important;
+  font-weight: 600;
+}
+
+.hk-guided-counter {
+  color: #55544f !important;
+}
+
+.hk-guided-note {
+  background: #f4f4f1 !important;
+  border-left-color: #8d8c86 !important;
+  color: #33322e !important;
+}
+
+.hk-guided-prev,
+.hk-guided-exit,
+.hk-preview-bar-cancel {
+  background: #ffffff !important;
+  border-color: #b9b8b3 !important;
+  color: #33322e !important;
+}
+
+.hk-guided-prev:hover:not(:disabled),
+.hk-guided-exit:hover,
+.hk-preview-bar-cancel:hover {
+  background: #efefed !important;
+}
+
+.hk-guided-prev:disabled,
+.hk-guided-next:disabled {
+  opacity: 0.55;
+}
+
+.hk-guided-exit {
+  flex: none;
+  white-space: nowrap;
+}
+
+.hk-guided-next,
+.hk-preview-bar-confirm {
+  background: #37352f !important;
+  color: #ffffff !important;
+}
+
+.hk-guided-next:hover:not(:disabled),
+.hk-preview-bar-confirm:hover {
+  background: #4b4844 !important;
 }
