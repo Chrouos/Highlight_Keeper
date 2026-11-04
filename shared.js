@@ -1,13 +1,6 @@
 /* 共用工具：網址正規化（側欄、manager 與 contentScript 共用，避免各複製一份）。
    以一般 script 在各情境最先載入，掛在 window.HkUrlKey。 */
 (function (root) {
-  // 舊版追蹤／信件參數清單（保留匯出，向後相容；新版改用白名單比對）。
-  const TRACKING_PARAMS = new Set([
-    "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "yclid", "ttclid",
-    "twclid", "igshid", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "spm",
-    "scm", "vero_id", "oly_enc_id", "oly_anon_id", "_openstat",
-  ]);
-
   // 「決定內容」的真參數白名單：只有這些會留下，其餘一律剝掉，
   // 讓 path?ref=、path?source=、不同順序的追蹤參數都收斂到同一頁，
   // 但 youtube ?v=、文章 ?id=、分頁 ?page= 仍視為不同頁，不會誤併。
@@ -44,5 +37,5 @@
     }
   };
 
-  root.HkUrlKey = { normalizePageKey, TRACKING_PARAMS, CONTENT_PARAMS };
+  root.HkUrlKey = { normalizePageKey, CONTENT_PARAMS };
 })(typeof window !== "undefined" ? window : globalThis);

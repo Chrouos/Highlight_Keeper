@@ -25,8 +25,6 @@
     return Math.min(minutes, 1440);
   };
 
-  const isPageKey = (key) => root.HkParsers.isHttpUrl(key);
-
   const exportNote = (note) => root.HkParsers.exportNote(note);
 
   /* ── 資料轉換 ─────────────────────────────────────── */

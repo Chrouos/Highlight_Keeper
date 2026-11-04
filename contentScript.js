@@ -1369,83 +1369,8 @@ const createRangeFromRawOffsets = (nodes, startRaw, endRaw) => {
   return range;
 };
 
-const findRangeForAutoHighlightText = (targetText, consumedSpans) => {
-  const normalizedNeedle = normalizeWhitespace(targetText);
-  if (!normalizedNeedle) return null;
-  const searchIndex = buildNormalizedSearchIndex();
-  if (!searchIndex?.normalizedText) return null;
-
-  const attempts = [
-    {
-      haystack: searchIndex.normalizedText,
-      needle: normalizedNeedle,
-    },
-    {
-      haystack: searchIndex.normalizedText.toLowerCase(),
-      needle: normalizedNeedle.toLowerCase(),
-    },
-  ];
-
-  for (const attempt of attempts) {
-    const indexes = findIndexesInText(attempt.haystack, attempt.needle);
-    for (const start of indexes) {
-      const rawSpan = normalizedSpanToRawSpan(
-        searchIndex.normalizedToRaw,
-        start,
-        attempt.needle.length,
-        searchIndex.rawTextLength
-      );
-      if (!rawSpan) continue;
-      const spanKey = `${rawSpan.startRaw}:${rawSpan.endRaw}`;
-      if (consumedSpans?.has(spanKey)) continue;
-      const range = createRangeFromRawOffsets(
-        searchIndex.nodes,
-        rawSpan.startRaw,
-        rawSpan.endRaw
-      );
-      if (!range) continue;
-      const ancestor =
-        range.commonAncestorContainer instanceof HTMLElement
-          ? range.commonAncestorContainer
-          : range.commonAncestorContainer?.parentElement;
-      if (ancestor && isEditableElement(ancestor)) continue;
-      if (rangeTouchesExistingHighlight(range)) continue;
-      consumedSpans?.add(spanKey);
-      return range;
-    }
-  }
-  return null;
-};
-
-const applyAutoHighlightRange = async (range, color, reason, extra = "", source = "") => {
-  const snapshot = serializeRange(range.cloneRange());
-  const text = normalizeWhitespace(snapshot.text);
-  if (!text) return null;
-  const highlightId = `hk-ai-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-  const normalizedColor = toHexColor(color || DEFAULT_COLOR);
-  const note = formatAiNote(reason, extra, source);
-  const highlightEl = wrapRangeWithHighlight(range, normalizedColor, highlightId);
-  setAllMarksMetadata(highlightId, { color: normalizedColor, note });
-  await saveHighlight({
-    id: highlightId,
-    color: normalizedColor,
-    text: snapshot.text,
-    range: snapshot,
-    url: pageKey,
-    createdAt: Date.now(),
-    note,
-  });
-  return {
-    id: highlightId,
-    color: normalizedColor,
-    text,
-  };
-};
-
 // ── Batch auto-highlight ─────────────────────────────────
-// The old path rebuilt the full-document text index for EVERY item and wrote
-// storage once per item (each write re-rendering the panel). Here we build the
-// index once, locate every span, apply from the end of the document backwards
+// Build the text index once, locate every span, apply from the end of the document backwards
 // (so earlier raw offsets stay valid while the DOM mutates), then persist all
 // entries with a single storage write.
 // AI 引用時常改動空白與標點（直引號／彎引號、破折號、中英文之間的空格、跨段落）。
@@ -4377,10 +4302,8 @@ const openHighlightPanel = async (options = {}) => {
       console.debug("載入面板設定失敗:", error);
     }
   }
-  const { side, view } = options ?? {};
-  if (typeof side === "string") {
-    await setHighlightPanelSide(side);
-  } else if (highlightPanelState.side !== highlightPanelPreferredSide) {
+  const { view } = options ?? {};
+  if (highlightPanelState.side !== highlightPanelPreferredSide) {
     await setHighlightPanelSide(highlightPanelPreferredSide, false);
   } else {
     applyHighlightPanelSideClasses();
@@ -6581,20 +6504,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
   if (message?.type === "OPEN_PAGE_PANEL") {
-    openHighlightPanel({
-      side: message.side,
-      pageKey: message.pageKey,
-      view: message.view,
-    })
+    openHighlightPanel()
       .then(() => sendResponse({ success: true, visible: true }))
-      .catch((error) =>
-        sendResponse({ success: false, error: error?.message })
-      );
-    return true;
-  }
-  if (message?.type === "SET_PANEL_SIDE") {
-    setHighlightPanelSide(message.side)
-      .then(() => sendResponse({ success: true, side: highlightPanelState.side }))
       .catch((error) =>
         sendResponse({ success: false, error: error?.message })
       );
@@ -6610,7 +6521,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "APPLY_HIGHLIGHT") {
     // 快捷鍵不帶顏色 → 用目前選的顏色
-    const color = message.color || currentColor || DEFAULT_COLOR;
+    const color = currentColor || DEFAULT_COLOR;
     applyHighlight(color)
       .then(() => {
         currentColor = color;

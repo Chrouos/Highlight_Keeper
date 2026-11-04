@@ -1908,16 +1908,6 @@ const savePageTagsFromDetail = async () => {
   }
 };
 
-const encodeContentToBase64 = (text) => {
-  const encoder = new TextEncoder();
-  const bytes = encoder.encode(text);
-  let binary = "";
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return btoa(binary);
-};
-
 const decodeBase64ToText = (encoded) => {
   if (!encoded) return "";
   const sanitized = encoded.replace(/\s/g, "");
@@ -1930,14 +1920,7 @@ const decodeBase64ToText = (encoded) => {
   return decoder.decode(bytes);
 };
 
-const buildRepoApiBase = (repo) => {
-  if (typeof repo !== "string") return null;
-  const [owner, name] = repo.split("/").map((part) => part?.trim());
-  if (!owner || !name) return null;
-  return `https://api.github.com/repos/${encodeURIComponent(
-    owner
-  )}/${encodeURIComponent(name)}`;
-};
+const { buildRepoApiBase, githubHeaders } = window.HkShareLink;
 
 const buildContentPath = (path) => {
   if (typeof path !== "string") return "";
@@ -1980,13 +1963,6 @@ const validateGithubSettings = (settings) => {
   return null;
 };
 
-const GITHUB_API_VERSION = "2022-11-28";
-const githubHeaders = (token) => ({
-  Authorization: `Bearer ${token}`,
-  Accept: "application/vnd.github+json",
-  "X-GitHub-Api-Version": GITHUB_API_VERSION,
-});
-
 // 把 GitHub 錯誤回應整理成精簡可行動的訊息。
 // 只有「真的回 HTML 整頁」（邊緣在驗證前就擋下）才換成檢查清單；
 // JSON 錯誤一律原樣顯示 message 與 errors 細節，方便看出是哪個欄位／權限出問題。
@@ -2017,113 +1993,18 @@ const describeGithubError = (status, errorText) => {
   return raw.slice(0, 300) || `HTTP ${status}`;
 };
 
-// 統一的 GitHub REST 呼叫：自動帶版本標頭、JSON body，失敗時丟出整理過的訊息。
-const githubApiRequest = async (
-  repoBase,
-  path,
-  token,
-  { method = "GET", body } = {}
-) => {
-  const response = await fetch(`${repoBase}${path}`, {
-    method,
-    headers: {
-      ...githubHeaders(token),
-      ...(body ? { "Content-Type": "application/json" } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    console.debug("GitHub 請求失敗", method, path, response.status, text.slice(0, 500));
-    const error = new Error(describeGithubError(response.status, text));
-    error.status = response.status;
+// commit 共用 share-link.js；失敗時換成筆記總覽的多語系說明。
+const commitFilesToGithub = async (settings, files, commitMessage) => {
+  if (!buildRepoApiBase(settings.repo)) throw new Error(t("manager.errRepoInvalid"));
+  try {
+    await window.HkShareLink.commitFilesToGithub(settings, files, commitMessage);
+  } catch (error) {
+    if (typeof error?.responseText === "string") {
+      error.message = describeGithubError(error.status, error.responseText);
+    }
     throw error;
   }
-  return response.json();
 };
-
-// 經由 Git Data API 一次 commit 多個檔案：blobs → tree → commit → 更新 ref。
-// 關鍵差異：檔案路徑放在 JSON body（tree[].path），不進 URL，
-// 避開 contents 端點對 URL 路徑編碼的邊緣限制（會回「invalid request」整頁 HTML），
-// 也能一次寫入完整備份＋各分類檔＋索引，省一次次上傳。
-// files: [{ path, content }]（path 為 repo 內完整路徑、content 為字串）
-const commitFilesToGithub = async (settings, files, commitMessage) => {
-  const repoBase = buildRepoApiBase(settings.repo);
-  if (!repoBase) throw new Error(t("manager.errRepoInvalid"));
-  const { token, branch } = settings;
-  const refPath = `/git/ref/heads/${encodeURIComponent(branch)}`;
-
-  // 1. 分支最新 commit（不存在 → 之後建立新分支）
-  let latestSha = null;
-  try {
-    const refData = await githubApiRequest(repoBase, refPath, token);
-    latestSha = refData?.object?.sha || null;
-  } catch (error) {
-    if (error?.status !== 404) throw error; // 404＝分支還沒建立，其餘照丟
-  }
-  let baseTree = null;
-  if (latestSha) {
-    const commitData = await githubApiRequest(
-      repoBase,
-      `/git/commits/${latestSha}`,
-      token
-    );
-    baseTree = commitData?.tree?.sha || null;
-  }
-
-  // 2. 每個檔案各建一個 blob
-  const treeEntries = [];
-  for (const file of files) {
-    const blob = await githubApiRequest(repoBase, "/git/blobs", token, {
-      method: "POST",
-      body: {
-        content: encodeContentToBase64(file.content),
-        encoding: "base64",
-      },
-    });
-    treeEntries.push({
-      path: file.path,
-      mode: "100644",
-      type: "blob",
-      sha: blob.sha,
-    });
-  }
-
-  // 3. tree（檔案路徑只在這裡出現）
-  const tree = await githubApiRequest(repoBase, "/git/trees", token, {
-    method: "POST",
-    body: {
-      ...(baseTree ? { base_tree: baseTree } : {}),
-      tree: treeEntries,
-    },
-  });
-
-  // 4. commit
-  const commit = await githubApiRequest(repoBase, "/git/commits", token, {
-    method: "POST",
-    body: {
-      message: commitMessage || `backup: highlight-keeper (${new Date().toISOString()})`,
-      tree: tree.sha,
-      parents: latestSha ? [latestSha] : [],
-    },
-  });
-
-  // 5. 更新既有分支，或建立新分支
-  if (latestSha) {
-    await githubApiRequest(repoBase, `/git/refs/heads/${encodeURIComponent(branch)}`, token, {
-      method: "PATCH",
-      body: { sha: commit.sha },
-    });
-  } else {
-    await githubApiRequest(repoBase, "/git/refs", token, {
-      method: "POST",
-      body: { ref: `refs/heads/${branch}`, sha: commit.sha },
-    });
-  }
-};
-
-const uploadViaGitDataApi = (settings, payloadText) =>
-  commitFilesToGithub(settings, [{ path: settings.path, content: payloadText }]);
 
 // 取設定路徑的資料夾（dirname）與檔名，分類檔／索引就放這個資料夾底下。
 const githubDir = (path) => {

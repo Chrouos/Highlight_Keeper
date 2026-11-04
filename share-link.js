@@ -117,6 +117,7 @@
       const text = await response.text();
       const error = new Error(describeGithubError(response.status, text));
       error.status = response.status;
+      error.responseText = text; // 呼叫端可換成自己語言的說明
       throw error;
     }
     return response.json();
@@ -290,6 +291,7 @@
     commitPageToGithub,
     commitFilesToGithub,
     buildRepoApiBase,
+    githubHeaders,
     githubApiRequest,
   };
 })(typeof window !== "undefined" ? window : globalThis);

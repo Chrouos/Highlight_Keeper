@@ -21,7 +21,7 @@
 
 | # | 功能 | 說明 |
 |---|---|---|
-| B1 | 可拖曳／左右側切換 | header 拖曳定位，記憶 `hkPanelSide` |
+| B1 | 可拖曳 | header 拖曳定位，記憶 `hkPanelPosition` |
 | B2 | 字級縮放 | A− / A+，記憶 `hkPanelFontScale` |
 | B3 | 開啟閱讀導覽 | 面板不放 AI 流程，只提供前往側欄的入口 |
 | B7 | 清除本頁標記 | 危險色按鈕 + 二次確認 |
