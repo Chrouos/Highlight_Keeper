@@ -1,0 +1,10 @@
+const assert = require("node:assert/strict");
+require("../tag-organizer.js");
+const tags = [{ name: "AI", count: 3 }, { name: "人工智慧", count: 4 }, { name: "機器學習", count: 2 }];
+const api = globalThis.HkTagOrganizer;
+assert.match(api.prompt(tags), /人工智慧/);
+assert.deepEqual(api.parse('```json\n{"merges":[{"from":"AI","to":"人工智慧"}]}\n```', tags), [{ from: "AI", to: "人工智慧" }]);
+assert.throws(() => api.parse('{"merges":[{"from":"未知","to":"AI"}]}', tags));
+assert.throws(() => api.parse('{"merges":[{"from":"AI","to":"人工智慧"},{"from":"人工智慧","to":"機器學習"}]}', tags));
+assert.throws(() => api.parse('{"merges":[{"from":"AI","to":"人工智慧"},{"from":"AI","to":"機器學習"}]}', tags));
+console.log("Tag organizer tests passed");

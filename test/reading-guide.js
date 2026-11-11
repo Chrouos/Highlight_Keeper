@@ -268,6 +268,7 @@ async function checkSidebar() {
   sidebar.state.page = null;
   await sidebar.loadActiveTab();
   assert.equal(sidebar.state.page, null, "opening on ChatGPT without a saved source must not throw");
+  assert.equal(nodes.get("moreTools").hidden, false, "tools remain accessible without an article");
   session.hkReadingGuideSourceTabId = 1;
   await sidebar.loadActiveTab();
   assert.equal(sidebar.state.pageKey, articleUrl, "the saved source can be restored from the AI tab");

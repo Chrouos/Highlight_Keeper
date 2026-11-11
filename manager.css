@@ -909,6 +909,13 @@ body {
   max-width: 520px;
 }
 
+.hk-tag-assistant { display: grid; gap: 8px; margin-bottom: 18px; padding: 12px; border: 1px solid var(--hk-line); border-radius: var(--hk-radius); }
+.hk-tag-assistant p { margin: 0; }
+.hk-tag-assistant button { justify-self: start; }
+.hk-tag-assistant textarea { width: 100%; resize: vertical; }
+.hk-tag-assistant [data-role="result"] { white-space: pre-wrap; }
+.hk-tag-assistant [hidden] { display: none; }
+
 .hk-manager-tagmgr-list {
   display: flex;
   flex-direction: column;
@@ -1014,6 +1021,10 @@ body {
   border: 1px solid var(--hk-line-strong);
   border-radius: var(--hk-radius);
   background: var(--hk-red-lit);
+}
+
+.hk-manager-autosync-conflicts[hidden] {
+  display: none;
 }
 
 .hk-manager-autosync-conflict-head,

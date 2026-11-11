@@ -51,6 +51,7 @@ const state = {
   tabId: null,
   pageKey: "",
   page: null,
+  loadedUrl: "",
   context: "",
   guideTerms: [],
   guideHighlights: [],
@@ -344,7 +345,11 @@ const render = () => {
   els.generate.disabled = state.applying;
   els.noPage.hidden = Boolean(page);
   els.aiControls.hidden = !page;
-  els.moreTools.hidden = !page;
+  els.moreTools.hidden = false;
+  els.shareLink.disabled = !page;
+  els.copyNotes.disabled = !page;
+  els.downloadNotes.disabled = !page;
+  els.openTools.disabled = !page;
   els.deletePageNotes.hidden = !page;
   els.tabs.hidden = !page;
   els.personalNote.disabled = !page;
@@ -389,25 +394,33 @@ const loadActiveTab = async () => {
   await flushNote();
   if (token !== state.loadToken) return;
   if (state.tabId !== tab?.id) els.response.value = "";
+  // 切回同一頁或重新整理：先留著畫面，資料回來再更新，不閃白也不擋按鈕。
+  const samePage = Boolean(state.page) && state.tabId === tab?.id && state.loadedUrl === tab?.url;
   state.tabId = tab?.id ?? null;
-  state.pageKey = "";
-  state.page = null;
-  state.context = "";
-  state.guideTerms = [];
-  state.guideHighlights = [];
-  state.mindmapOutline = "";
-  state.prompt = "";
-  state.noteText = "";
-  state.noteDirty = false;
-  els.personalNote.value = "";
-  setNoteStatus("sidebar.notesSaved");
-  setStatus("");
-  render();
+  state.loadedUrl = tab?.url || "";
+  if (!samePage) {
+    state.pageKey = "";
+    state.page = null;
+    state.context = "";
+    state.guideTerms = [];
+    state.guideHighlights = [];
+    state.mindmapOutline = "";
+    state.prompt = "";
+    state.noteText = "";
+    state.noteDirty = false;
+    els.personalNote.value = "";
+    setNoteStatus("sidebar.notesSaved");
+    setStatus("");
+    render();
+  }
   if (!tab?.id || !/^https?:/i.test(tab.url || "")) {
     setStatus(t("sidebar.unsupported"), true);
     return;
   }
 
+  setStatus(t("sidebar.loading"));
+  if (!samePage) els.noPage.hidden = true;
+  if (tab.status === "loading") return;
   try {
     const response = await sendToTab(tab.id, { type: "GET_PAGE_HIGHLIGHTS", checkText: true });
     if (token !== state.loadToken) return;
@@ -417,7 +430,7 @@ const loadActiveTab = async () => {
     state.pageKey = response.data.url;
     const [stored, promptInfo] = await Promise.all([
       chrome.storage.local.get([GENERATED_NOTES_KEY, PERSONAL_NOTES_KEY, MINDMAP_KEY]),
-      sendToTab(tab.id, { type: "BUILD_READING_GUIDE_PROMPT" }),
+      sendToTab(tab.id, { type: "BUILD_READING_GUIDE_PROMPT" }).catch(() => null),
     ]);
     if (token !== state.loadToken) return;
     const generated = stored[GENERATED_NOTES_KEY]?.[state.pageKey] || {};
@@ -426,12 +439,15 @@ const loadActiveTab = async () => {
     state.guideTerms = generated.guideTerms || generated.unlocatedTerms || [];
     state.guideHighlights = generated.guideHighlights || generated.unlocatedHighlights || [];
     state.mindmapOutline = stored[MINDMAP_KEY]?.[state.pageKey]?.outline || "";
-    state.noteText = personal.text || "";
-    els.personalNote.value = state.noteText;
+    // 載入途中又打了字就不覆蓋，等下一次自動儲存。
+    if (!state.noteDirty) {
+      state.noteText = personal.text || "";
+      els.personalNote.value = state.noteText;
+    }
     state.provider = promptInfo?.provider || "chatgpt";
     state.configured = Boolean(promptInfo?.configured);
     state.prompt = promptInfo?.prompt || "";
-    if (!promptInfo?.success) setStatus(t("sidebar.extractError"), true);
+    setStatus(promptInfo?.success ? "" : t("sidebar.extractError"), !promptInfo?.success);
     // 換文章時才決定收合：已整理過的把位子留給閱讀，沒整理過就直接看到 AI 步驟。
     // 同一篇文章因標註變動重新載入時，不動使用者正在操作的區塊。
     if (previousPageKey !== state.pageKey) els.aiControls.open = !hasGuide();

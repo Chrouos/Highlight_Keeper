@@ -1717,6 +1717,63 @@ const ensureTagManagerOverlay = () => {
 
   const body = document.createElement("div");
   body.className = "hk-manager-detail-body";
+  const assistant = document.createElement("section");
+  assistant.className = "hk-tag-assistant";
+  assistant.innerHTML = `<p data-role="hint"></p><button type="button" class="hk-manager-btn" data-role="copy"></button><textarea class="hk-manager-input" rows="4" data-role="reply"></textarea><button type="button" class="hk-manager-btn hk-manager-btn-muted" data-role="preview"></button><div data-role="result" aria-live="polite"></div><button type="button" class="hk-manager-btn" data-role="apply" hidden></button>`;
+  const hint = assistant.querySelector('[data-role="hint"]');
+  const copy = assistant.querySelector('[data-role="copy"]');
+  const reply = assistant.querySelector('[data-role="reply"]');
+  const preview = assistant.querySelector('[data-role="preview"]');
+  const result = assistant.querySelector('[data-role="result"]');
+  const apply = assistant.querySelector('[data-role="apply"]');
+  hint.textContent = t("manager.tagAiHint");
+  copy.textContent = t("manager.tagAiCopy");
+  reply.placeholder = t("manager.tagAiPlaceholder");
+  preview.textContent = t("manager.tagAiPreview");
+  apply.textContent = t("manager.tagAiApply");
+  const tagCounts = () => {
+    const counts = new Map();
+    state.pages.forEach((page) => (page.tags || []).forEach((tag) => counts.set(tag, (counts.get(tag) || 0) + 1)));
+    return [...counts].map(([name, count]) => ({ name, count }));
+  };
+  let proposed = null;
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(window.HkTagOrganizer.prompt(tagCounts()));
+      result.textContent = t("manager.tagAiCopied");
+    } catch (_error) { result.textContent = t("manager.tagAiCopyError"); }
+  });
+  reply.addEventListener("input", () => { proposed = null; apply.hidden = true; result.textContent = ""; });
+  preview.addEventListener("click", () => {
+    try {
+      proposed = window.HkTagOrganizer.parse(reply.value, tagCounts());
+      result.textContent = proposed.length ? proposed.map(({ from, to }) => `${from} → ${to}`).join("\n") : t("manager.tagAiEmpty");
+      apply.hidden = !proposed.length;
+    } catch (_error) { proposed = null; apply.hidden = true; result.textContent = t("manager.tagAiInvalid"); }
+  });
+  apply.addEventListener("click", async () => {
+    if (!proposed?.length) return;
+    apply.disabled = true;
+    try {
+      const merges = window.HkTagOrganizer.parse(reply.value, tagCounts());
+      const mapping = new Map(merges.map(({ from, to }) => [from, to]));
+      const stored = await chrome.storage.local.get(PAGE_META_KEY);
+      const meta = { ...(stored[PAGE_META_KEY] || {}) };
+      let touched = 0;
+      Object.entries(meta).forEach(([url, entry]) => {
+        const tags = Array.isArray(entry?.tags) ? entry.tags : [];
+        if (!tags.some((tag) => mapping.has(tag))) return;
+        meta[url] = { ...entry, tags: [...new Set(tags.map((tag) => mapping.get(tag) || tag))], updatedAt: Date.now() };
+        touched++;
+      });
+      if (touched) await chrome.storage.local.set({ [PAGE_META_KEY]: meta });
+      proposed = null; apply.hidden = true; reply.value = "";
+      await refreshAfterTagChange();
+      result.textContent = t("manager.tagAiDone", { count: touched });
+    } catch (_error) { result.textContent = t("manager.tagAiInvalid"); apply.hidden = true; }
+    finally { apply.disabled = false; }
+  });
+  body.appendChild(assistant);
   const list = document.createElement("div");
   list.id = "hk-manager-tagmgr-list";
   const datalist = document.createElement("datalist");
@@ -2425,13 +2482,22 @@ const runAutoSyncNow = async () => {
   autoSyncStatusEl.textContent = t("manager.syncRunning");
   autoSyncStatusEl.classList.remove("is-error");
   try {
-    await chrome.runtime.sendMessage({ type: "HK_SYNC_NOW" });
+    const result = await chrome.runtime.sendMessage({ type: "HK_SYNC_NOW" });
+    if (result?.status === "busy") {
+      autoSyncStatusEl.textContent = t("manager.syncBusy");
+      return;
+    }
+    if (result?.status === "error" && result.errorMessage && !result.lastRunAt) {
+      throw new Error(result.errorMessage);
+    }
     await refreshManager();
+    await renderAutoSyncState();
   } catch (error) {
     console.debug("立即同步失敗", error);
+    autoSyncStatusEl.textContent = t("manager.syncFailed", { error: error?.message || "" });
+    autoSyncStatusEl.classList.add("is-error");
   } finally {
     autoSyncNowBtn.disabled = false;
-    renderAutoSyncState();
   }
 };
 

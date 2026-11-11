@@ -88,4 +88,4 @@
 | F1 | `normalizePageKey` 網址正規化（去追蹤參數、canonical 優先）|
 | F2 | `pageToMarkdown` 轉 Markdown（標籤／重點／摘要／脈絡／個人筆記／心智圖）|
 | F3 | AI 回覆解析：脈絡 / 名詞解釋 / 重點整理 / 閱讀地圖 / 標籤分段；相容舊版 `===重點===` 標記與反斜線跳脫的 Markdown |
-| F4 | storage keys：`hkColorPalette`、`hkLastColor`、`hkAISettings`、`__hk_page_meta__`、`hkGeneratedNotes`、`hkPersonalNotes`、`hkMindmaps`、`hkGithubSyncSettings`、`hkAutoSyncState`、`hkPanelSide`、`hkPanelFontScale`、`hkLang` |
+| F4 | storage keys：`hkColorPalette`、`hkLastColor`、`hkAISettings`、`__hk_page_meta__`、`hkGeneratedNotes`、`hkPersonalNotes`、`hkMindmaps`、`hkGithubSyncSettings`、`hkAutoSyncState`、`hkPanelSide`（僅讀取舊設定）、`hkPanelPosition`、`hkPanelFontScale`、`hkLang` |

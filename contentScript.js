@@ -165,7 +165,6 @@ const PANEL_DRAG_MARGIN = 12;
 let highlightPanel = null;
 let highlightPanelEls = null;
 let highlightPanelVisible = false;
-let highlightPanelPreferredSide = "right";
 const highlightPanelState = {
   side: "right",
   activeKey: pageKey,
@@ -2089,23 +2088,6 @@ const applyHighlightPanelSideClasses = () => {
   updateFontControlAvailability();
 };
 
-const setHighlightPanelSide = async (side, persist = true) => {
-  const resolved = side === "left" ? "left" : "right";
-  highlightPanelState.side = resolved;
-  highlightPanelPreferredSide = resolved;
-  if (persist) {
-    await clearHighlightPanelPosition(true);
-  }
-  applyHighlightPanelSideClasses();
-  if (persist && storage) {
-    try {
-      await storage.set({ hkPanelSide: resolved });
-    } catch (error) {
-      console.debug("儲存面板位置失敗", error);
-    }
-  }
-};
-
 const applyHighlightPanelTabState = () => {
   const visibleTabs = ["page", "search"];
   const resolved = visibleTabs.includes(highlightPanelState.activeTab)
@@ -2228,24 +2210,6 @@ const setHighlightPanelPosition = async (x, y, persist = true) => {
   }
 };
 
-const clearHighlightPanelPosition = async (persist = true) => {
-  const hadPosition = Boolean(highlightPanelState.position);
-  highlightPanelState.position = null;
-  applyHighlightPanelSideClasses();
-  if (persist && storage) {
-    try {
-      if (typeof storage.remove === "function") {
-        await storage.remove(HIGHLIGHT_PANEL_POSITION_KEY);
-      } else {
-        await storage.set({ [HIGHLIGHT_PANEL_POSITION_KEY]: null });
-      }
-    } catch (error) {
-      console.debug("清除面板座標失敗", error);
-    }
-  }
-  return hadPosition;
-};
-
 const isPanelDragDisallowedTarget = (target) => {
   if (!(target instanceof Element)) return false;
   return Boolean(
@@ -2341,7 +2305,6 @@ const loadPanelPreferences = async () => {
         ? stored.hkPanelSide
         : "right";
     highlightPanelState.side = side;
-    highlightPanelPreferredSide = side;
     const savedPosition = stored?.[HIGHLIGHT_PANEL_POSITION_KEY];
     if (isValidPanelPosition(savedPosition)) {
       highlightPanelState.position = savedPosition;
@@ -4303,11 +4266,7 @@ const openHighlightPanel = async (options = {}) => {
     }
   }
   const { view } = options ?? {};
-  if (highlightPanelState.side !== highlightPanelPreferredSide) {
-    await setHighlightPanelSide(highlightPanelPreferredSide, false);
-  } else {
-    applyHighlightPanelSideClasses();
-  }
+  applyHighlightPanelSideClasses();
 
   if (view === "settings") {
     highlightPanelEls?.toggleDrawer?.(true);
@@ -4661,13 +4620,6 @@ chrome.storage?.onChanged.addListener((changes, areaName) => {
   if (changes.hkColorPalette) {
     setColorPaletteState(changes.hkColorPalette.newValue);
     renderPanelPalette();
-  }
-  if (changes.hkPanelSide) {
-    const nextSide =
-      changes.hkPanelSide.newValue === "left" ? "left" : "right";
-    highlightPanelState.side = nextSide;
-    highlightPanelPreferredSide = nextSide;
-    applyHighlightPanelSideClasses();
   }
   if (changes[HIGHLIGHT_PANEL_POSITION_KEY]) {
     const nextPosition = changes[HIGHLIGHT_PANEL_POSITION_KEY].newValue;
