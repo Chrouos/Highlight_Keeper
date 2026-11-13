@@ -105,14 +105,23 @@
     token,
     { method = "GET", body } = {}
   ) => {
-    const response = await fetch(`${repoBase}${path}`, {
-      method,
-      headers: {
-        ...githubHeaders(token),
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    let response;
+    try {
+      response = await fetch(`${repoBase}${path}`, {
+        method,
+        headers: {
+          ...githubHeaders(token),
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      const operation = path.match(/^\/(?:git\/(?:refs?|commits|trees|blobs)|contents)/)?.[0] || "/";
+      const networkError = new Error(`Failed to fetch GitHub (${method} ${operation})`);
+      networkError.code = "network-error";
+      throw networkError;
+    }
     if (!response.ok) {
       const text = await response.text();
       const error = new Error(describeGithubError(response.status, text));

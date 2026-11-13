@@ -31,13 +31,12 @@ const openSidePanel = (tabId) => chrome.sidePanel.open({ tabId });
 
 chrome.commands.onCommand.addListener((command, tab) => {
   if (!tab?.id) return;
-  if (command === "open-reading-guide") {
+  if (command === "open-reading-guide" || command === "toggle-panel") {
     openSidePanel(tab.id).catch((error) => console.debug("開啟側欄失敗", error));
     return;
   }
   const type = {
     "highlight-selection": "APPLY_HIGHLIGHT",
-    "toggle-panel": "TOGGLE_PAGE_PANEL",
   }[command];
   // 內容腳本不在此頁（如 chrome:// 或安裝前就開著的分頁）時忽略。
   if (type) chrome.tabs.sendMessage(tab.id, { type }).catch(() => {});

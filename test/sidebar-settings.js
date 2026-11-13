@@ -1,0 +1,12 @@
+const assert = require("node:assert/strict");
+require("../sidebar-settings.js");
+const { mergeAiSettings, removePaletteColor } = globalThis.HkSidebarSettings;
+const original = { provider: "chatgpt", categories: [{ name: "Existing", color: "#ffffff" }], usePreview: true, prompt: "saved" };
+const updated = mergeAiSettings(original, { provider: "openai", openaiKey: "key", openaiModel: "model" });
+assert.equal(updated.provider, "openai");
+assert.equal(updated.openaiKey, "key");
+assert.equal(updated.prompt, "saved");
+assert.deepEqual(updated.categories, original.categories);
+assert.deepEqual(removePaletteColor(["#111111", "#222222"], "#111111"), ["#222222"]);
+assert.deepEqual(removePaletteColor(["#111111"], "#111111"), ["#111111"], "the palette must retain one color");
+console.log("Sidebar settings passed: unrelated settings are preserved and the palette remains usable.");

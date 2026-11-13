@@ -47,6 +47,15 @@ body {
   gap: 32px;
 }
 
+.embedded-sync .hk-manager { padding: 0; gap: 12px; }
+.embedded-sync .hk-manager-header,
+.embedded-sync .hk-manager-search-row,
+.embedded-sync .hk-manager-summary { display: none; }
+.embedded-sync .hk-manager-sync { margin: 0; }
+@media (prefers-color-scheme: dark) {
+  .embedded-sync { --hk-bg: #292a28; --hk-sub: #30312f; --hk-hover: #393a37; --hk-line: #41423f; --hk-line-strong: #555652; --hk-ink: #e8e8e6; --hk-soft: #b0b0ab; --hk-faint: #a4a4a0; --hk-blue: #a9c1e8; --hk-blue-lit: #27374d; --hk-red-lit: #432d2a; }
+}
+
 /* ── Header ─────────────────────────────────────────── */
 .hk-manager-header {
   display: flex;

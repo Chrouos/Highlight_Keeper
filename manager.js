@@ -1,3 +1,6 @@
+if (new URLSearchParams(window.location.search).get("embed") === "sync") {
+  document.documentElement.classList.add("embedded-sync");
+}
 const PAGE_META_KEY = "__hk_page_meta__";
 const DEFAULT_COLOR = "#fff5b8";
 const GITHUB_SETTINGS_KEY = "hkGithubSyncSettings";
@@ -755,21 +758,7 @@ const mergeEntryArrays = (arrays) => {
   return merged;
 };
 
-// 路徑段數＝網址具體程度：文章頁（/zh-Hant/index/xxx/）比根路徑（/zh-Hant/）具體，
-// 同標題合併時拿最具體的當主頁面。
-const pathSpecificity = (url) => {
-  try {
-    return new URL(url).pathname.split("/").filter(Boolean).length;
-  } catch (_e) {
-    return 0;
-  }
-};
-
-// 找出分裂成多筆的頁面群組，兩層判定：
-// 1. 網址正規化後相同（只差參數／追蹤碼）。
-// 2. 同網域＋同 meta 標題（SPA 換頁曾把文章存到錯的網址時，網址收斂不到
-//    一起，但標題會一樣）。只認「真的存過 meta」的標題，網址 fallback 不算，
-//    避免把湊巧同名的頁面誤併。
+// 只合併正規化後相同的網址；不同路徑即使標題相同也可能是不同頁面。
 const findDuplicateGroups = () => {
   const byKey = new Map();
   state.pages.forEach((page) => {
@@ -778,34 +767,12 @@ const findDuplicateGroups = () => {
     byKey.get(canonical).push(page);
   });
 
-  // 第二層：把「網址收斂後仍分開、但同網域同標題」的叢集再併成一組。
-  const byTitle = new Map();
-  byKey.forEach((pages, canonical) => {
-    const metaTitle = pages
-      .map((p) => state.meta[p.url]?.title?.trim())
-      .find(Boolean);
-    const domain = pageDomain(canonical);
-    const key =
-      metaTitle && domain ? `${domain}\n${metaTitle}` : `__solo__\n${canonical}`;
-    if (!byTitle.has(key)) byTitle.set(key, []);
-    byTitle.get(key).push({ canonical, pages });
-  });
-
   const groups = [];
-  byTitle.forEach((clusters) => {
-    const pages = clusters.flatMap((c) => c.pages);
+  byKey.forEach((pages, canonical) => {
     if (pages.length < 2) return;
-    const latestUpdated = (c) =>
-      Math.max(...c.pages.map((p) => p.updatedAt || 0));
-    // 主頁面：路徑最具體的 canonical；一樣具體就取最後更新的那叢。
-    const canonical = [...clusters].sort(
-      (a, b) =>
-        pathSpecificity(b.canonical) - pathSpecificity(a.canonical) ||
-        latestUpdated(b) - latestUpdated(a)
-    )[0].canonical;
     groups.push({
       canonical,
-      byTitle: clusters.length > 1,
+      byTitle: false,
       // 最後更新的排前面，標題／摘要／心智圖優先採用較新的那份。
       pages: [...pages].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
     });
@@ -829,11 +796,27 @@ const mergeDuplicateGroups = async (groups) => {
   const entryUpdates = {};
   const keysToRemove = [];
   let mergedExtra = 0;
+  let mergedGroups = 0;
+  let skipped = 0;
 
   groups.forEach(({ canonical, pages }) => {
     const urls = pages.map((p) => p.url);
+    // 不同版本的筆記或同 ID 標註不可由較新的版本靜默覆蓋。
+    const hasConflict = [notes, maps, personalNotes].some((records) =>
+      new Set(urls.map((url) => records[url]).filter((value) => value != null).map((value) => JSON.stringify(value))).size > 1
+    );
+    const entriesById = new Map();
+    let conflictingEntry = false;
+    pages.forEach((page) => (page.entries || []).forEach((entry) => {
+      if (!entry?.id) return;
+      const serialized = JSON.stringify(entry);
+      if (entriesById.has(entry.id) && entriesById.get(entry.id) !== serialized) conflictingEntry = true;
+      entriesById.set(entry.id, serialized);
+    }));
+    if (hasConflict || conflictingEntry) { skipped++; return; }
     entryUpdates[canonical] = mergeEntryArrays(pages.map((p) => p.entries));
     mergedExtra += pages.length - 1;
+    mergedGroups++;
 
     // meta：title 取第一個非空（已依更新時間排序），tags 取聯集。
     const tagSet = new Set();
@@ -867,6 +850,7 @@ const mergeDuplicateGroups = async (groups) => {
     if (personalNote !== undefined) personalNotes[canonical] = personalNote;
   });
 
+  if (!mergedGroups) return { mergedExtra, mergedGroups, skipped };
   await chrome.storage.local.set({
     ...entryUpdates,
     [PAGE_META_KEY]: meta,
@@ -875,7 +859,7 @@ const mergeDuplicateGroups = async (groups) => {
     [PERSONAL_NOTES_KEY]: personalNotes,
   });
   if (keysToRemove.length) await chrome.storage.local.remove(keysToRemove);
-  return mergedExtra;
+  return { mergedExtra, mergedGroups, skipped };
 };
 
 // 點「整理重複頁面」：先預覽要合併哪些群組，確認後才動手。
@@ -909,12 +893,13 @@ const runMergeDuplicates = async () => {
     cancelLabel: t("manager.btnCancel"),
   });
   if (!ok) return;
-  const mergedExtra = await mergeDuplicateGroups(groups);
+  const result = await mergeDuplicateGroups(groups);
   if (detailCurrentPageUrl) closePageDetail();
   state.selected.clear();
   await refreshManager();
   setStatus(
-    t("manager.statusMerged", { groups: groups.length, extra: mergedExtra })
+    (result.mergedGroups ? t("manager.statusMerged", { groups: result.mergedGroups, extra: result.mergedExtra }) : "") +
+    (result.skipped ? ` ${t("manager.mergeSkipped", { count: result.skipped })}` : "")
   );
 };
 

@@ -242,6 +242,19 @@ const conflictUrls = (result) => result.conflicts.map((c) => c.url);
   result = await sync(laptop);
   assert.equal(result.status, "ok", "recovers after an error");
 
+  // A rejected network request identifies the operation without exposing credentials.
+  const fetchBeforeNetworkFailure = globalThis.fetch;
+  const beforeNetworkFailure = structuredClone(laptop[URL_A]);
+  globalThis.fetch = async () => { throw new TypeError("Failed to fetch"); };
+  result = await sync(laptop);
+  globalThis.fetch = fetchBeforeNetworkFailure;
+  assert.equal(result.status, "error");
+  assert.equal(result.errorCode, "network-error");
+  assert.match(result.errorMessage, /GET.*git\/ref/);
+  assert.ok(!result.errorMessage.includes(`Bearer ${SETTINGS.token}`), "error does not disclose credentials");
+  assert.deepEqual(laptop[URL_A], beforeNetworkFailure, "network failure leaves notes untouched");
+  assert.equal((await sync(laptop)).status, "ok", "sync recovers after a network failure");
+
   // A remote wiped of its pages must not wipe this device.
   const many = makeDevice();
   ["1", "2", "3", "4", "5"].forEach((n) => { many[`https://example.com/p${n}`] = mark(n); });

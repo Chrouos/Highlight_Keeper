@@ -9,16 +9,8 @@ const TEXT_PARENT_SKIP_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT"]);
 const normalizePageKey = (href) =>
   window.HkUrlKey ? window.HkUrlKey.normalizePageKey(href) : href;
 
-// 優先用頁面宣告的 canonical 連結當鍵：它是去掉所有追蹤／信件參數後最穩定的
-// 文章網址（例如 Substack 的 /p/slug）。沒有 canonical 才退回剝參數的網址。
-const resolvePageKey = () => {
-  try {
-    const link = document.querySelector('link[rel="canonical"]');
-    const href = link?.href;
-    if (href && /^https?:/i.test(href)) return normalizePageKey(href);
-  } catch (_e) {}
-  return normalizePageKey(window.location.href);
-};
+// SPA 的 canonical 可能仍指向前一頁；資料鍵以目前網址為準，避免把不同頁面混在一起。
+const resolvePageKey = () => normalizePageKey(window.location.href);
 
 let pageKey = resolvePageKey();
 
@@ -6320,6 +6312,7 @@ const handleHighlightClick = (event) => {
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  synchronizeCurrentLocation();
   if (message?.type === "BUILD_READING_GUIDE_PROMPT") {
     (async () => {
       try {
@@ -6404,6 +6397,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         const entries = await getStoredHighlights();
         const targetText = HkParsers.looseKey(message.text || "");
         const entry = entries.find((item) => {
+          if (message.id) return item.id === message.id;
           if (HkParsers.looseKey(item?.text || "") !== targetText) return false;
           if (message.kind === "term") return item.kind === "term";
           return !message.kind || item.kind === "passage" || !item.kind;
@@ -6429,6 +6423,78 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ success: true });
       } catch (error) {
         sendResponse({ success: false, error: error?.message || t("sidebar.noMatch") });
+      }
+    })();
+    return true;
+  }
+  if (message?.type === "CLEAR_PAGE_HIGHLIGHTS" || message?.type === "RECOLOR_LEGACY_HIGHLIGHTS") {
+    (async () => {
+      try {
+        if (!message.pageKey || message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
+        const count = message.type === "RECOLOR_LEGACY_HIGHLIGHTS" ? await recolorLegacyHighlights() : (await clearPageHighlights(), 0);
+        sendResponse({ success: true, count });
+      } catch (error) { sendResponse({ success: false, error: error?.message || t("sidebar.settingsError") }); }
+    })();
+    return true;
+  }
+  if (message?.type === "IMPORT_PAGE_HIGHLIGHTS") {
+    (async () => {
+      try {
+        if (!message.pageKey || message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
+        const text = String(message.text || "");
+        let parsed;
+        try { parsed = JSON.parse(text); } catch (_error) { throw new Error(t("ai.errJsonInvalid")); }
+        if (Array.isArray(parsed?.pages)) {
+          const pages = HkParsers.normalizeBulkPages(parsed.pages);
+          if (pages.length !== 1 || normalizePageKey(pages[0].url) !== message.pageKey) throw new Error(t("sidebar.importWrongPage"));
+          const target = { ...pages[0], url: message.pageKey };
+          const result = HkParsers.pagesToStorageUpdates([target], await storage.get(null));
+          if (message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
+          if (Object.keys(result.updates).length) await storage.set(result.updates);
+          if (result.imported.length && message.pageKey === pageKey) attemptRestoreHighlights();
+          sendResponse({ success: true, kind: "page", count: result.imported.length, skipped: result.skipped.length });
+          return;
+        }
+        const entries = parseImportedHighlightsPayload(text);
+        if (!entries.length) throw new Error(t("ai.errNoHighlightInFile"));
+        const count = await importHighlightsFromEntries(entries);
+        if (message.pageKey === pageKey) attemptRestoreHighlights();
+        sendResponse({ success: true, count });
+      } catch (error) { sendResponse({ success: false, error: error?.message || t("ai.errImportFailed") }); }
+    })();
+    return true;
+  }
+  if (message?.type === "SET_PAGE_TAGS") {
+    (async () => {
+      try {
+        if (!message.pageKey || message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
+        if (!Array.isArray(message.tags) || !message.tags.every((tag) => typeof tag === "string")) throw new Error(t("sidebar.settingsError"));
+        await setPageTags(message.pageKey, message.tags);
+        sendResponse({ success: true });
+      } catch (error) { sendResponse({ success: false, error: error?.message }); }
+    })();
+    return true;
+  }
+  if (message?.type === "UPDATE_PAGE_HIGHLIGHT" || message?.type === "DELETE_PAGE_HIGHLIGHT") {
+    (async () => {
+      try {
+        if (!message.pageKey || message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
+        if (typeof message.id !== "string" || !message.id) throw new Error(t("sidebar.noMatch"));
+        const entry = await findHighlightEntry(message.id);
+        if (message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
+        if (!entry) throw new Error(t("sidebar.noMatch"));
+        if (message.type === "DELETE_PAGE_HIGHLIGHT") {
+          await deleteHighlightEntry(message.id);
+          document.querySelectorAll(`[${HIGHLIGHT_ATTR}="${CSS.escape(message.id)}"]`).forEach(unwrapHighlightElement);
+        } else {
+          const note = typeof message.note === "string" ? message.note.trim() : entry.note || "";
+          const color = typeof message.color === "string" && /^#[0-9a-f]{6}$/i.test(message.color) ? message.color : entry.color;
+          await updateHighlightEntry(message.id, { note, color });
+          setAllMarksMetadata(message.id, { note, color });
+        }
+        sendResponse({ success: true });
+      } catch (error) {
+        sendResponse({ success: false, error: error?.message || t("sidebar.settingsError") });
       }
     })();
     return true;
@@ -6538,6 +6604,7 @@ window.addEventListener("load", () => attemptRestoreHighlights(), {
 // pageKey 並重新還原。
 const LOCATION_CHANGE_EVENT = "hk:locationchange";
 let urlChangeTimer = null;
+let observedLocation = normalizePageKey(window.location.href);
 
 const onUrlChanged = (next) => {
   // 清掉舊頁殘留的 in-page 標註，避免疊到新畫面（沿用 clearPageHighlights 的做法）。
@@ -6565,6 +6632,14 @@ const onUrlChanged = (next) => {
   try {
     refreshHighlightPanelIfVisible();
   } catch (_e) {}
+  notifyPageChanged();
+};
+
+const synchronizeCurrentLocation = () => {
+  const current = normalizePageKey(window.location.href);
+  if (current === observedLocation) return;
+  observedLocation = current;
+  onUrlChanged(current);
 };
 
 const handleLocationChange = () => {
@@ -6574,7 +6649,7 @@ const handleLocationChange = () => {
   } catch (_e) {
     return;
   }
-  if (next === pageKey) return;
+  if (next === observedLocation) return;
   // debounce：SPA 換頁常連續觸發多個事件／mutation，合併成一次。
   if (urlChangeTimer) window.clearTimeout(urlChangeTimer);
   urlChangeTimer = window.setTimeout(() => {
@@ -6585,7 +6660,8 @@ const handleLocationChange = () => {
     } catch (_e) {
       return;
     }
-    if (settled === pageKey) return;
+    if (settled === observedLocation) return;
+    observedLocation = settled;
     onUrlChanged(settled);
   }, 300);
 };
@@ -6615,6 +6691,8 @@ if (!window.__hkUrlWatcherInstalled) {
   window.addEventListener("popstate", handleLocationChange);
   window.addEventListener("hashchange", handleLocationChange);
   window.addEventListener(LOCATION_CHANGE_EVENT, handleLocationChange);
+  // Content scripts run in an isolated world and cannot observe every page-side history call.
+  window.setInterval(handleLocationChange, 500);
 }
 
 // ── 分享連結收件端 ─────────────────────────────────────────────

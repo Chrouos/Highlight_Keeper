@@ -32,18 +32,24 @@ const els = {
   openWebAI: document.getElementById("openWebAiBtn"),
   response: document.getElementById("aiResponse"),
   applyResponse: document.getElementById("applyResponseBtn"),
-  settings: document.getElementById("settingsBtn"),
   refresh: document.getElementById("refreshBtn"),
   tabs: document.querySelector(".tabs"),
   moreTools: document.getElementById("moreTools"),
   shareLink: document.getElementById("shareLinkBtn"),
   copyNotes: document.getElementById("copyNotesBtn"),
   downloadNotes: document.getElementById("downloadNotesBtn"),
-  openTools: document.getElementById("openToolsBtn"),
   openManager: document.getElementById("openManagerBtn"),
   langSelect: document.getElementById("langSelect"),
   syncNotice: document.getElementById("syncNotice"),
   deletePageNotes: document.getElementById("deletePageNotesBtn"),
+  pageHighlights: document.getElementById("pageHighlights"),
+  emptyPageHighlights: document.getElementById("emptyPageHighlights"),
+  notePane: document.getElementById("pane-notes"),
+  pageTags: document.getElementById("pageTags"),
+  savePageTags: document.getElementById("savePageTags"),
+  importPageFile: document.getElementById("importPageFile"),
+  clearPageHighlights: document.getElementById("clearPageHighlights"),
+  recolor: document.getElementById("sidebarRecolor"),
 };
 
 const t = (key, params) => window.HkI18n.t(key, params);
@@ -65,6 +71,7 @@ const state = {
   noteTimer: 0,
   loadToken: 0,
   activeTab: "context",
+  renderedPageHighlights: "",
   applying: false,
 };
 
@@ -198,6 +205,7 @@ const makeItemButton = (item, kind) => {
     try {
       const result = await sendToTab(state.tabId, {
         type: "FOCUS_SAVED_HIGHLIGHT",
+        id: item.id,
         text: item.text,
         kind,
       });
@@ -254,6 +262,72 @@ const renderItems = (container, empty, items, kind) => {
   container.replaceChildren();
   items.forEach((item) => container.appendChild(makeItemRow(item, kind)));
   empty.hidden = items.length > 0;
+};
+
+const changePageHighlight = async (id, changes) => {
+  const pageKey = state.pageKey;
+  const result = await sendToTab(state.tabId, { type: "UPDATE_PAGE_HIGHLIGHT", id, pageKey, ...changes });
+  if (!result?.success) throw new Error(result?.error || t("sidebar.settingsError"));
+  if (state.pageKey === pageKey) await loadActiveTab();
+};
+
+const savePageTags = async (tags) => {
+  const result = await sendToTab(state.tabId, { type: "SET_PAGE_TAGS", pageKey: state.pageKey, tags });
+  if (!result?.success) throw new Error(result?.error || t("sidebar.settingsError"));
+};
+
+const importPageHighlights = async (text) => {
+  const pageKey = state.pageKey;
+  const result = await sendToTab(state.tabId, { type: "IMPORT_PAGE_HIGHLIGHTS", pageKey, text });
+  if (!result?.success) throw new Error(result?.error || t("ai.errImportFailed"));
+  if (state.pageKey === pageKey) await loadActiveTab();
+  return result;
+};
+
+const makePageHighlight = (item) => {
+  const card = document.createElement("div");
+  card.className = "page-highlight";
+  const focus = makeItemButton(item, item.kind || "passage");
+  const editor = document.createElement("details");
+  const summary = document.createElement("summary");
+  summary.textContent = t("sidebar.editHighlight");
+  const note = document.createElement("textarea");
+  note.value = item.note || "";
+  note.rows = 2;
+  note.setAttribute("aria-label", t("detail.noteLabel"));
+  const color = document.createElement("input");
+  color.type = "color";
+  const shortColor = /^#([0-9a-f]{3})$/i.exec(item.color || "");
+  color.value = /^#[0-9a-f]{6}$/i.test(item.color || "") ? item.color : shortColor ? `#${[...shortColor[1]].map((c) => c + c).join("")}` : "#fff5b8";
+  let colorChanged = false;
+  color.addEventListener("input", () => { colorChanged = true; });
+  color.setAttribute("aria-label", t("sidebar.highlightColor"));
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "quiet-button";
+  save.textContent = t("sidebar.saveHighlight");
+  save.addEventListener("click", async () => {
+    try { await changePageHighlight(item.id, { note: note.value, ...(colorChanged ? { color: color.value } : {}) }); }
+    catch (error) { setStatus(error.message, true); }
+  });
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "text-button";
+  remove.textContent = t("sidebar.deleteItem");
+  remove.addEventListener("click", async () => {
+    if (!window.confirm(t("sidebar.confirmDeleteHighlight"))) return;
+    try {
+      const result = await sendToTab(state.tabId, { type: "DELETE_PAGE_HIGHLIGHT", id: item.id, pageKey: state.pageKey });
+      if (!result?.success) throw new Error(result?.error || t("sidebar.deleteError"));
+      await loadActiveTab();
+    } catch (error) { setStatus(error.message, true); }
+  });
+  const actions = document.createElement("div");
+  actions.className = "action-row";
+  actions.append(color, save, remove);
+  editor.append(summary, note, actions);
+  card.append(focus, editor);
+  return card;
 };
 
 const buildMapList = (nodes, depth) => {
@@ -323,6 +397,19 @@ const render = () => {
   els.emptyContext.hidden = Boolean(state.context);
 
   const storedHighlights = Array.isArray(page?.highlights) ? page.highlights : [];
+  const highlightsSignature = JSON.stringify([state.pageKey, storedHighlights]);
+  if (state.renderedPageHighlights !== highlightsSignature) {
+    state.renderedPageHighlights = highlightsSignature;
+    els.pageHighlights.replaceChildren();
+    storedHighlights.forEach((item) => els.pageHighlights.appendChild(makePageHighlight(item)));
+  }
+  els.emptyPageHighlights.hidden = storedHighlights.length > 0;
+  els.notePane.hidden = !page;
+  els.pageTags.disabled = !page;
+  els.savePageTags.disabled = !page;
+  els.importPageFile.disabled = !page;
+  els.clearPageHighlights.disabled = !page;
+  els.recolor.disabled = !page;
   const visibleHighlights = [...storedHighlights, ...(page?.previewHighlights || [])];
   const terms = mergeItems(visibleHighlights.filter((item) => item.kind === "term"), state.guideTerms);
   const highlights = mergeItems(visibleHighlights.filter((item) => item.kind !== "term"), state.guideHighlights);
@@ -349,11 +436,19 @@ const render = () => {
   els.shareLink.disabled = !page;
   els.copyNotes.disabled = !page;
   els.downloadNotes.disabled = !page;
-  els.openTools.disabled = !page;
   els.deletePageNotes.hidden = !page;
   els.tabs.hidden = !page;
   els.personalNote.disabled = !page;
   activateTab(state.activeTab);
+};
+
+const activateMainView = (name) => {
+  for (const view of ["page", "reading", "notes", "settings"]) {
+    document.getElementById(`view-${view}`).hidden = view !== name;
+  }
+  document.querySelectorAll("[data-main-view]").forEach((button) => {
+    button.setAttribute("aria-current", button.dataset.mainView === name ? "page" : "false");
+  });
 };
 
 const activateTab = (name) => {
@@ -429,13 +524,14 @@ const loadActiveTab = async () => {
     state.page = response.data;
     state.pageKey = response.data.url;
     const [stored, promptInfo] = await Promise.all([
-      chrome.storage.local.get([GENERATED_NOTES_KEY, PERSONAL_NOTES_KEY, MINDMAP_KEY]),
+      chrome.storage.local.get([GENERATED_NOTES_KEY, PERSONAL_NOTES_KEY, MINDMAP_KEY, PAGE_META_KEY]),
       sendToTab(tab.id, { type: "BUILD_READING_GUIDE_PROMPT" }).catch(() => null),
     ]);
     if (token !== state.loadToken) return;
     const generated = stored[GENERATED_NOTES_KEY]?.[state.pageKey] || {};
     const personal = stored[PERSONAL_NOTES_KEY]?.[state.pageKey] || {};
     state.context = generated.context || generated.note || "";
+    els.pageTags.value = (stored[PAGE_META_KEY]?.[state.pageKey]?.tags || []).join(", ");
     state.guideTerms = generated.guideTerms || generated.unlocatedTerms || [];
     state.guideHighlights = generated.guideHighlights || generated.unlocatedHighlights || [];
     state.mindmapOutline = stored[MINDMAP_KEY]?.[state.pageKey]?.outline || "";
@@ -693,6 +789,11 @@ const downloadNotesJson = async () => {
   }
 };
 
+document.querySelectorAll("[data-main-view]").forEach((button) => {
+  button.addEventListener("click", () => activateMainView(button.dataset.mainView));
+});
+activateMainView("page");
+
 document.querySelectorAll("[role=tab]").forEach((tab) => {
   tab.addEventListener("click", () => activateTab(tab.dataset.tab));
   tab.addEventListener("keydown", (event) => {
@@ -707,6 +808,38 @@ document.querySelectorAll("[role=tab]").forEach((tab) => {
 });
 
 els.refresh.addEventListener("click", loadActiveTab);
+els.savePageTags.addEventListener("click", async () => {
+  try {
+    await savePageTags(els.pageTags.value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean));
+    setStatus(t("sidebar.tagsSaved"));
+  } catch (error) { setStatus(error.message, true); }
+});
+els.importPageFile.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const result = await importPageHighlights(await file.text());
+    setStatus(result.kind === "page" ? t("ai.bulkImported", { imported: result.count, skipped: result.skipped || 0 }) : t("ai.importedCount", { count: result.count }));
+  }
+  catch (error) { setStatus(error.message, true); }
+  finally { event.target.value = ""; }
+});
+els.clearPageHighlights.addEventListener("click", async () => {
+  if (!window.confirm(t("panel.clearConfirm"))) return;
+  try {
+    const result = await sendToTab(state.tabId, { type: "CLEAR_PAGE_HIGHLIGHTS", pageKey: state.pageKey });
+    if (!result?.success) throw new Error(result?.error || t("sidebar.settingsError"));
+    await loadActiveTab();
+  } catch (error) { setStatus(error.message, true); }
+});
+els.recolor.addEventListener("click", async () => {
+  if (!window.confirm(t("panel.recolorConfirm"))) return;
+  try {
+    const result = await sendToTab(state.tabId, { type: "RECOLOR_LEGACY_HIGHLIGHTS", pageKey: state.pageKey });
+    if (!result?.success) throw new Error(result?.error || t("sidebar.settingsError"));
+    setStatus(result.count ? t("panel.recolorDone", { count: result.count }) : t("panel.recolorNone"));
+  } catch (error) { setStatus(error.message, true); }
+});
 els.generate.addEventListener("click", generateGuide);
 els.copyPrompt.addEventListener("click", async () => {
   try {
@@ -742,15 +875,6 @@ els.response.addEventListener("paste", () => {
     if (text) applyGuideResponse(text);
   }, 30);
 });
-els.settings.addEventListener("click", async () => {
-  if (!state.tabId) return;
-  try {
-    await sendToTab(state.tabId, { type: "OPEN_AI_SETTINGS" });
-    setStatus("");
-  } catch (_error) {
-    setStatus(t("sidebar.settingsError"), true);
-  }
-});
 els.startGuide.addEventListener("click", async () => {
   try {
     const result = await sendToTab(state.tabId, { type: "START_GUIDED_READING" });
@@ -763,18 +887,14 @@ els.deletePageNotes.addEventListener("click", deletePageNotes);
 els.shareLink.addEventListener("click", shareLink);
 els.copyNotes.addEventListener("click", copyNotesMarkdown);
 els.downloadNotes.addEventListener("click", downloadNotesJson);
-els.openTools.addEventListener("click", async () => {
-  try {
-    await sendToTab(state.tabId, { type: "OPEN_PAGE_PANEL" });
-  } catch (_error) {
-    setStatus(t("sidebar.settingsError"), true);
-  }
-});
 const openManager = () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("manager.html") });
 };
 els.openManager.addEventListener("click", openManager);
-els.syncNotice.addEventListener("click", openManager);
+els.syncNotice.addEventListener("click", () => {
+  activateMainView("settings");
+  document.getElementById("syncSettings").open = true;
+});
 els.langSelect.addEventListener("change", (event) => window.HkI18n.setLang(event.target.value));
 els.personalNote.addEventListener("input", () => {
   state.noteDirty = true;
@@ -784,8 +904,8 @@ els.personalNote.addEventListener("input", () => {
   state.noteTimer = window.setTimeout(flushNote, 450);
 });
 
-chrome.runtime?.onMessage?.addListener((message) => {
-  if (message?.type === "HK_PAGE_CHANGED" && message.pageKey === state.pageKey) loadActiveTab();
+chrome.runtime?.onMessage?.addListener((message, sender) => {
+  if (message?.type === "HK_PAGE_CHANGED" && (message.pageKey === state.pageKey || sender?.tab?.id === state.tabId)) loadActiveTab();
 });
 chrome.tabs.onActivated.addListener(() => loadActiveTab());
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -828,6 +948,7 @@ window.HkI18n.initI18n().then(() => {
 });
 window.HkI18n.onLangChange(() => {
   window.HkI18n.applyDOMTranslations();
+  state.renderedPageHighlights = "";
   render();
 });
 activateTab("context");

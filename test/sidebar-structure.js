@@ -1,0 +1,13 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const html = fs.readFileSync(require.resolve("../sidepanel.html"), "utf8");
+const script = fs.readFileSync(require.resolve("../sidepanel.js"), "utf8");
+const settings = fs.readFileSync(require.resolve("../sidebar-settings.js"), "utf8");
+const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+assert.equal(new Set(ids).size, ids.length, "every element ID is unique");
+for (const [, id] of script.matchAll(/getElementById\("([^"]+)"\)/g)) assert.ok(ids.includes(id), `missing sidepanel element: ${id}`);
+for (const [, id] of settings.matchAll(/\$\("([^"]+)"\)/g)) assert.ok(ids.includes(id), `missing settings element: ${id}`);
+for (const field of ["provider", "openaiKey", "openaiModel", "geminiKey", "geminiModel", "autoHighlightPrompt", "prompt", "usePreview", "selectionOnly", "deepResearch"]) assert.ok(ids.includes(`aiSetting-${field}`), `missing AI setting: ${field}`);
+assert.ok(html.indexOf('id="openManagerBtn"') < html.indexOf('id="view-page"'), "all-notes entry remains visible above the views");
+for (const view of ["page", "reading", "notes", "settings"]) assert.ok(ids.includes(`view-${view}`), `missing main view ${view}`);
+console.log("Sidebar structure passed: required controls, views and always-visible notes entry are present.");

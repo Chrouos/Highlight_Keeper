@@ -217,6 +217,7 @@ async function checkSidebar() {
     addEventListener() {}, setAttribute() {}, append(...items) { this.children.push(...items); },
     appendChild(item) { this.children.push(item); }, replaceChildren() { this.children = []; } });
   const events = [];
+  const requests = [];
   const local = { hkGeneratedNotes: {} };
   const session = {};
   let active = { id: 1, url: articleUrl };
@@ -229,8 +230,12 @@ async function checkSidebar() {
     chrome: {
       tabs: { query: async () => [active], get: async (id) => tabs[id], onActivated: { addListener() {} }, onUpdated: { addListener() {} },
         sendMessage: async (id, message) => {
+          requests.push(message);
           if (message.type === "GET_PAGE_HIGHLIGHTS") return { success: true, data: { url: tabs[id].url, title: "Article", pageText: "Article text", highlights: [] } };
           if (message.type === "BUILD_READING_GUIDE_PROMPT") return { success: true, provider: "chatgpt", configured: true, prompt: "Prompt" };
+          if (message.type === "UPDATE_PAGE_HIGHLIGHT") return { success: true };
+          if (message.type === "SET_PAGE_TAGS") return { success: true };
+          if (message.type === "IMPORT_PAGE_HIGHLIGHTS") return { success: true, count: 1 };
           if (message.type === "APPLY_READING_GUIDE_RESPONSE") {
             assert.equal(message.pageKey, tabs[id].url);
             events.forEach((callback) => callback({ [tabs[id].url]: { newValue: [] } }, "local"));
@@ -242,10 +247,22 @@ async function checkSidebar() {
     },
   };
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync(require.resolve("../sidepanel.js"), "utf8") + "\nglobalThis.sidebar = { state, loadActiveTab, applyGuideResponse };", context);
+  vm.runInContext(fs.readFileSync(require.resolve("../sidepanel.js"), "utf8") + "\nglobalThis.sidebar = { state, loadActiveTab, applyGuideResponse, activateMainView, changePageHighlight, savePageTags, importPageHighlights };", context);
   await new Promise((resolve) => setImmediate(resolve));
   const sidebar = context.sidebar;
+  sidebar.activateMainView("settings");
+  assert.equal(nodes.get("view-settings").hidden, false, "settings is available in the side panel");
+  assert.equal(nodes.get("view-reading").hidden, true, "the reading view is hidden when settings is open");
+  sidebar.activateMainView("reading");
+  assert.equal(nodes.get("view-reading").hidden, false, "returning to reading restores the view");
   assert.equal(sidebar.state.pageKey, articleUrl);
+  await sidebar.changePageHighlight("mark-1", { note: "note" });
+  assert.ok(requests.slice(-2).some((request) => request.type === "GET_PAGE_HIGHLIGHTS"), "the list refreshes after saving a highlight");
+  assert.ok(requests.some((request) => request.type === "UPDATE_PAGE_HIGHLIGHT" && request.id === "mark-1" && request.pageKey === articleUrl && request.note === "note"), "updates target the original page and exact highlight");
+  await sidebar.savePageTags(["alpha", "beta"]);
+  assert.ok(requests.some((request) => request.type === "SET_PAGE_TAGS" && request.pageKey === articleUrl && request.tags.join(",") === "alpha,beta"), "tags are saved for the active page");
+  assert.equal((await sidebar.importPageHighlights("{}")).count, 1);
+  assert.ok(requests.some((request) => request.type === "IMPORT_PAGE_HIGHLIGHTS" && request.pageKey === articleUrl), "imports are bound to the active page");
   nodes.get("aiResponse").value = "unsent response";
   active = { id: 9, url: "https://chatgpt.com/" };
   await sidebar.loadActiveTab();

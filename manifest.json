@@ -19,7 +19,7 @@
     },
     "toggle-panel": {
       "suggested_key": { "default": "Ctrl+Shift+K", "mac": "Command+Shift+K" },
-      "description": "開關標註面板"
+      "description": "開啟側邊欄"
     }
   },
   "action": {
