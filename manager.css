@@ -1068,3 +1068,73 @@ body {
   color: var(--hk-soft);
   font-size: 12px;
 }
+
+/* Search and organization workspace */
+.hk-manager-backup > summary { cursor: pointer; color: var(--hk-soft); padding: 12px 0; }
+.hk-manager-backup .hk-manager-actions { margin: 12px 0; }
+.hk-manager-summary .hk-manager-search-row { margin: 20px 0 14px; }
+.hk-manager-summary .hk-manager-search { width: 100%; font-size: 15px; padding: 13px 15px; }
+.hk-manager-summary .hk-manager-search-label { width: 100%; }
+.hk-manager-controls { align-items: center; }
+.hk-manager-tag-filter { flex-basis: auto; width: auto; position: relative; align-items: center; }
+.hk-tag-picker { position: relative; }
+.hk-tag-picker > summary { cursor: pointer; padding: 7px 12px; background: var(--hk-sub); border: 1px solid var(--hk-line-strong); border-radius: 6px; }
+.hk-tag-picker[open] { z-index: 3; }
+.hk-tag-picker > input { display: block; width: 280px; margin-top: 8px; }
+.hk-tag-options { position: absolute; width: 280px; max-height: 280px; overflow: auto; background: var(--hk-bg); border: 1px solid var(--hk-line-strong); padding: 8px; box-shadow: 0 8px 22px #0002; display: grid; gap: 4px; }
+.hk-tag-options .hk-manager-filter-chip { text-align: left; white-space: normal; }
+.hk-manager-card-tags { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
+.hk-manager-card-tags button { cursor: pointer; font: inherit; font-size: 11px; color: var(--hk-soft); border: 0; border-radius: 4px; background: var(--hk-sub); padding: 2px 7px; }
+.hk-manager-excerpt { margin: 8px 0; color: var(--hk-soft); font-size: 13px; overflow-wrap: anywhere; }
+.hk-manager-tagmgr-dialog { max-width: 760px; }
+.hk-tag-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0; padding: 12px; background: var(--hk-sub); border-radius: 6px; }
+.hk-tag-tools input { flex: 1 1 200px; min-width: 0; }
+.hk-tag-tools p { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--hk-soft); }
+.hk-manager-tagmgr-name { flex: 1; flex-shrink: 1; }
+@media (max-width: 640px) {
+ .hk-manager-tagmgr-row { flex-wrap: wrap; }
+ .hk-manager-tagmgr-name { flex-basis: 70%; }
+ .hk-tag-picker > input, .hk-tag-options { width: 230px; }
+}
+.hk-bulk-tag-input { width: 180px; min-width: 120px; }
+.hk-manager-selection-bar { flex-wrap: wrap; }
+.hk-tag-option { display: flex; align-items: center; gap: 8px; padding: 7px; cursor: pointer; border-radius: 4px; overflow-wrap: anywhere; }
+.hk-tag-option:hover, .hk-tag-option:focus-within { background: var(--hk-sub); }
+.hk-tag-option input { flex-shrink: 0; accent-color: var(--hk-blue); }
+.hk-manager-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; padding: 16px 0; border-top: 1px solid var(--hk-line); font-size: 12px; color: var(--hk-soft); }
+.hk-manager-pagination > span:first-child { margin-right: auto; }
+.hk-manager-pagination label { display: inline-flex; align-items: center; gap: 6px; }
+.hk-manager-pagination button:disabled { opacity: .35; cursor: default; }
+
+/* Hidden actions must stay hidden even when their component uses flex. */
+[hidden] { display: none !important; }
+.hk-search-hint { margin: 6px 0 0; color: var(--hk-soft); font-size: 12px; }
+.hk-manager-search-row { display: block; }
+.hk-manager-header-right { flex-wrap: wrap; justify-content: flex-end; }
+.hk-manager-tagmgr-row > button { flex-shrink: 0; }
+.hk-manager-tagmgr-row { flex-wrap: wrap; }
+.hk-manager-tagmgr-input { flex: 1 1 150px; }
+.hk-manager-selection-actions { flex-wrap: wrap; }
+.hk-manager-backup { scroll-margin-top: 20px; }
+@media(max-width:640px) {
+  .hk-manager-header { flex-wrap: wrap; }
+  .hk-manager-header-right { justify-content: flex-start; }
+}
+
+/* Sidebar owns the disclosure and surface; embedded content is immediately usable. */
+.embedded-sync .hk-manager-sync { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.embedded-sync .hk-manager-sync-header h2 { display: none; }
+.embedded-sync .hk-manager-sync-header p { margin: 0; }
+.embedded-sync .hk-manager-actions { margin: 0; gap: 8px; }
+.embedded-sync .hk-manager-sync-fields { grid-template-columns: minmax(0,1fr); }
+.embedded-sync .hk-manager-input { min-width: 0; max-width: 100%; }
+.embedded-sync .hk-manager-sync-actions { gap: 8px; }
+.embedded-sync .hk-manager-sync-status:empty,
+.embedded-sync .hk-manager-autosync-status:empty { display: none; min-height: 0; margin: 0; }
+
+@media(prefers-color-scheme:dark) {
+ .embedded-sync { --hk-bg:#24262b;--hk-sub:#24262b;--hk-hover:#292c33;--hk-line:#363941;--hk-line-strong:#526585;--hk-ink:#eceef3;--hk-soft:#aeb3be;--hk-faint:#aeb3be;--hk-blue:#a5bfff;--hk-blue-lit:#303c56;--hk-red-lit:#34272b; }
+}
+
+.embedded-sync .hk-manager-btn-muted { background:var(--hk-blue);border-color:var(--hk-blue);color:#1d2a48; }
+@media(prefers-color-scheme:light){.embedded-sync .hk-manager-btn-muted { color:#fff; }}

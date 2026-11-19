@@ -1,0 +1,108 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Reading desk integration</title></head><body><h1>Article fixture</h1><p id="article">A page with real text to highlight.</p><pre id="results">RUNNING</pre>
+<script src="../../reading-desk-model.js"></script><script src="../../reading-desk-store.js"></script>
+<script>
+let deskRoot;const runtimeErrors=[];window.addEventListener("error",e=>runtimeErrors.push(e.message));const originalAttach=Element.prototype.attachShadow;Element.prototype.attachShadow=function(options){const result=originalAttach.call(this,options);if(this.id==='hk-reading-desk')deskRoot=result;return result;};
+const all={};const listeners=[];let runtimeListener;let currentPage='https://example.com/a';let failNext=false;let focusCount=0;let promptCopies=0;let openedAI=0,appliedReplies=0;let settingsRequests=[];let saveDelay=0,readDelay=0,failNoteNext=false,saveQuoteDelay=0;
+const storedHighlights={ 'https://example.com/a':[{id:'one',text:'First quote',note:'Original note',color:'#fff5b8',url:'https://example.com/a'}], 'https://example.com/b':[] };
+const storage={get:async()=>structuredClone(all),set:async updates=>{if(failNext){failNext=false;throw new Error('Disk full');}if(saveDelay)await new Promise(r=>setTimeout(r,saveDelay));Object.assign(all,structuredClone(updates));listeners.forEach(cb=>cb({hkReadingDesks:{}},'local'));}};
+const store=HkReadingDeskStore.createStore(storage);
+window.chrome={storage:{local:storage,onChanged:{addListener:cb=>listeners.push(cb)}},runtime:{onMessage:{addListener:cb=>runtimeListener=cb},sendMessage:async m=>{if(m.type==='HK_DESK_PATCH'){try{return{success:true,desk:await store.patch(m.pageKey,m.action)}}catch(e){return{success:false,error:e.message}}}return{success:true}}}};
+window.HkI18n={t:k=>k.split('.').pop()};
+window.HkDeskBridge={restoreDeleted:async(source,undo)=>{await store.restoreDeleted(source,undo);storedHighlights[source]=all[source];},deleteHighlights:async(source,ids)=>{all[source]=structuredClone(storedHighlights[source]);const result=await store.deleteHighlights(source,ids);storedHighlights[source]=all[source];return result;},key:()=>currentPage,highlights:async key=>{if(readDelay)await new Promise(r=>setTimeout(r,readDelay));return structuredClone(storedHighlights[key]||[])},extract:async()=> 'one',saveNote:async(key,id,note)=>{if(failNoteNext){failNoteNext=false;throw new Error('Note save failed')}if(saveQuoteDelay)await new Promise(r=>setTimeout(r,saveQuoteDelay));const h=storedHighlights[key].find(x=>x.id===id);if(!h)throw new Error('missing source');h.note=note;},focus:()=>{focusCount++;return true},copyPrompt:async()=>{promptCopies++},openAI:async()=>{openedAI++},applyReply:async(source,text)=>{if(source!==currentPage)throw new Error("wrong source");if(text==="invalid")throw new Error("invalid reply");appliedReplies++;return{success:true,context:"Article summary",previewing:false}},sidebar:async(settings)=>{settingsRequests.push(settings);return{success:true}}};
+</script><script src="../../reading-desk.js"></script><script>
+(async()=>{
+ const output=document.getElementById('results');let checks=0;const assert=(condition,message)=>{if(!condition)throw new Error(message);checks++};const wait=ms=>new Promise(r=>setTimeout(r,ms));
+ await HkReadingDeskUI.open();assert(!!deskRoot,'shadow root created');assert(!document.getElementById('hk-reading-desk').shadowRoot,'closed shadow root');
+ HkReadingDeskUI.onHighlight(storedHighlights[currentPage][0]);await wait(40);assert(deskRoot.querySelectorAll('.card').length===0,'ordinary highlighting does not create desk cards');
+ const promptButton=[...deskRoot.querySelectorAll('.dock button')].find(b=>b.textContent.includes('copyPrompt'));assert(!!promptButton,'desk exposes direct copy prompt action');promptButton.click();await wait(10);assert(promptCopies===1,'prompt copies without opening sidebar');
+ assert(!!deskRoot.querySelector('.ai-panel:not([hidden])'),'copy prompt exposes next steps in the desk');
+ deskRoot.querySelector('.ai-open-chatgpt').click();await wait(10);assert(openedAI===1,'open AI is reachable without a reading tab');
+ const reply=deskRoot.querySelector('.ai-reply');reply.value='AI article response';reply.dispatchEvent(new Event('input'));deskRoot.querySelector('.ai-apply').click();await wait(20);assert(appliedReplies===1,'reply applies within reading desk');assert(deskRoot.querySelector('.ai-result').textContent.includes('Article summary'),'desk displays returned summary');
+ reply.value='invalid';reply.dispatchEvent(new Event('input'));deskRoot.querySelector('.ai-apply').click();await wait(20);assert(reply.value==='invalid','failed apply preserves pasted response');deskRoot.querySelector('.ai-panel-close').click();
+
+ await HkReadingDeskUI.pin('one');assert(deskRoot.querySelectorAll('.card').length===1,'pin quote');
+ const beforePinAgain=deskRoot.querySelectorAll('.card').length;await HkReadingDeskUI.pin('one');assert(deskRoot.querySelectorAll('.card').length===beforePinAgain,'locating a pinned excerpt does not duplicate it');assert(deskRoot.querySelector('.card').classList.contains('is-located'),'pinned excerpt is visibly located');
+ const sameCard=deskRoot.querySelector('.card');assert(HkReadingDeskUI.locateExisting('one')===true,'source click locates an existing card');assert(deskRoot.querySelector('.card')===sameCard,'navigation does not recreate the note editor');
+ assert(sameCard.querySelector('.note-preview')?.textContent==='Original note','thought opens as readable text');assert(sameCard.querySelector('textarea').hidden,'reading a thought does not focus an editor');sameCard.querySelector('.edit-thought').click();assert(!sameCard.querySelector('textarea').hidden,'editing is explicit');
+ const quoteBody=sameCard.querySelector('.body');const noteBox=sameCard.querySelector('textarea');assert(quoteBody.getBoundingClientRect().bottom<=noteBox.getBoundingClientRect().top+1,'quote and thought do not overlap');
+ assert(HkReadingDeskUI.locateExisting('not-pinned')===false,'unpinned source navigation does not create a new card');
+
+ let field=deskRoot.querySelector('textarea');assert(field.value==='Original note','canonical highlight note loads');field.value='New thought';field.dispatchEvent(new Event('input'));await wait(450);assert(storedHighlights[currentPage][0].note==='New thought','quote note saved');deskRoot.querySelector('.edit-thought').click();assert(field.hidden,'done editing returns to reading mode');assert(deskRoot.querySelector('.note-preview').textContent==='New thought','reading view reflects saved edits');
+ deskRoot.querySelector('.source').click();assert(focusCount===1,'source navigation uses bridge');
+ deskRoot.querySelector('.dock button').click();assert(deskRoot.querySelectorAll('.card').length===2,'new note card');let note=deskRoot.querySelector('.note textarea');note.value='Independent thought';note.dispatchEvent(new Event('input'));await wait(450);assert(all.hkReadingDesks[currentPage].cards.some(c=>c.text==='Independent thought'),'free note auto saves');
+ note.blur();const card=deskRoot.querySelector('.note');const head=card.querySelector('header');head.focus();head.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));await wait(50);assert(all.hkReadingDesks[currentPage].cards.find(c=>c.type==='note').x>16,'keyboard movement persists');
+ // Change route while the debounce is pending: the old page must get the text.
+ note=deskRoot.querySelector('.note textarea');note.value='Written before navigation';note.dispatchEvent(new Event('input'));currentPage='https://example.com/b';HkReadingDeskUI.navigate();await wait(100);assert(all.hkReadingDesks['https://example.com/a'].cards.some(c=>c.text==='Written before navigation'),'navigation flush bound to original page');assert(deskRoot.querySelectorAll('.card').length===0,'new page has no old cards');
+ currentPage='https://example.com/a';HkReadingDeskUI.navigate();await wait(100);assert(deskRoot.querySelector('.note textarea').value==='Written before navigation','reopen restores note');
+ failNext=true;note=deskRoot.querySelector('.note textarea');note.value='Retain on failure';note.dispatchEvent(new Event('input'));await wait(450);assert(!deskRoot.querySelector('.retry').hidden,'save failure exposes retry');assert(note.value==='Retain on failure','failed save retains typed text');deskRoot.querySelector('.retry').click();await wait(80);assert(all.hkReadingDesks[currentPage].cards.some(c=>c.text==='Retain on failure'),'retry saves retained draft');
+
+ // Reload may read storage before a pending save finishes; it must retain the new draft.
+ note=deskRoot.querySelector('.note textarea');note.value='Newest text during reload';note.dispatchEvent(new Event('input'));note.dispatchEvent(new Event('blur'));saveDelay=100;readDelay=180;
+ await HkReadingDeskUI.open();saveDelay=0;readDelay=0;
+ assert(deskRoot.querySelector('.note textarea').value==='Newest text during reload','reload cannot resurrect stale text');
+
+ let quote=deskRoot.querySelector('.card:not(.note) textarea');
+ failNoteNext=true;quote.value='obsolete failed text';quote.dispatchEvent(new Event('input'));quote.dispatchEvent(new Event('blur'));await wait(50);
+ assert(!deskRoot.querySelector('.retry').hidden,'failed quote exposes retry');
+ saveQuoteDelay=120;quote.value='newer successful text';quote.dispatchEvent(new Event('input'));quote.dispatchEvent(new Event('blur'));deskRoot.querySelector('.retry').click();await wait(300);saveQuoteDelay=0;
+ assert(storedHighlights[currentPage][0].note==='newer successful text','obsolete retry must not overwrite newer quote edit');
+
+ const collapseButton=[...deskRoot.querySelectorAll('.dock button')].find(b=>b.textContent.includes('collapse'));
+ collapseButton.click();
+ assert(collapseButton.textContent.includes('expand'),'collapsed cards offer explicit expand action');
+ assert([...deskRoot.querySelectorAll('.card')].every(c=>c.classList.contains('collapsed')),'all cards collapsed');
+ collapseButton.click();assert([...deskRoot.querySelectorAll('.card')].every(c=>!c.classList.contains('collapsed')),'expand restores card contents');
+
+ const freeNote=deskRoot.querySelector('.note');const beforeDelete=deskRoot.querySelectorAll('.note').length;
+ window.confirm=()=>false;freeNote.querySelector('.head button:last-child').click();
+ assert(deskRoot.querySelectorAll('.note').length===beforeDelete,'cancel keeps free note content');
+ window.confirm=()=>true;freeNote.querySelector('.head button:last-child').click();await wait(30);
+ assert(deskRoot.querySelectorAll('.note').length===beforeDelete-1,'confirmed delete removes free note');
+ const quoteCard=deskRoot.querySelector('.card:not(.note)');quoteCard.querySelector('.head button:last-child').click();await wait(30);
+ assert(storedHighlights[currentPage].length===1,'removing excerpt from desk keeps canonical highlight');
+
+ storedHighlights[currentPage].push({id:'edge',text:'An excerpt near the right edge',note:'A longer thought. '.repeat(30),url:currentPage});
+ const pinnedX=innerWidth-236;await HkReadingDeskUI.pin('edge',{x:pinnedX,y:120});const edgeCard=deskRoot.querySelector('.quote-card');assert(edgeCard.getBoundingClientRect().right<=innerWidth-8,'expanded reading note stays within the right edge');assert(edgeCard.offsetWidth===320,'pinned thoughts use a readable width');
+ const beforePanel=HkReadingDeskUI.annotationState().obstacles.length;[...deskRoot.querySelectorAll('.dock button')].find(b=>b.textContent.includes('materials')).click();assert(HkReadingDeskUI.annotationState().obstacles.length>beforePanel,'open highlight tray is an annotation obstacle');[...deskRoot.querySelectorAll('.dock button')].find(b=>b.textContent.includes('pasteReply')).click();assert(HkReadingDeskUI.annotationState().obstacles.length>beforePanel,'open AI panel is an annotation obstacle');
+
+ aiPanelClose=deskRoot.querySelector('.ai-panel-close');if(aiPanelClose)aiPanelClose.click();[...deskRoot.querySelectorAll('.dock button')].find(b=>b.textContent.includes('materials')).click();
+ const countBeforeJump=deskRoot.querySelectorAll('.card').length;const focusBefore=focusCount;deskRoot.querySelector('.tray-source').click();assert(focusCount===focusBefore+1,'highlight list text jumps to the source paragraph');assert(deskRoot.querySelectorAll('.card').length===countBeforeJump,'source navigation does not pin a card');assert(deskRoot.querySelector('.tray').hidden,'source navigation dismisses the list');
+
+ storedHighlights[currentPage].push({id:'overlap',text:'Another source',note:'A second thought with several lines of text. '.repeat(8),url:currentPage});await HkReadingDeskUI.pin('overlap',{x:pinnedX,y:120});
+ const visibleRects=[...deskRoot.querySelectorAll('.card')].filter(node=>!node.hidden).map(node=>node.getBoundingClientRect());
+ assert(visibleRects.every((a,i)=>visibleRects.every((b,j)=>i===j||a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top)),'pinned note boxes do not overlap');
+ assert(getComputedStyle(deskRoot.querySelector('.quote-card .note-preview')).fontSize==='14px','long thoughts use steady reading typography');
+ assert(!getComputedStyle(deskRoot.querySelector('.quote-card')).backgroundColor.startsWith('rgba'),'pinned notes have opaque paper backgrounds');
+
+ deskRoot.querySelector('.quote-card .edit-thought').click();const editRects=[...deskRoot.querySelectorAll('.card')].filter(node=>!node.hidden).map(node=>node.getBoundingClientRect());assert(editRects.every((a,i)=>editRects.every((b,j)=>i===j||a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top)),'editing preserves non-overlapping note placement');deskRoot.querySelector('.quote-card .edit-thought').click();
+
+ const moved=deskRoot.querySelector('.quote-card .head');for(let i=0;i<8;i++)moved.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));await wait(50);const keyboardRects=[...deskRoot.querySelectorAll('.card')].filter(node=>!node.hidden).map(node=>node.getBoundingClientRect());assert(keyboardRects.every((a,i)=>keyboardRects.every((b,j)=>i===j||a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top)),'keyboard movement also avoids overlap');
+ Object.defineProperty(window,'innerWidth',{configurable:true,value:375});Object.defineProperty(window,'innerHeight',{configurable:true,value:667});
+ for(let i=0;i<12;i++)all.hkReadingDesks[currentPage]=HkReadingDesk.patch(all.hkReadingDesks[currentPage],{type:'upsert',card:{id:'overflow:'+i,type:'note',text:'Free thought '+i,x:16,y:80}});
+ await HkReadingDeskUI.open();const hiddenNote=[...deskRoot.querySelectorAll('.note')].find(node=>node.hidden);assert(!!hiddenNote,'overflow fixture contains a hidden free note');[...deskRoot.querySelectorAll('.dock button')].find(b=>b.textContent.includes('materials')).click();const recover=[...deskRoot.querySelectorAll('.note-tray-item')].find(button=>button.dataset.cardId===hiddenNote.dataset.cardId);assert(!!recover,'hidden free notes remain reachable from the tray');recover.click();assert(!hiddenNote.hidden&&!hiddenNote.classList.contains('layout-collapsed'),'locating an overflow free note restores its contents');
+
+ [...deskRoot.querySelectorAll('.dock button')].find(b=>b.textContent.includes('materials')).click();const pinnedBefore=all.hkReadingDesks[currentPage].cards.filter(c=>c.type==='quote').length;const focusBeforeUnpin=focusCount;saveDelay=80;deskRoot.querySelector('.tray-pin.is-pinned').click();window.dispatchEvent(new Event('resize'));await wait(120);saveDelay=0;assert(runtimeErrors.length===0,'unpin remains safe during pending persistence and resize');assert(all.hkReadingDesks[currentPage].cards.filter(c=>c.type==='quote').length===pinnedBefore-1,'pressing a pinned icon unpins without jumping');assert(focusCount===focusBeforeUnpin,'unpin does not navigate the page');
+ const countBeforeDelete=storedHighlights[currentPage].length;window.confirm=()=>false;deskRoot.querySelector('.tray-delete').click();await wait(20);assert(storedHighlights[currentPage].length===countBeforeDelete,'cancel keeps highlights');
+ window.confirm=()=>true;deskRoot.querySelector('.tray-delete').click();await wait(100);assert(storedHighlights[currentPage].length===countBeforeDelete-1,'per-row delete removes one saved highlight');
+ const freeBeforeClear=all.hkReadingDesks[currentPage].cards.filter(c=>c.type==='note').length;deskRoot.querySelector('.tray-clear').click();await wait(100);assert(storedHighlights[currentPage].length===0,'clear all removes page highlights');assert(all.hkReadingDesks[currentPage].cards.filter(c=>c.type==='note').length===freeBeforeClear,'clear all keeps free notes');assert(all.hkReadingDesks[currentPage].cards.every(c=>c.type!=='quote'),'clear also removes related pinned annotations');
+
+ assert(!deskRoot.querySelector('.undo-bar').hidden,'highlight deletion offers undo');
+ deskRoot.querySelector('.undo-bar button').click();await wait(100);assert(storedHighlights[currentPage].length>0,'undo restores deleted highlights');
+
+ const toolbarMenu=deskRoot.querySelector('.dock details');toolbarMenu.open=true;toolbarMenu.querySelector('summary').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));assert(!toolbarMenu.open,'Escape closes toolbar menu');
+ toolbarMenu.open=true;document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));assert(!toolbarMenu.open,'outside click closes toolbar menu');
+ const advanced=[...deskRoot.querySelectorAll('.dock button')].find(b=>b.textContent.includes('advancedShortcut'));
+ assert(!!advanced,'advanced settings reachable directly from desk menu');advanced.click();await wait(20);assert(settingsRequests.at(-1)===true,'direct shortcut requests settings view');
+ const settingsButton=[...deskRoot.querySelectorAll('.dock button')].find(b=>b.textContent.includes('settings'));settingsButton.click();
+ const settings=deskRoot.querySelector('.settings-panel');assert(!settings.hidden,'settings opens directly from desk');
+ const select=settings.querySelector('select');select.value='hover';select.dispatchEvent(new Event('change'));await wait(30);assert(all.hkReadingPreferences.mode==='hover','display preference persists');
+ const range=settings.querySelector('input');range.value=18;range.dispatchEvent(new Event('input'));range.dispatchEvent(new Event('change'));await wait(30);assert(HkReadingDeskUI.preferences().fontSize===18,'font preference updates immediately');assert(all.hkReadingPreferences.fontSize===18,'font preference persists');
+ settings.querySelector('.ai-heading button').click();
+ const freeNode=[...deskRoot.querySelectorAll('.note')].find(n=>!n.hidden);
+ const freeId=freeNode.dataset.cardId;freeNode.querySelector('.head button:last-child').click();await wait(70);
+ assert(!all.hkReadingDesks[currentPage].cards.some(c=>c.id===freeId),'free note deletion persists');
+ deskRoot.querySelector('.undo-bar button').click();await wait(100);assert(all.hkReadingDesks[currentPage].cards.some(c=>c.id===freeId),'undo restores deleted free note');
+ assert(runtimeErrors.length===0,'settings and undo run without browser errors');
+ output.textContent='PASS '+checks+' browser integration checks';
+})().catch(error=>{document.getElementById('results').textContent='FAIL '+error.stack;});
+</script></body></html>

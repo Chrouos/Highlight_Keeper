@@ -120,6 +120,20 @@ const conflictUrls = (result) => result.conflicts.map((c) => c.url);
   assert.ok(![...github.blobs.values()].some((c) => c.includes("FULL ARTICLE TEXT")), "article text is not uploaded");
   assert.ok(remotePaths().includes("backups/categories/AI.json") && remotePaths().includes("backups/index.json"));
 
+  // Corrupt page records must never become deletion instructions.
+  const validHead=github.head;
+  const corruptContent=JSON.stringify({type:'highlight-keeper-bulk',pages:[{url:URL_A,entries:'corrupt'}]});
+  const corruptBlob=gitSha(corruptContent);github.blobs.set(corruptBlob,corruptContent);
+  const corruptTree=new Map(headTree(validHead));corruptTree.set('backups/hk.json',corruptBlob);
+  const corruptTreeSha=sha1('audit-corrupt-tree');github.trees.set(corruptTreeSha,corruptTree);
+  const corruptHead=sha1('audit-corrupt-head');github.commits.set(corruptHead,{tree:corruptTreeSha,parents:[validHead]});github.head=corruptHead;
+  const beforeCorrupt=structuredClone(laptop[URL_A]);
+  result=await sync(laptop);
+  assert.equal(result.errorCode,'remote-invalid','malformed remote page rejects whole backup');
+  assert.deepEqual(laptop[URL_A],beforeCorrupt,'malformed remote does not erase local page');
+  assert.equal(github.head,corruptHead,'malformed remote is not overwritten');
+  github.head=validHead;
+  result=await sync(laptop);
   // Nothing changed: one request, nothing written.
   github.calls.length = 0;
   result = await sync(laptop);
@@ -138,6 +152,12 @@ const conflictUrls = (result) => result.conflicts.map((c) => c.url);
   assert.deepEqual(github.calls, ["GET /git/ref/heads/main"], "a pull does not cause a follow-up push");
 
   // One side edits: it travels, and only changed files are uploaded.
+  const beforeForeignHead=github.head,foreignTree=new Map(headTree(github.head));
+  for(const path of ['backups/categories/README.md','backups/categories/my-data.json']){
+    const text='unrelated '+path,blob=gitSha(text);github.blobs.set(blob,text);foreignTree.set(path,blob);
+  }
+  const foreignTreeSha=sha1('foreign-tree');github.trees.set(foreignTreeSha,foreignTree);
+  const foreignHead=sha1('foreign-head');github.commits.set(foreignHead,{tree:foreignTreeSha,parents:[beforeForeignHead]});github.head=foreignHead;
   laptop[URL_B] = mark("bravo");
   laptop.__hk_page_meta__[URL_B] = { title: "B", tags: ["Other"] };
   await sync(laptop);
@@ -211,6 +231,8 @@ const conflictUrls = (result) => result.conflicts.map((c) => c.url);
   delete laptop.__hk_page_meta__[URL_B];
   await sync(laptop);
   assert.ok(!remotePaths().includes("backups/categories/Other.json"), "empty category file is removed");
+  assert(remotePaths().includes('backups/categories/README.md'),'unrelated documentation survives category cleanup');
+  assert(remotePaths().includes('backups/categories/my-data.json'),'unrelated JSON survives category cleanup');
   await sync(desktop);
 
   // Another device pushes mid-cycle: the commit is refused rather than overwriting them.

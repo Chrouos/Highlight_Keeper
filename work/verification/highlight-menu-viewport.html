@@ -1,0 +1,42 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../contentStyles.css"></head><body><pre id="result">RUNNING</pre><div class="hk-highlight-menu" id="menu"><div class="hk-menu-header">劃線與心得</div><div class="hk-menu-section hk-menu-colors"><label class="hk-menu-label">顏色<input type="color" class="hk-menu-color-input"></label><div class="hk-menu-swatches"><button class="hk-menu-swatch"></button><button class="hk-menu-swatch"></button><button class="hk-menu-swatch"></button><button class="hk-menu-swatch"></button><button class="hk-menu-swatch"></button><button class="hk-menu-swatch"></button></div></div><div class="hk-menu-section"><label class="hk-menu-label">心得<button class="hk-menu-translate-btn">翻譯</button></label><textarea class="hk-menu-note" rows="6" placeholder="寫下這段帶給你的想法…"></textarea></div><div class="hk-menu-actions"><button class="hk-menu-btn hk-menu-btn-primary">儲存心得</button><button class="hk-menu-btn hk-menu-btn-danger">刪除標註</button></div><div class="hk-menu-status"></div></div><script>
+const menu=document.getElementById('menu');const ensureHighlightMenu=()=>menu;
+const getHighlightVisualRect=()=>({left:innerWidth-30,right:innerWidth-10,top:innerHeight-50,bottom:innerHeight-30});
+const positionHighlightMenu = (highlightEl) => {
+  const menu = ensureHighlightMenu();
+  if (!highlightEl) return;
+  const margin = 12;
+  menu.style.visibility = "hidden";
+  menu.style.opacity = "0";
+  menu.style.display = "flex";
+
+  window.requestAnimationFrame(() => {
+    const rect = getHighlightVisualRect(highlightEl);
+    if (!rect) return;
+    const menuRect = menu.getBoundingClientRect();
+    let top = rect.bottom + margin;
+    let left = rect.left;
+
+    if (left + menuRect.width > window.innerWidth - margin) {
+      left = window.innerWidth - menuRect.width - margin;
+    }
+    if (left < margin) {
+      left = margin;
+    }
+
+    if (top + menuRect.height > window.innerHeight - margin) {
+      top = rect.top - menuRect.height - margin;
+      if (top < margin) {
+        top = window.innerHeight - menuRect.height - margin;
+      }
+    }
+
+    menu.style.top = `${Math.max(margin, top)}px`;
+    menu.style.left = `${Math.max(margin, left)}px`;
+    menu.style.visibility = "visible";
+    menu.style.opacity = "1";
+  });
+};
+
+
+(async()=>{positionHighlightMenu({});await new Promise(r=>setTimeout(r,100));const rect=menu.getBoundingClientRect();const note=menu.querySelector('textarea').getBoundingClientRect();if(note.height>140)throw Error('Empty thoughts field too tall: '+note.height);if(rect.right>innerWidth-11||rect.bottom>innerHeight-11||rect.top<11||rect.left<11)throw Error('Menu outside viewport: '+JSON.stringify(rect));if(menu.scrollWidth>menu.clientWidth+1)throw Error('Horizontal overflow');document.getElementById('result').textContent='PASS compact menu and viewport positioning';})().catch(e=>document.getElementById('result').textContent='FAIL '+e.message);
+</script></body></html>

@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Highlight Keeper</title>
+    <link rel="stylesheet" href="../../sidepanel.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div class="heading">
+          <h1 id="pageTitle" class="page-title">—</h1>
+          <p id="pageUrl" class="page-url"></p>
+        </div>
+        <button id="refreshBtn" class="icon-button" type="button" data-i18n-title="sidebar.refresh" data-i18n-aria-label="sidebar.refresh" aria-label="重新整理"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M19 12a7 7 0 1 0-2 5"/></svg></button>
+      </header>
+
+      <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+      <button id="syncNotice" class="sync-notice" type="button" hidden></button>
+      <div class="workspace-links">
+      <button id="openManagerBtn" class="quiet-button library-button" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h6v14H4zM14 5h6v14h-6z"/></svg><span data-i18n="popup.openManager">開啟收藏總覽</span></button>
+      <button id="openReadingDesk" class="quiet-button" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg><span data-i18n="desk.open">開啟閱讀工作桌</span></button>
+      </div>
+
+      <label class="library-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><span data-i18n="sidebar.findSaved">搜尋收藏</span><input type="search" id="librarySearch" data-i18n-placeholder="sidebar.findSavedPlaceholder" placeholder="搜尋標題、標籤或筆記" /></label>
+      <nav class="main-nav" aria-label="功能">
+        <button type="button" data-main-view="page" data-i18n="sidebar.mainPage">本頁</button>
+        <button type="button" data-main-view="reading" data-i18n="sidebar.mainReading">AI 導讀</button>
+        <button type="button" data-main-view="notes" data-i18n="sidebar.mainNotes">我的筆記</button>
+        <button type="button" data-main-view="library" data-i18n="sidebar.library">收藏</button>
+        <button type="button" data-main-view="settings" data-i18n="sidebar.mainSettings">設定</button>
+      </nav>
+      <section id="view-library" class="main-view" hidden>
+        <div class="pane"><h2 data-i18n="sidebar.library">收藏</h2><p class="empty" id="libraryHint"></p><div id="libraryResults" class="item-list"></div><button type="button" id="libraryMore" class="quiet-button" data-i18n="sidebar.libraryMore" hidden>顯示更多</button></div>
+      </section>
+      <section id="view-page" class="main-view">
+        <div class="pane">
+          <h2 data-i18n="sidebar.mainPage">本頁</h2>
+          <div id="pageHighlights" class="item-list"></div>
+          <p id="emptyPageHighlights" class="empty" data-i18n="sidebar.emptyPageHighlights">這一頁還沒有標註。</p>
+          <details class="page-actions"><summary data-i18n="sidebar.organizePage">整理標籤</summary>
+          <label class="field-label"><span data-i18n="sidebar.pageTags">頁面標籤（用逗號分隔）</span><input id="pageTags" type="text" /></label>
+          <button id="savePageTags" class="quiet-button" type="button" data-i18n="sidebar.saveTags">儲存標籤</button>
+          </details>
+          <details class="page-actions"><summary data-i18n="sidebar.pageActions">分享與匯出</summary>
+            <div class="action-row">
+              <button id="shareLinkBtn" class="quiet-button" type="button" data-i18n="popup.shareLink" data-i18n-title="popup.shareLinkTitle">複製分享連結</button>
+              <button id="copyNotesBtn" class="quiet-button" type="button" data-i18n="popup.copyNotesShort" data-i18n-title="popup.copyNotesTitle">複製 Markdown</button>
+              <button id="downloadNotesBtn" class="quiet-button" type="button" data-i18n="popup.downloadNotesShort" data-i18n-title="popup.downloadNotesTitle">下載 JSON</button>
+              <label class="quiet-button file-button"><span data-i18n="panel.archiveImport">匯入 JSON</span><input id="importPageFile" type="file" accept="application/json" /></label>
+            </div>
+          </details>
+          <details class="page-actions maintenance-actions"><summary data-i18n="sidebar.pageMaintenance">清除與刪除</summary>
+            <div class="action-row">
+          <button id="clearPageHighlights" class="quiet-button" type="button" data-i18n="panel.clearPage">只清除頁面標記</button>
+          <button id="deletePageNotesBtn" class="danger-button" type="button" data-i18n="sidebar.deletePageNotes" hidden>刪除這篇文章的筆記</button>
+            </div>
+          </details>
+        </div>
+      </section>
+      <section id="view-settings" class="main-view" hidden>
+      <details id="moreTools" class="card more-tools">
+        <summary data-i18n="sidebar.displaySettings">顯示設定</summary>
+        <label class="field-label"><span data-i18n="popup.langLabel">顯示語言</span><select id="langSelect" class="lang-select" data-i18n-aria-label="popup.langLabel" aria-label="顯示語言">
+          <option value="zh" data-i18n="popup.langZh">繁體中文</option>
+          <option value="en" data-i18n="popup.langEn">English</option>
+        </select></label>
+        <label class="field-label"><span data-i18n="sidebar.fontSize">閱讀字級</span><input id="sidebarFontScale" type="range" min="0.85" max="1.35" step="0.05" value="1" /></label>
+      </details>
+      <details class="card"><summary data-i18n="popup.paletteTitle">標註顏色</summary><div id="sidebarPalette" class="palette-list"></div><div class="action-row"><input id="sidebarNewColor" type="color" value="#fff5b8" data-i18n-aria-label="sidebar.highlightColor" aria-label="標註顏色" /><button id="sidebarAddColor" class="quiet-button" type="button" data-i18n="popup.addToPalette">加入色票</button></div><button id="sidebarRecolor" class="quiet-button" type="button" data-i18n="panel.recolorLegacy">把舊的深色標註換淺</button></details>
+      <details id="syncSettings" class="card"><summary data-i18n="manager.backupTools">備份與同步</summary><iframe class="sync-frame" data-src="manager.html?embed=sync" title="GitHub 備份" data-i18n-title="manager.githubBackup"></iframe></details>
+      <details class="card">
+        <summary data-i18n="sidebar.openSettings">AI 設定</summary>
+        <form id="sidebarAiForm">
+          <label class="field-label"><span data-i18n="panel.providerLabel">AI 服務</span><select id="aiSetting-provider"><option value="chatgpt">ChatGPT</option><option value="gemini-web">Gemini</option><option value="openai">OpenAI API</option><option value="gemini">Gemini API</option></select></label>
+          <div data-ai-provider="openai" hidden><label class="field-label">OpenAI API Key<input id="aiSetting-openaiKey" type="password" autocomplete="off" /></label><label class="field-label"><span data-i18n="panel.modelLabel">模型</span><input id="aiSetting-openaiModel" /></label></div>
+          <div data-ai-provider="gemini" hidden><label class="field-label">Gemini API Key<input id="aiSetting-geminiKey" type="password" autocomplete="off" /></label><label class="field-label"><span data-i18n="panel.modelLabel">模型</span><input id="aiSetting-geminiModel" /></label></div>
+          <div class="field-label"><span data-i18n="panel.categoryLabel">標註分類</span><div id="sidebarCategoryList"></div></div>
+          <div class="action-row"><button id="sidebarAddCategory" class="quiet-button" type="button" data-i18n="panel.addCategory">新增分類</button><button id="sidebarResetCategories" class="quiet-button" type="button" data-i18n="panel.resetCategories">重設分類</button></div>
+          <label class="field-label"><span data-i18n="sidebar.extraPrompt">重點整理補充要求</span><textarea id="aiSetting-autoHighlightPrompt" rows="3"></textarea></label>
+          <label class="field-label"><span data-i18n="sidebar.summaryPrompt">摘要補充要求</span><textarea id="aiSetting-prompt" rows="3"></textarea></label>
+          <label class="check-row"><input id="aiSetting-usePreview" type="checkbox" /><span data-i18n="sidebar.previewOption">套用前預覽</span></label>
+          <label class="check-row"><input id="aiSetting-selectionOnly" type="checkbox" /><span data-i18n="sidebar.selectionOption">只標選取的文字</span></label>
+          <label class="check-row"><input id="aiSetting-deepResearch" type="checkbox" /><span data-i18n="panel.deepResearch">逐段延伸</span></label>
+          <button class="quiet-button" type="submit" data-i18n="sidebar.saveSettings">儲存設定</button>
+          <p id="sidebarAiStatus" class="save-status" role="status"></p>
+        </form>
+      </details>
+      </section>
+
+      <section id="view-reading" class="main-view" hidden>
+      <details id="aiControls" class="card ai-controls" open>
+        <summary data-i18n="sidebar.aiTools">用 AI 整理這篇</summary>
+        <div class="action-row">
+          <button id="copyPromptBtn" class="primary-button" type="button" data-i18n="sidebar.copyPrompt">複製 Prompt</button>
+          <button id="openWebAiBtn" class="quiet-button" type="button" data-i18n="sidebar.openChatgpt" hidden>開啟 ChatGPT</button>
+          <button id="generateBtn" class="quiet-button" type="button" data-i18n="sidebar.generate" hidden>用 API 一鍵整理</button>
+        </div>
+        <div class="manual-paste">
+          <textarea id="aiResponse" rows="3" data-i18n-aria-label="sidebar.responseLabel" data-i18n-placeholder="sidebar.pastePlaceholder" placeholder="把 AI 的回覆貼在這裡，貼上後會自動套用"></textarea>
+          <div class="action-row">
+            <button id="applyResponseBtn" class="quiet-button" type="button" data-i18n="sidebar.applyResponse">套用回覆</button>
+          </div>
+        </div>
+      </details>
+
+      <nav class="tabs" role="tablist" data-i18n-aria-label="sidebar.tabsLabel" aria-label="閱讀導覽分頁">
+        <button id="tab-context" class="tab" role="tab" aria-selected="true" aria-controls="pane-context" data-tab="context" data-i18n="sidebar.tab.context">脈絡</button>
+        <button id="tab-terms" class="tab" role="tab" aria-selected="false" aria-controls="pane-terms" data-tab="terms">
+          <span data-i18n="sidebar.tab.terms">名詞解釋</span><span id="termsCount" class="count" hidden></span>
+        </button>
+        <button id="tab-highlights" class="tab" role="tab" aria-selected="false" aria-controls="pane-highlights" data-tab="highlights">
+          <span data-i18n="sidebar.tab.highlights">重點整理</span><span id="highlightsCount" class="count" hidden></span>
+        </button>
+      </nav>
+
+      <section id="pane-context" class="pane" role="tabpanel" aria-labelledby="tab-context">
+        <h2 data-i18n="sidebar.contextHeading">論述脈絡</h2>
+        <p id="contextText" class="context-text"></p>
+        <p id="emptyContext" class="empty" data-i18n="sidebar.empty.context">尚無文章脈絡。</p>
+        <div id="mapSection" class="map-section" hidden>
+          <div class="section-head">
+            <h2 data-i18n="sidebar.mapHeading">閱讀地圖</h2>
+            <button id="startGuideBtn" class="quiet-button" type="button" data-i18n="sidebar.startGuide">開始導讀</button>
+          </div>
+          <div id="readingMap" class="reading-map"></div>
+        </div>
+      </section>
+      <section id="pane-terms" class="pane" role="tabpanel" aria-labelledby="tab-terms" hidden>
+        <h2 data-i18n="sidebar.tab.terms">名詞解釋</h2>
+        <div id="termsList" class="item-list"></div>
+        <p id="emptyTerms" class="empty" data-i18n="sidebar.empty.terms">尚無名詞解釋。</p>
+      </section>
+      <section id="pane-highlights" class="pane" role="tabpanel" aria-labelledby="tab-highlights" hidden>
+        <h2 data-i18n="sidebar.tab.highlights">重點整理</h2>
+        <div id="highlightsList" class="item-list"></div>
+        <p id="emptyHighlights" class="empty" data-i18n="sidebar.empty.highlights">尚無重點整理。</p>
+      </section>
+      </section>
+      <section id="view-notes" class="main-view" hidden>
+      <section id="pane-notes" class="pane notes-pane" hidden>
+        <h2 data-i18n="sidebar.articleNotes">本篇筆記總覽</h2>
+        <div id="articleNotesOverview" class="article-notes-overview"></div>
+        <details id="legacyArticleNotes" class="page-actions" hidden>
+          <summary data-i18n="sidebar.legacyNotes">先前的文章筆記</summary>
+          <textarea id="personalNote" rows="3" data-i18n-aria-label="sidebar.noteLabel" data-i18n-placeholder="sidebar.notePlaceholder" placeholder="記下自己的想法、問題或待查資料"></textarea>
+          <p id="noteSaveStatus" class="save-status" data-i18n="sidebar.notesSaved">已儲存</p>
+        </details>
+      </section>
+      </section>
+      <p id="noPage" class="empty unsupported" data-i18n="sidebar.unsupported" hidden>此分頁無法讀取文章內容。</p>
+
+    </main>
+
+
+
+
+
+
+
+  <script>
+if(new URLSearchParams(location.search).get('theme')==='light'){
+ const light={bg:'#f6f7f9',surface:'#ffffff',border:'#e3e6ec',text:'#24262b',muted:'#616773',link:'#365fc3','tab-bg':'#eceef3',accent:'#365fc3','accent-text':'#ffffff','accent-border':'#365fc3','error-text':'#994646','error-bg':'#f9eeee'};
+ for(const [name,value]of Object.entries(light))document.documentElement.style.setProperty('--'+name,value);
+ document.documentElement.style.colorScheme='light';
+}
+const w=Number(new URLSearchParams(location.search).get('width'));if(w)document.querySelector('.app').style.width=w+'px';
+const t=k=>k, state={tabId:null};
+window.HkParsers={breakNoteLines:t=>t};
+const breakLines = (text) => window.HkParsers?.breakNoteLines(text) ?? String(text ?? "");
+
+// 一行一個區塊；「例子：」這類開頭的小標加粗，掃一眼就知道每行在講什麼。
+const fillNoteLines = (container, text) => {
+  breakLines(text).split("\n").forEach((line) => {
+    const content = line.trim();
+    if (!content) return;
+    const row = document.createElement("span");
+    row.className = "note-line";
+    const labeled = content.match(/^([^：:\s]{1,8}[：:])\s*(.*)$/);
+    if (labeled && !/^https?:/i.test(content)) {
+      const label = document.createElement("strong");
+      label.textContent = labeled[1];
+      row.append(label, labeled[2]);
+    } else {
+      row.textContent = content;
+    }
+    container.appendChild(row);
+  });
+};
+
+const makeItemButton = (item, kind) => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "item-button";
+  // 色條對應頁面上的標註顏色，讓清單與原文對得起來。
+  if (item.color) button.style?.setProperty("--item-color", item.color);
+  if (item.unavailable && !item.covered) {
+    button.disabled = true;
+    button.classList.add("is-unavailable");
+  }
+  if ((item.unavailable && !item.covered) || item.notOnPage) {
+    const unavailable = document.createElement("span");
+    // 名詞本來就可能只是概念，沒有標記仍有解釋，不用警示。
+    const termOnly = kind === "term" && item.unavailable && !item.notApplied;
+    unavailable.className = termOnly ? "item-kind is-quiet" : "item-kind";
+    unavailable.textContent = t(item.notApplied ? "sidebar.notApplied" : termOnly ? "sidebar.termNotInArticle" : "sidebar.unavailable");
+    button.appendChild(unavailable);
+  }
+  button.addEventListener("click", async () => {
+    if (!state.tabId) return;
+    try {
+      const result = await sendToTab(state.tabId, {
+        type: "FOCUS_SAVED_HIGHLIGHT",
+        id: item.id,
+        text: item.text,
+        kind,
+      });
+      if (!result?.success) setStatus(result?.error || t("sidebar.noMatch"), true);
+      else setStatus("");
+    } catch (_error) {
+      setStatus(t("sidebar.noMatch"), true);
+    }
+  });
+  const text = document.createElement("span");
+  text.className = "item-text";
+  text.textContent = item.label || item.text || "";
+  button.appendChild(text);
+  const note = item.explanation || item.reason || item.note || "";
+  if (note) {
+    const description = document.createElement("span");
+    description.className = "item-note";
+    fillNoteLines(description, note);
+    button.appendChild(description);
+  }
+  return button;
+};
+
+
+const examples=[
+{text:'Export to static HTML, PDF, and PPTX',note:'AI：支援網頁、文件與 PowerPoint 格式匯出。\n為何重要：擴展簡報的交付方式，不限於框架內部使用。',color:'#e0e8fa'},
+{text:'shared-element morphs',note:'AI：讓不同頁面的對應元素產生連續變形動畫。\n例子：圖片從第一頁右側平滑移動到第二頁中央。\n在本文：屬於框架內建的動畫功能，未展示實作品質。',color:'#ece2f7'},
+{text:'Fullscreen playback with keyboard navigation',note:'提供全螢幕播放與專用的簡報介面，讓講者專注在內容與節奏。',color:'#ffedc8'}];
+document.getElementById('pageTitle').textContent='open-slide: A slide framework built for agents.';
+document.getElementById('pageUrl').textContent='github.com/open-slide/open-slide';
+document.getElementById('emptyPageHighlights').hidden=true;
+const list=document.getElementById('pageHighlights');
+for(const item of examples){const card=document.createElement('div');card.className='page-highlight';card.append(makeItemButton(item,'passage'));const edit=document.createElement('details');const summary=document.createElement('summary');summary.textContent='編輯心得與顏色';edit.append(summary);const field=document.createElement('textarea');field.value=item.note;edit.append(field);card.append(edit);list.append(card);}
+document.querySelector('[data-main-view="page"]').setAttribute('aria-current','page');
+document.querySelectorAll('[data-main-view]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('.main-view').forEach(view=>view.hidden=view.id!=='view-'+button.dataset.mainView);document.querySelectorAll('[data-main-view]').forEach(b=>b.setAttribute('aria-current',b===button?'page':'false'));}));
+</script></body>
+</html>

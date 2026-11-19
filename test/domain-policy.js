@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');
+require('../shared.js');
+const {domainAllowed,parseDomains}=globalThis.HkDomainPolicy;
+assert.equal(domainAllowed('example.com',{}),true);
+assert.equal(domainAllowed('news.example.com',{block:['example.com']}),false);
+assert.equal(domainAllowed('notexample.com',{block:['example.com']}),true);
+assert.equal(domainAllowed('news.example.com',{allow:['example.com']}),true);
+assert.equal(domainAllowed('other.com',{allow:['example.com']}),false);
+assert.equal(domainAllowed('private.example.com',{allow:['example.com'],block:['private.example.com']}),false);
+assert.deepEqual(parseDomains('Example.com\n*.example.org'),['example.com','example.org']);
+assert.equal(parseDomains('example.com/path'),null);
+console.log('Domain policy matches subdomains, respects allowlists and prioritizes blocklists');

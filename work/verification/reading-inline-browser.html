@@ -1,0 +1,59 @@
+<!doctype html><html><meta charset="utf-8"><style>body{font:16px/1.8 system-ui;margin:0}article{margin:100px;width:650px}nav{position:fixed;left:790px;top:100px;width:350px;height:500px;background:#f8f8fa}mark{background:#fff5b8}#results{position:fixed;bottom:0}</style><body>
+<article><p id="source">Scoring a response: <mark data-hk-highlight-id="a">Send a labelled sample and score the returned distributions.</mark></p><p id="next">Following article content must remain visible and must move below the annotation.</p></article>
+<nav>Website contents<br>Introduction<br>Worked example<br>Scoring responses</nav><pre id="results">RUNNING</pre>
+<script src="../../reading-margin-layout.js"></script><script>
+let marginRoot;const attach=Element.prototype.attachShadow;Element.prototype.attachShadow=function(options){const r=attach.call(this,options);if(this.id==='hk-reading-margin')marginRoot=r;return r};
+const HIGHLIGHT_ATTR='data-hk-highlight-id';
+let inlineThoughtSlot=null,inlineThoughtBlock=null;
+const reserveInlineThought = (id,height=0) => {
+  if(!id){inlineThoughtSlot?.remove();inlineThoughtSlot=null;inlineThoughtBlock=null;return null;}
+  const mark=[...document.querySelectorAll(`[${HIGHLIGHT_ATTR}="${CSS.escape(id)}"]`)]
+    .map(element=>({element,rect:typeof getHighlightVisualRect==="function"?getHighlightVisualRect(element):element.getBoundingClientRect()}))
+    .filter(item=>item.rect&&item.rect.bottom>16&&item.rect.top<innerHeight-16)
+    .sort((a,b)=>Math.abs(a.rect.top-innerHeight*.44)-Math.abs(b.rect.top-innerHeight*.44))[0]?.element;
+  if(!mark){inlineThoughtSlot?.remove();inlineThoughtSlot=null;inlineThoughtBlock=null;return null;}
+  const block=mark.closest("p,li,blockquote,pre,h1,h2,h3,h4,td")||mark.parentElement;
+  if(!block)return null;
+  if(!inlineThoughtSlot?.isConnected||inlineThoughtSlot.dataset.highlightId!==id||inlineThoughtBlock!==block){
+    inlineThoughtSlot?.remove();
+    inlineThoughtSlot=document.createElement("div");
+    inlineThoughtBlock=block;
+    inlineThoughtSlot.className="hk-inline-thought-slot";
+    inlineThoughtSlot.setAttribute("data-hk-ui","true");
+    inlineThoughtSlot.setAttribute("aria-hidden","true");
+    inlineThoughtSlot.dataset.highlightId=id;
+    inlineThoughtSlot.style.cssText="all:initial;display:block;box-sizing:border-box;width:auto;min-width:0;clear:both;pointer-events:none;grid-column:1 / -1;";
+    if(["LI","TD"].includes(block.tagName)){
+      // Numbered summaries often use flex/grid: append inside the text column,
+      // never beside the counter and copy as an extra narrow layout column.
+      let copy=mark;
+      while(copy.parentElement&&copy.parentElement!==block)copy=copy.parentElement;
+      if(copy!==mark&&!copy.matches?.(".hk-highlight"))copy.append(inlineThoughtSlot);
+      else block.after(inlineThoughtSlot);
+      if(inlineThoughtSlot.getBoundingClientRect().width<Math.min(240,innerWidth-32))block.after(inlineThoughtSlot);
+    }else block.after(inlineThoughtSlot);
+  }
+  const reserved=Math.max(48,height)+16;
+  if(inlineThoughtSlot.style.height!==reserved+"px")inlineThoughtSlot.style.height=reserved+"px";
+  const rect=inlineThoughtSlot.getBoundingClientRect();
+  return{left:rect.left+12,top:rect.top+8,width:Math.max(120,rect.width-24)};
+};
+let mode='auto',pinned=[];
+const entries=[{id:'a',text:'Send a labelled sample and score the returned distributions.',note:'AI：把有標籤的樣本送入模型，再用適當的評分規則檢查機率。',color:'#fff5b8'}];
+window.chrome={storage:{onChanged:{addListener(){}}}};window.HkI18n={t:k=>k};
+window.HkDeskBridge={key:()=> 'https://example.com/inline',highlights:async()=>entries,pageTheme:()=> 'light',inlineAnchor:(id,height)=>reserveInlineThought(id,height),anchors:ids=>ids.map(id=>{const r=document.querySelector('mark').getBoundingClientRect(),c=document.querySelector('article').getBoundingClientRect();return{id,rect:{left:r.left,right:r.right,top:r.top,bottom:r.bottom},column:{left:c.left,right:c.right}}})};
+window.HkReadingDeskUI={preferences:()=>({mode}),annotationState:()=>({pinnedIds:pinned,obstacles:[]}),pin:async id=>{pinned=[id];dispatchEvent(new Event('hk-reading-desk-change'));}};
+const initialNext=document.getElementById('next').getBoundingClientRect().top;
+</script><script src="../../reading-annotations.js"></script><script>
+(async()=>{let checks=0;const assert=(ok,msg)=>{if(!ok)throw Error(msg);checks++},wait=ms=>new Promise(r=>setTimeout(r,ms));
+try{await wait(250);let note=marginRoot.querySelector('.thought');if(new URLSearchParams(location.search).has('preview')){note.style.transition='none';note.classList.remove('entering');document.getElementById('results').hidden=true;return;}assert(!!note,'annotation remains visible with occupied margin');assert(note.dataset.side==='inline','fallback uses source flow');
+const rect=note.getBoundingClientRect(),source=document.getElementById('source').getBoundingClientRect(),next=document.getElementById('next').getBoundingClientRect(),nav=document.querySelector('nav').getBoundingClientRect();
+assert(rect.top>=source.bottom&&rect.top-source.bottom<32,'annotation directly follows source');
+assert(rect.bottom<=next.top,'following article text is not covered');
+assert(rect.right<nav.left,'website TOC is not covered');assert(next.top>initialNext,'space is reserved in article flow');
+HkPageAnnotations.refresh();await wait(200);assert(document.querySelectorAll('.hk-inline-thought-slot').length===1,'repeated renders retain one slot');
+mode='hover';HkPageAnnotations.refresh();await wait(240);assert(!document.querySelector('.hk-inline-thought-slot'),'hover-only mode clears reserved gap');
+mode='auto';HkPageAnnotations.refresh();await wait(240);note=marginRoot.querySelector('.thought');assert(!!note,'automatic mode restores inline thought');note.querySelector('.pin').click();await wait(240);assert(!document.querySelector('.hk-inline-thought-slot'),'pinning clears automatic slot');
+document.getElementById('results').textContent='PASS '+checks+' inline annotation checks';
+}catch(e){document.getElementById('results').textContent='FAIL '+e.message;}})();
+</script></body></html>

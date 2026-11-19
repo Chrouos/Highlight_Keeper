@@ -1,4 +1,4 @@
-/* 閱讀導覽側欄：整個擴充功能唯一的閱讀與 AI 入口。 */
+/* 閱讀導覽側欄：文章導讀、筆記檢視與進階設定。 */
 const PERSONAL_NOTES_KEY = "hkPersonalNotes";
 const GENERATED_NOTES_KEY = "hkGeneratedNotes";
 const MINDMAP_KEY = "hkMindmaps";
@@ -45,6 +45,8 @@ const els = {
   pageHighlights: document.getElementById("pageHighlights"),
   emptyPageHighlights: document.getElementById("emptyPageHighlights"),
   notePane: document.getElementById("pane-notes"),
+  notesOverview: document.getElementById("articleNotesOverview"),
+  legacyNotes: document.getElementById("legacyArticleNotes"),
   pageTags: document.getElementById("pageTags"),
   savePageTags: document.getElementById("savePageTags"),
   importPageFile: document.getElementById("importPageFile"),
@@ -67,10 +69,13 @@ const state = {
   configured: false,
   prompt: "",
   noteText: "",
+  readingDesk: {cards:[]},
   noteDirty: false,
   noteTimer: 0,
   loadToken: 0,
   activeTab: "context",
+  mainView: "page",
+  preferredView: "page",
   renderedPageHighlights: "",
   applying: false,
 };
@@ -120,7 +125,7 @@ const sendToTab = async (tabId, message) => {
     if (latest?.status !== "complete") throw firstError;
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["shared.js", "parsers.js", "i18n.js", "highlightDom.js", "contentScript.js"],
+      files: ["shared.js", "parsers.js", "i18n.js", "highlightDom.js", "contentScript.js", "reading-desk-model.js", "reading-margin-layout.js", "reading-annotations.js", "reading-desk.js"],
     });
     await wait(180);
     return chrome.tabs.sendMessage(tabId, message);
@@ -389,9 +394,37 @@ const mergeItems = (stored, extra) => {
   return items.sort((a, b) => rank(a) - rank(b));
 };
 
+const renderNotesOverview = () => {
+  els.notesOverview.replaceChildren();
+  const items = window.HkSidebarLibrary?.articleNotes(state.page?.highlights, state.readingDesk) || [];
+  els.legacyNotes.hidden = !state.noteText.trim() && !state.noteDirty;
+  if (!items.length && els.legacyNotes.hidden) {
+    const empty=document.createElement("p");empty.className="empty";empty.textContent=t("sidebar.notesEmpty");els.notesOverview.appendChild(empty);
+  }
+  for (const type of ["note","quote"]) {
+    const group=items.filter(item=>item.type===type);
+    if(!group.length)continue;
+    const heading=document.createElement("h3");heading.textContent=t(type==="note"?"desk.freeNote":"sidebar.thoughtsHeading");els.notesOverview.appendChild(heading);
+    group.forEach(item=>{
+      const card=document.createElement("section");card.className="article-note";
+      if(item.quote){const quote=document.createElement("blockquote");quote.textContent=item.quote;card.appendChild(quote);}
+      const text=document.createElement("p");text.textContent=item.text;card.appendChild(text);
+      const edit=document.createElement("button");edit.type="button";edit.className="text-button";edit.textContent=t("sidebar.openNote");
+      const source=state.pageKey, tabId=state.tabId;
+      edit.addEventListener("click",async()=>{
+        try {
+          const result=await sendToTab(tabId,{type:"SHOW_DESK_CARD",pageKey:source,cardId:item.id,...(item.highlightId?{highlightId:item.highlightId}:{})});
+          if(!result?.success)throw new Error(result?.error || t("sidebar.noMatch"));
+        } catch(error){setStatus(error.message,true);}
+      });
+      card.appendChild(edit);els.notesOverview.appendChild(card);
+    });
+  }
+};
+
 const render = () => {
   const page = state.page;
-  els.title.textContent = page?.title || "—";
+  els.title.textContent = page?.title || t("sidebar.library");
   els.url.textContent = page?.url || "";
   els.context.textContent = breakLines(state.context || "");
   els.emptyContext.hidden = Boolean(state.context);
@@ -430,7 +463,7 @@ const render = () => {
   els.openWebAI.textContent = t(state.provider === "gemini-web" ? "sidebar.openGemini" : "sidebar.openChatgpt");
   els.applyResponse.disabled = state.applying;
   els.generate.disabled = state.applying;
-  els.noPage.hidden = Boolean(page);
+  els.noPage.hidden = true;
   els.aiControls.hidden = !page;
   els.moreTools.hidden = false;
   els.shareLink.disabled = !page;
@@ -439,11 +472,16 @@ const render = () => {
   els.deletePageNotes.hidden = !page;
   els.tabs.hidden = !page;
   els.personalNote.disabled = !page;
+  renderNotesOverview();
   activateTab(state.activeTab);
+  activateMainView(state.preferredView, false);
 };
 
-const activateMainView = (name) => {
-  for (const view of ["page", "reading", "notes", "settings"]) {
+const activateMainView = (name, remember = true) => {
+  if (remember) state.preferredView = name;
+  if (!state.page && ["page", "reading", "notes"].includes(name)) name = "library";
+  state.mainView = name;
+  for (const view of ["page", "reading", "notes", "library", "settings"]) {
     document.getElementById(`view-${view}`).hidden = view !== name;
   }
   document.querySelectorAll("[data-main-view]").forEach((button) => {
@@ -476,16 +514,19 @@ const renderSyncNotice = (syncState) => {
 const hasGuide = () => Boolean(state.context || state.guideTerms.length || state.guideHighlights.length);
 
 const loadActiveTab = async () => {
+  const token = ++state.loadToken;
   const previousPageKey = state.pageKey;
   let [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if(token!==state.loadToken)return;
   if (isAIWebsite(tab?.url)) {
     // Keep the source article while the user chats with an AI in another tab.
     if (state.page) return;
     const saved = await chrome.storage.session.get("hkReadingGuideSourceTabId");
+    if(token!==state.loadToken)return;
     tab = Number.isInteger(saved.hkReadingGuideSourceTabId)
       ? await chrome.tabs.get(saved.hkReadingGuideSourceTabId).catch(() => null) : null;
   }
-  const token = ++state.loadToken;
+  if(token!==state.loadToken)return;
   await flushNote();
   if (token !== state.loadToken) return;
   if (state.tabId !== tab?.id) els.response.value = "";
@@ -502,6 +543,7 @@ const loadActiveTab = async () => {
     state.mindmapOutline = "";
     state.prompt = "";
     state.noteText = "";
+    state.readingDesk = {cards:[]};
     state.noteDirty = false;
     els.personalNote.value = "";
     setNoteStatus("sidebar.notesSaved");
@@ -509,7 +551,7 @@ const loadActiveTab = async () => {
     render();
   }
   if (!tab?.id || !/^https?:/i.test(tab.url || "")) {
-    setStatus(t("sidebar.unsupported"), true);
+    setStatus(t("sidebar.libraryFallback"));
     return;
   }
 
@@ -524,10 +566,11 @@ const loadActiveTab = async () => {
     state.page = response.data;
     state.pageKey = response.data.url;
     const [stored, promptInfo] = await Promise.all([
-      chrome.storage.local.get([GENERATED_NOTES_KEY, PERSONAL_NOTES_KEY, MINDMAP_KEY, PAGE_META_KEY]),
+      chrome.storage.local.get([GENERATED_NOTES_KEY, PERSONAL_NOTES_KEY, MINDMAP_KEY, PAGE_META_KEY, "hkReadingDesks"]),
       sendToTab(tab.id, { type: "BUILD_READING_GUIDE_PROMPT" }).catch(() => null),
     ]);
     if (token !== state.loadToken) return;
+    state.readingDesk = stored.hkReadingDesks?.[state.pageKey] || {cards:[]};
     const generated = stored[GENERATED_NOTES_KEY]?.[state.pageKey] || {};
     const personal = stored[PERSONAL_NOTES_KEY]?.[state.pageKey] || {};
     state.context = generated.context || generated.note || "";
@@ -554,7 +597,7 @@ const loadActiveTab = async () => {
     console.debug("讀取側欄文章資料失敗", error);
     state.page = null;
     render();
-    setStatus(t("sidebar.extractError"), true);
+    setStatus(t("sidebar.libraryFallback"));
   }
 };
 
@@ -668,14 +711,18 @@ const copyPromptToClipboard = async () => {
 /* ── 刪除這篇文章的筆記 ─────────────────────────────── */
 // 不可復原，所以要按第二次才執行；不用 confirm()，對話框會蓋住正在讀的文章。
 let deleteArmTimer = 0;
+let deleteArmPageKey = "";
 const disarmDelete = () => {
   window.clearTimeout(deleteArmTimer);
   deleteArmTimer = 0;
+  deleteArmPageKey = "";
   els.deletePageNotes.classList.remove("is-armed");
   els.deletePageNotes.textContent = t("sidebar.deletePageNotes");
 };
 const deletePageNotes = async () => {
-  if (!deleteArmTimer) {
+  if (!deleteArmTimer || deleteArmPageKey!==state.pageKey) {
+    window.clearTimeout(deleteArmTimer);
+    deleteArmPageKey=state.pageKey;
     els.deletePageNotes.classList.add("is-armed");
     els.deletePageNotes.textContent = t("sidebar.deletePageNotesConfirm");
     deleteArmTimer = window.setTimeout(disarmDelete, 5000);
@@ -705,14 +752,14 @@ const collectPageEntry = async () => {
   const key = state.pageKey;
   if (!key) throw new Error(t("popup.errNoTabSimple"));
   const stored = await chrome.storage.local.get([
-    key, PAGE_META_KEY, GENERATED_NOTES_KEY, MINDMAP_KEY, PERSONAL_NOTES_KEY,
+    key, PAGE_META_KEY, GENERATED_NOTES_KEY, MINDMAP_KEY, PERSONAL_NOTES_KEY, "hkReadingDesks",
   ]);
   const entries = Array.isArray(stored[key]) ? stored[key] : [];
   const meta = stored[PAGE_META_KEY]?.[key] || {};
   const note = stored[GENERATED_NOTES_KEY]?.[key] || null;
   const mindmap = stored[MINDMAP_KEY]?.[key] || null;
   const personal = stored[PERSONAL_NOTES_KEY]?.[key]?.text;
-  if (!entries.length && !note && !mindmap && !personal) throw new Error(t("popup.errNoNotes"));
+  if (!entries.length && !note && !mindmap && !personal && !stored.hkReadingDesks?.[key]) throw new Error(t("popup.errNoNotes"));
   return {
     url: key,
     title: meta.title || state.page?.title || "",
@@ -721,6 +768,7 @@ const collectPageEntry = async () => {
     note,
     mindmap,
     ...(typeof personal === "string" ? { personalNote: personal } : {}),
+    ...(stored.hkReadingDesks?.[key] ? {readingDesk:stored.hkReadingDesks[key]} : {}),
   };
 };
 
@@ -810,7 +858,7 @@ document.querySelectorAll("[role=tab]").forEach((tab) => {
 els.refresh.addEventListener("click", loadActiveTab);
 els.savePageTags.addEventListener("click", async () => {
   try {
-    await savePageTags(els.pageTags.value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean));
+    await savePageTags(els.pageTags.value.split(/[,，、\n]+/).map((tag) => tag.trim()).filter(Boolean));
     setStatus(t("sidebar.tagsSaved"));
   } catch (error) { setStatus(error.message, true); }
 });
@@ -849,7 +897,7 @@ els.copyPrompt.addEventListener("click", async () => {
     setStatus(t("sidebar.promptCopyError"), true);
   }
 });
-// 只開網站；複製 Prompt 只有一個入口。
+// 開啟網站；與工作桌共用相同的文章 Prompt 流程。
 els.openWebAI.addEventListener("click", () => {
   const url = state.provider === "gemini-web" ? "https://gemini.google.com/app" : "https://chatgpt.com/";
   chrome.tabs.create({ url }).catch(() => setStatus(t("sidebar.noMatch"), true));
@@ -915,6 +963,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[SYNC_STATE_KEY]) renderSyncNotice(changes[SYNC_STATE_KEY].newValue);
   if (area !== "local" || !state.pageKey) return;
+  if (changes.hkReadingDesks) {state.readingDesk=changes.hkReadingDesks.newValue?.[state.pageKey] || {cards:[]};renderNotesOverview();}
   if (changes[AI_SETTINGS_KEY]) {
     state.provider = changes[AI_SETTINGS_KEY].newValue?.provider || "chatgpt";
     render();
@@ -936,6 +985,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     state.noteText = next[state.pageKey]?.text || "";
     els.personalNote.value = state.noteText;
     setNoteStatus("sidebar.notesSaved");
+    renderNotesOverview();
   }
   if (changes[state.pageKey]) scheduleHighlightsRefresh();
 });
@@ -953,3 +1003,59 @@ window.HkI18n.onLangChange(() => {
 });
 activateTab("context");
 loadActiveTab();
+
+
+let libraryPages = [];
+let libraryLimit = 20;
+let libraryLoadSeq = 0;
+const librarySearch = document.getElementById("librarySearch");
+const renderLibrary = () => {
+  const results = document.getElementById("libraryResults");
+  const matches = window.HkSidebarLibrary.search(libraryPages, librarySearch.value);
+  results.replaceChildren();
+  document.getElementById("libraryHint").textContent = t(matches.length ? "sidebar.libraryCount" : libraryPages.length ? "sidebar.libraryEmpty" : "sidebar.libraryFirst", { count: matches.length });
+  matches.slice(0, libraryLimit).forEach((page) => {
+    const link = document.createElement("a");
+    link.className = "library-result";
+    link.href = page.url; link.target = "_blank"; link.rel = "noopener";
+    const title = document.createElement("strong"); title.textContent = page.title;
+    const meta = document.createElement("span"); meta.textContent = [new URL(page.url).hostname, ...page.tags].join(" · ");
+    link.append(title, meta); results.appendChild(link);
+  });
+  document.getElementById("libraryMore").hidden = matches.length <= libraryLimit;
+};
+const loadLibrary = async () => {
+  const seq = ++libraryLoadSeq;
+  try {
+    const stored = await chrome.storage.local.get(null);
+    if (seq !== libraryLoadSeq) return;
+    libraryPages = window.HkSidebarLibrary.pages(stored);
+    renderLibrary();
+  } catch (error) { document.getElementById("libraryHint").textContent = t("sidebar.libraryLoadError"); }
+};
+librarySearch.addEventListener("input", () => { libraryLimit = 20; activateMainView("library"); renderLibrary(); });
+document.getElementById("libraryMore").addEventListener("click", () => { libraryLimit += 20; renderLibrary(); });
+let libraryRefreshTimer;
+chrome.storage.onChanged.addListener((_changes, area) => {
+  if (area !== "local") return;
+  clearTimeout(libraryRefreshTimer);
+  libraryRefreshTimer = setTimeout(loadLibrary, 200);
+});
+window.HkI18n.onLangChange(renderLibrary);
+window.HkI18n.initI18n().then(loadLibrary);
+
+document.getElementById("openReadingDesk").addEventListener("click", async () => {
+  if (!state.tabId) return;
+  try {
+    const result = await sendToTab(state.tabId, {type:"TOGGLE_READING_DESK"});
+    if (!result?.success) throw new Error(t("sidebar.extractError"));
+  } catch (error) {setStatus(error.message, true);}
+});
+
+// A desk settings shortcut also works when this panel was already open.
+chrome.storage.session.get('hkOpenSettingsAt').then(stored=>{
+ if(Date.now()-(stored.hkOpenSettingsAt||0)<10000)activateMainView('settings');
+});
+chrome.storage.onChanged.addListener((changes,area)=>{
+ if(area==='session'&&changes.hkOpenSettingsAt)activateMainView('settings');
+});

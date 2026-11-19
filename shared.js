@@ -38,4 +38,27 @@
   };
 
   root.HkUrlKey = { normalizePageKey, CONTENT_PARAMS };
+  const normalizeDomain = value => {
+    let text=String(value||'').trim().toLowerCase();
+    if(!text)return '';
+    text=text.replace(/^\*\./,'');
+    try {
+      const url=new URL(text.includes('://')?text:`https://${text}`);
+      if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.port||url.pathname!=='/'||url.search||url.hash)return null;
+      const host=url.hostname.replace(/\.$/,'');
+      return host&&/^[a-z0-9.-]+$/.test(host)&&!host.includes('..')?host:null;
+    } catch(_error){return null;}
+  };
+  const parseDomains = value => {
+    const entries=String(value||'').split(/[\n,，]+/).map(s=>s.trim()).filter(Boolean),domains=[];
+    for(const entry of entries){const domain=normalizeDomain(entry);if(!domain)return null;if(!domains.includes(domain))domains.push(domain);}
+    return domains;
+  };
+  const domainAllowed = (hostname,policy={}) => {
+    const host=String(hostname||'').toLowerCase().replace(/\.$/,'');
+    const matches=list=>(Array.isArray(list)?list:[]).some(domain=>{const normalized=normalizeDomain(domain);return normalized&&(host===normalized||host.endsWith('.'+normalized));});
+    const allow=Array.isArray(policy.allow)?policy.allow:[];
+    return !matches(policy.block)&&(!allow.length||matches(allow));
+  };
+  root.HkDomainPolicy={normalizeDomain,parseDomains,domainAllowed};
 })(typeof window !== "undefined" ? window : globalThis);

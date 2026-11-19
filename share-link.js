@@ -106,21 +106,30 @@
     { method = "GET", body } = {}
   ) => {
     let response;
-    try {
-      response = await fetch(`${repoBase}${path}`, {
-        method,
-        headers: {
-          ...githubHeaders(token),
-          ...(body ? { "Content-Type": "application/json" } : {}),
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-    } catch (error) {
-      if (!(error instanceof TypeError)) throw error;
-      const operation = path.match(/^\/(?:git\/(?:refs?|commits|trees|blobs)|contents)/)?.[0] || "/";
-      const networkError = new Error(`Failed to fetch GitHub (${method} ${operation})`);
-      networkError.code = "network-error";
-      throw networkError;
+    const attempts=method==="GET"?3:1;
+    for(let attempt=0;attempt<attempts;attempt++){
+      const controller=new AbortController();
+      const timeout=setTimeout(()=>controller.abort(),15000);
+      try {
+        response=await fetch(`${repoBase}${path}`,{
+          method,signal:controller.signal,
+          headers:{...githubHeaders(token),...(body?{"Content-Type":"application/json"}:{})},
+          body:body?JSON.stringify(body):undefined,
+        });
+        break;
+      } catch(error) {
+        if(!(error instanceof TypeError)&&!controller.signal.aborted)throw error;
+        if(attempt+1<attempts){
+          clearTimeout(timeout);
+          await new Promise(resolve=>setTimeout(resolve,400*(attempt+1)));
+          continue;
+        }
+        const operation=path.match(/^\/(?:git\/(?:refs?|commits|trees|blobs)|contents)/)?.[0]||"/";
+        const networkError=new Error(`Failed to fetch GitHub (${method} ${operation})`);
+        networkError.code=controller.signal.aborted?"network-timeout":"network-error";
+        networkError.operation=`${method} ${operation}`;
+        throw networkError;
+      } finally {clearTimeout(timeout);}
     }
     if (!response.ok) {
       const text = await response.text();
@@ -164,12 +173,18 @@
     }
     let baseTree = null;
     if (latestSha) {
-      const commitData = await githubApiRequest(
-        repoBase,
-        `/git/commits/${latestSha}`,
-        token
-      );
-      baseTree = commitData?.tree?.sha || null;
+      let commitData;
+      try {
+        commitData=await githubApiRequest(repoBase,`/git/commits/${latestSha}`,token);
+      }catch(error){
+        if(!["network-error","network-timeout"].includes(error.code))throw error;
+        // Both endpoints read the same immutable commit; never change the parent/ref.
+        const alternate=await githubApiRequest(repoBase,`/commits/${latestSha}`,token);
+        commitData=alternate?.commit;
+      }
+      baseTree=commitData?.tree?.sha;
+      if(!baseTree)throw new Error("GitHub commit has no tree");
+
     }
 
     const treeEntries = [];

@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const src=fs.readFileSync(require.resolve('../manager.js'),'utf8');
+const t=(k)=>k;
+const statusStart=src.indexOf('const autoSyncStatusText ='),statusEnd=src.indexOf('const resolveAutoSyncConflicts',statusStart);
+const statusText=vm.runInNewContext(src.slice(statusStart,statusEnd)+';autoSyncStatusText',{t});
+assert.equal(statusText({status:'error',errorCode:'network-error',errorMessage:'raw error'}),'manager.syncNetworkError');
+let manual='Already up to date';
+const autoSyncStatusEl={textContent:'',classList:{toggle(){}}};
+const ctx={autoSyncStatusEl,autoSyncConflictsEl:{},githubStatusEl:{classList:{contains:()=>false}},window:{HkAutoSync:{readState:async()=>({status:'error',errorCode:'network-error'})}},autoSyncStatusText:statusText,setGithubStatus:s=>{manual=s},renderAutoSyncConflicts(){}};
+const a=src.indexOf('const renderAutoSyncState ='),b=src.indexOf('const runAutoSyncNow',a);
+const render=vm.runInNewContext(src.slice(a,b)+';renderAutoSyncState',ctx);
+render().then(()=>{assert.equal(manual,'');assert.equal(autoSyncStatusEl.textContent,'manager.syncNetworkError');console.log('Sync failure clears stale success and shows actionable network status');}).catch(e=>{console.error(e);process.exitCode=1});

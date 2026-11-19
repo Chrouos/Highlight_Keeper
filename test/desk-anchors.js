@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');const fs=require('node:fs');const vm=require('node:vm');
+const source=fs.readFileSync(require.resolve('../contentScript.js'),'utf8');
+const article={getBoundingClientRect:()=>({left:100,right:900})},block={getBoundingClientRect:()=>({left:140,right:840})};
+const mark={closest:selector=>selector.startsWith('article')?article:block,parentElement:block};
+const context={document:{querySelectorAll:()=>[mark]},CSS:{escape:id=>id},HIGHLIGHT_ATTR:'data-highlight-id',innerHeight:800,getHighlightVisualRect:()=>({left:160,right:600,top:200,bottom:230})};vm.createContext(context);
+const start = source.indexOf('globalThis.HkDeskBridge = {');
+assert.ok(start >= 0);
+const end = source.indexOf('\n};', start);
+assert.ok(end > start);
+const bridge=vm.runInContext(source.slice(start, end + 3) + ';HkDeskBridge',context);
+const anchor=bridge.anchors(['a'])[0];assert.equal(anchor.column.right,900,'margin starts outside the full article boundary');assert.equal(anchor.rect.right,600,'connector still points to the actual highlight');
+console.log('Reading margin uses the article edge and actual highlight geometry');

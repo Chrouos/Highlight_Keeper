@@ -2,17 +2,18 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <title data-i18n="manager.pageTitle">Highlight Keeper — 笔記總覽</title>
+    <title data-i18n="manager.pageTitle">Highlight Keeper — 收藏總覽</title>
     <link rel="stylesheet" href="manager.css" />
   </head>
   <body>
     <main class="hk-manager">
       <header class="hk-manager-header">
         <div>
-          <h1 data-i18n="manager.heading">筆記內容總覽</h1>
+          <h1 data-i18n="manager.heading">收藏總覽</h1>
           <p data-i18n="manager.subheading">一次匯出/匯入所有頁面的標註，集中管理你的資料。</p>
         </div>
         <div class="hk-manager-header-right">
+          <button type="button" id="openBackupTools" class="hk-manager-btn hk-manager-btn-ghost" data-i18n="manager.backupTools">備份與同步</button>
           <label class="hk-manager-lang">
             <span data-i18n="popup.langLabel">顯示語言</span>
             <select id="managerLang">
@@ -23,18 +24,7 @@
           <button type="button" class="hk-manager-close" id="closeManagerBtn">×</button>
         </div>
       </header>
-      <div class="hk-manager-search-row">
-        <label class="hk-manager-search-label">
-          <span data-i18n="manager.searchLabel">搜尋筆記</span>
-          <input
-            type="search"
-            id="managerSearch"
-            class="hk-manager-search"
-            data-i18n-placeholder="manager.searchPlaceholder"
-            placeholder="輸入關鍵字或頁面標題"
-          />
-        </label>
-      </div>
+      <details class="hk-manager-backup" style="order: 2"><summary data-i18n="manager.backupTools">備份與同步</summary>
       <section class="hk-manager-actions">
         <button type="button" id="downloadAllBtn" class="hk-manager-btn" data-i18n="manager.downloadAll">
           下載全部筆記
@@ -105,6 +95,12 @@
             上傳到 GitHub
           </button>
         </div>
+        <p
+          id="githubSyncStatus"
+          class="hk-manager-sync-status"
+          role="status"
+          aria-live="polite"
+        ></p>
         <div class="hk-manager-autosync">
           <label class="hk-manager-autosync-toggle">
             <input type="checkbox" id="autoSyncEnabled" />
@@ -120,14 +116,10 @@
         <p id="autoSyncStatus" class="hk-manager-autosync-status" role="status" aria-live="polite"></p>
         <div id="autoSyncConflicts" class="hk-manager-autosync-conflicts" hidden></div>
         <div id="githubCategoryList" class="hk-manager-github-categories" style="display: none"></div>
-        <p
-          id="githubSyncStatus"
-          class="hk-manager-sync-status"
-          role="status"
-          aria-live="polite"
-        ></p>
+
       </section>
-      <section class="hk-manager-summary">
+      </details>
+      <section class="hk-manager-summary" style="order: 1">
         <header>
           <h2 data-i18n="manager.pageListHeading">頁面清單</h2>
           <span id="pageCount" class="hk-manager-count"></span>
@@ -152,6 +144,20 @@
             整理重複頁面
           </button>
         </header>
+      <div class="hk-manager-search-row">
+        <label class="hk-manager-search-label">
+          <span data-i18n="manager.searchLabel">搜尋筆記</span>
+          <input
+            type="search"
+            id="managerSearch"
+            class="hk-manager-search"
+            data-i18n-placeholder="manager.searchPlaceholder"
+            aria-describedby="managerSearchHint"
+            placeholder="搜尋標題、劃線、心得或標籤"
+          />
+        </label>
+        <p id="managerSearchHint" class="hk-search-hint" data-i18n="manager.searchHint">多個關鍵字可用空格分隔。</p>
+      </div>
         <div class="hk-manager-controls">
           <label class="hk-manager-sort-label">
             <span data-i18n="manager.sortLabel">排序</span>
@@ -174,6 +180,7 @@
             匯出此分類
           </button>
           <div id="managerTagFilter" class="hk-manager-tag-filter"></div>
+          <button type="button" id="clearFiltersBtn" class="hk-manager-btn hk-manager-btn-ghost" data-i18n="manager.resetFilters">清除篩選</button>
         </div>
         <div id="pageList" class="hk-manager-list"></div>
       </section>

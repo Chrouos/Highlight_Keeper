@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 require("../shared.js");
 require("../parsers.js");
+require("../sidebar-library-data.js");
 const P = globalThis.HkParsers;
 assert.deepEqual(P.getReadingGuideLimits("short article"), { termsMax: 3, highlightsMin: 3, highlightsMax: 4 });
 assert.deepEqual(P.getReadingGuideLimits("word ".repeat(900)), { termsMax: 4, highlightsMin: 5, highlightsMax: 7 });
@@ -114,6 +115,8 @@ const lined = P.parseReadingGuideResponse(`## 名詞解釋
 assert.equal(lined.terms[0].explanation, "把使用者分到不同版本。\n例子：部分請求用新模型。\n在本文：只是可能原因。");
 assert.equal(lined.terms[1].explanation, "說明在下一行。");
 assert.equal(lined.highlights[0].reason, "這段在講什麼。\n為何重要：它和主線的關係。");
+const arrowNote=P.parseReadingGuideResponse("## 重點整理\n- **原文：** Exact quote\n  - **重點：** 這段在講什麼。\n  - => 它和主線的關係。");
+assert.equal(arrowNote.highlights[0].reason,"這段在講什麼。\n=> 它和主線的關係。",'the compact marker stays in the saved note');
 assert.equal(P.parseReadingGuideResponse("## 名詞解釋\n名詞：X\n解釋：第一句。\n說明：第二句。").terms[0].explanation, "第一句。\n第二句。", "a second label adds a line");
 assert.equal(P.parseHighlightBlocks("原文：Q\n重點：第一句。\n說明：第二句。")[0].reason, "第一句。\n第二句。");
 const wall = "AI：A/B 測試是將不同使用者或請求分配到不同版本，藉此比較系統表現的方法。例如部分 Codex 請求可能由新版模型處理，其餘維持舊版。本文將它列為新模型流量出現的可能原因，但沒有證據確認 OpenAI 確實正在執行 A/B 測試。";
@@ -163,7 +166,7 @@ async function checkPersistence() {
   const saved = {};
   let noteUpdates = 0;
   const context = {
-    pageKey: articleUrl, HkParsers: P, DEFAULT_COLOR: "#fff5b8",
+    pageKey: articleUrl, HkParsers: P, DEFAULT_COLOR: "#fff5b8",domainPolicyLoaded:Promise.resolve(),domainAllowsHighlights:()=>true,
     MINDMAP_STORAGE_KEY: "hkMindmaps", PAGE_META_KEY: "__hk_page_meta__",
     aiSettings: { categories: [], usePreview: true }, previewData: [],
     highlightPanelState: { notesByPage: {} },
@@ -218,7 +221,7 @@ async function checkSidebar() {
     appendChild(item) { this.children.push(item); }, replaceChildren() { this.children = []; } });
   const events = [];
   const requests = [];
-  const local = { hkGeneratedNotes: {} };
+  const local = { hkGeneratedNotes: {}, hkReadingDesks: { [articleUrl]: {cards:[{id:"note:one",type:"note",text:"Free thought"}]} }, hkPersonalNotes:{[articleUrl]:{text:"Legacy article note"}} };
   const session = {};
   let active = { id: 1, url: articleUrl };
   const tabs = { 1: active, 2: { id: 2, url: otherUrl } };
@@ -226,7 +229,7 @@ async function checkSidebar() {
     URL, console, setTimeout, clearTimeout,
     document: { getElementById: (id) => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); },
       createElement: node, querySelector: node, querySelectorAll: () => [] },
-    window: { HkI18n: { t: (key) => key, initI18n: async () => {}, applyDOMTranslations() {}, onLangChange() {} }, setTimeout, clearTimeout },
+    window: { HkSidebarLibrary: globalThis.HkSidebarLibrary, HkI18n: { t: (key) => key, initI18n: async () => {}, applyDOMTranslations() {}, onLangChange() {} }, setTimeout, clearTimeout },
     chrome: {
       tabs: { query: async () => [active], get: async (id) => tabs[id], onActivated: { addListener() {} }, onUpdated: { addListener() {} },
         sendMessage: async (id, message) => {
@@ -250,6 +253,19 @@ async function checkSidebar() {
   vm.runInContext(fs.readFileSync(require.resolve("../sidepanel.js"), "utf8") + "\nglobalThis.sidebar = { state, loadActiveTab, applyGuideResponse, activateMainView, changePageHighlight, savePageTags, importPageHighlights };", context);
   await new Promise((resolve) => setImmediate(resolve));
   const sidebar = context.sidebar;
+  const allText = node => [node.textContent || "", ...(node.children || []).map(allText)].join(" ");
+  assert.match(allText(nodes.get("articleNotesOverview")), /Free thought/, "notes overview displays free notes from the desk");
+  assert.equal(nodes.get("legacyArticleNotes").hidden, false, "existing article notes remain available");
+  assert.equal(nodes.get("personalNote").value, "Legacy article note", "legacy note content is preserved");
+
+  const loadedPage = sidebar.state.page;
+  sidebar.state.page = null;
+  sidebar.activateMainView("page");
+  assert.equal(nodes.get("view-library").hidden, false, "unavailable pages open the saved library");
+  assert.equal(nodes.get("view-page").hidden, true, "unavailable pages hide article actions");
+  sidebar.activateMainView("settings");
+  assert.equal(nodes.get("view-settings").hidden, false, "settings remain accessible without an article");
+  sidebar.state.page = loadedPage;
   sidebar.activateMainView("settings");
   assert.equal(nodes.get("view-settings").hidden, false, "settings is available in the side panel");
   assert.equal(nodes.get("view-reading").hidden, true, "the reading view is hidden when settings is open");

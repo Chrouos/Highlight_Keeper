@@ -89,7 +89,7 @@
   const syncFrame = document.querySelector(".sync-frame");
   const resizeSyncFrame = () => {
     const content = syncFrame?.contentDocument?.querySelector(".hk-manager");
-    if (content?.offsetHeight) syncFrame.style.height = `${content.scrollHeight + 8}px`;
+    if (content?.offsetHeight) syncFrame.style.height = `${Math.ceil(content.getBoundingClientRect().height) + 8}px`;
   };
   syncFrame?.addEventListener("load", () => {
     const content = syncFrame.contentDocument?.querySelector(".hk-manager");
@@ -110,6 +110,29 @@
   chrome.storage.local.get("hkPanelFontScale").then((stored) => applyScale(stored.hkPanelFontScale));
   scaleInput.addEventListener("input", () => applyScale(scaleInput.value));
   scaleInput.addEventListener("change", () => chrome.storage.local.set({ hkPanelFontScale: Number(scaleInput.value) }));
+  const thoughtsInput = $("sidebarAutoThoughts"), thoughtsStatus = $("sidebarThoughtsStatus");
+  const applyThoughts = value => { thoughtsInput.checked = value?.mode !== "hover"; };
+  chrome.storage.local.get("hkReadingPreferences").then(stored => applyThoughts(stored.hkReadingPreferences)).catch(() => { thoughtsStatus.textContent = root.HkI18n.t("sidebar.settingsError"); });
+  thoughtsInput.addEventListener("change", async () => {
+    thoughtsInput.disabled = true;
+    try {
+      const { hkReadingPreferences = {} } = await chrome.storage.local.get("hkReadingPreferences");
+      await chrome.storage.local.set({ hkReadingPreferences: { ...hkReadingPreferences, mode: thoughtsInput.checked ? "auto" : "hover" } });
+      thoughtsStatus.textContent = root.HkI18n.t("sidebar.settingsSaved");
+    } catch (_error) {
+      thoughtsInput.checked = !thoughtsInput.checked;
+      thoughtsStatus.textContent = root.HkI18n.t("sidebar.settingsError");
+    } finally { thoughtsInput.disabled = false; }
+  });
+  const allowDomains=$("sidebarDomainAllow"),blockDomains=$("sidebarDomainBlock"),domainsStatus=$("sidebarDomainsStatus");
+  const showDomains=policy=>{allowDomains.value=(policy?.allow||[]).join('\n');blockDomains.value=(policy?.block||[]).join('\n');};
+  chrome.storage.local.get('hkDomainPolicy').then(stored=>showDomains(stored.hkDomainPolicy)).catch(()=>{domainsStatus.textContent=root.HkI18n.t('sidebar.settingsError');});
+  $('sidebarSaveDomains').addEventListener('click',async()=>{
+    const allow=root.HkDomainPolicy.parseDomains(allowDomains.value),block=root.HkDomainPolicy.parseDomains(blockDomains.value);
+    if(!allow||!block){domainsStatus.textContent=root.HkI18n.t('sidebar.domainInvalid');return;}
+    try{await chrome.storage.local.set({hkDomainPolicy:{allow,block}});showDomains({allow,block});domainsStatus.textContent=root.HkI18n.t('sidebar.settingsSaved');}
+    catch(_error){domainsStatus.textContent=root.HkI18n.t('sidebar.settingsError');}
+  });
   const loadPalette = async () => {
     const saved = await chrome.storage.local.get("hkColorPalette");
     const palette = Array.isArray(saved.hkColorPalette) && saved.hkColorPalette.length ? saved.hkColorPalette : defaults;
@@ -140,6 +163,7 @@
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && changes.hkColorPalette) loadPalette();
     if (area === "local" && changes.hkPanelFontScale) applyScale(changes.hkPanelFontScale.newValue);
+    if (area === "local" && changes.hkReadingPreferences) applyThoughts(changes.hkReadingPreferences.newValue);
   });
   loadPalette().catch(() => { status.textContent = root.HkI18n.t("sidebar.settingsError"); });
 })(typeof window !== "undefined" ? window : globalThis);

@@ -30,6 +30,9 @@ HkI18n?.onLangChange?.(() => {
 });
 
 const storage = chrome.storage?.local;
+let domainPolicy={},domainPolicyReady=false,domainPolicyChanged=false;
+const domainPolicyLoaded=storage?.get('hkDomainPolicy').then(saved=>{if(!domainPolicyChanged)domainPolicy=saved.hkDomainPolicy||{};domainPolicyReady=true;}).catch(()=>{domainPolicyReady=true;})||Promise.resolve().then(()=>{domainPolicyReady=true;});
+const domainAllowsHighlights=()=>domainPolicyReady&&(!window.HkDomainPolicy||window.HkDomainPolicy.domainAllowed(window.location.hostname,domainPolicy));
 const DEFAULT_COLOR = "#fff5b8";
 // 淺色系預設：底色夠淡，黑字疊上去仍清楚，整頁不會被螢光色蓋掉。
 const DEFAULT_PALETTE = [
@@ -88,7 +91,7 @@ const DEFAULT_READING_GUIDE_PROMPT = `# 任務：製作閱讀導覽
 只挑理解本文必要、且文章裡逐字出現的專有名詞，與重點段落分開計算。「名詞」欄照文章的寫法，不加翻譯或括號，中文意思寫進解釋。每個名詞分行寫：「解釋」一句白話說它是什麼；「例子」一句具體例子，沒有好例子就省略這行；「在本文」一句說它在這篇的作用，以及本文有沒有證實。每行不超過 40 個中文字。不可只改寫相鄰原句；一般背景知識須標明「補充」，不要捏造本文沒有的結果。
 
 ### 重點整理
-挑選關鍵段落，涵蓋全文主要章節，不要只挑開頭或結論。同一個論點不重複標；方法、重要結果、數據的意義、取捨與限制都應納入考量。原文保留文章的語言，逐字引用連續文字，不翻譯、不加省略號。分行寫：「重點」一句說這段在講什麼；「為何重要」一句說它和主線的關係。每行不超過 40 個中文字，不能只是重述數字或原句。
+挑選關鍵段落，涵蓋全文主要章節，不要只挑開頭或結論。同一個論點不重複標；方法、重要結果、數據的意義、取捨與限制都應納入考量。原文保留文章的語言，逐字引用連續文字，不翻譯、不加省略號。分行寫：「重點」一句說這段在講什麼；下一行以「=>」開頭，說它和主線的關係。每行不超過 40 個中文字，不能只是重述數字或原句。
 
 ### 閱讀地圖
 用大綱畫出建議的閱讀路線，讓人由上而下就能掌握全文。主幹依原文的論述順序；子節點是父節點的展開、原因、做法或例子。重要分支展開到第 3～4 層，節點 15 字以內，內容只來自原文。
@@ -353,6 +356,16 @@ const showTranslateCard = async (text, anchorRect, highlightEl = null) => {
 // ── Floating toolbar ───────────────────────────────────
 let _floatingSelectionRange = null;
 
+const createDeskExtractIcon = () => {
+  const deskIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  for (const [name, value] of Object.entries({viewBox:"0 0 24 24",width:"18",height:"18",fill:"none",stroke:"currentColor","stroke-width":"1.7","stroke-linecap":"round","stroke-linejoin":"round","aria-hidden":"true",focusable:"false"})) deskIcon.setAttribute(name, value);
+  // Two overlapping notes and an outgoing arrow: lift this passage onto the desk.
+  const deskPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  deskPath.setAttribute("d", "M14 3H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-4 M8 16v3a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-3 M13 3h6v6 M19 3l-9 9");
+  deskIcon.appendChild(deskPath);
+  return deskIcon;
+};
+
 const ensureFloatingButton = () => {
   if (floatingButton) return floatingButton;
 
@@ -432,6 +445,18 @@ const ensureFloatingButton = () => {
 
   toolbar.appendChild(hlBtn);
   toolbar.appendChild(trBtn);
+  const deskBtn = document.createElement("button");
+  deskBtn.type = "button";
+  deskBtn.className = "hk-floating-tr-btn hk-floating-desk-btn";
+  deskBtn.setAttribute("aria-label", t("desk.extract"));
+  deskBtn.title = t("desk.extract");
+  deskBtn.appendChild(createDeskExtractIcon());
+  deskBtn.addEventListener("mousedown", e => e.preventDefault());
+  deskBtn.addEventListener("click", async () => {
+    try { await globalThis.HkReadingDeskUI?.extract(); hideFloatingButton(); }
+    catch (error) { showHkToast(error.message, { isError: true }); }
+  });
+  toolbar.appendChild(deskBtn);
   document.body.appendChild(toolbar);
   floatingButton = toolbar;
   return toolbar;
@@ -987,7 +1012,7 @@ const buildReadingGuidePrompt = (pageData, palette, existingTags = []) => {
 - **原文：** 文章中的連續原句
   - **分類：** #分類或色碼
   - **重點：** 這段在講什麼
-  - **為何重要：** 它和主線的關係${deepFields}
+  - => 它和主線的關係${deepFields}
 
 ## 閱讀地圖
 # 文章主題
@@ -1059,6 +1084,7 @@ const capturePreviewUndo = async (targetPageKey) => {
 };
 
 const applyReadingGuideResponse = async (rawText, provider = "chatgpt", model = "chatgpt-web", targetPageKey = pageKey) => {
+  await domainPolicyLoaded;if(!domainAllowsHighlights())throw new Error(t('sidebar.domainDisabled'));
   if (targetPageKey !== pageKey) throw new Error(t("sidebar.parseError"));
   const parsed = HkParsers.parseReadingGuideResponse(rawText, {
     categories: aiSettings.categories,
@@ -1146,9 +1172,9 @@ const applyReadingGuideResponse = async (rawText, provider = "chatgpt", model = 
     unmatchedTasks.filter((item) => item.kind === "term"),
     unmatchedTasks.filter((item) => item.kind !== "term"), savedGuideItems);
   if (parsed.mindmap && parseMindmapOutline(parsed.mindmap)) {
-    await saveMindmap(parsed.mindmap, parseMindmapOutline(parsed.mindmap).title);
+    await saveMindmap(parsed.mindmap, parseMindmapOutline(parsed.mindmap).title, targetPageKey);
   }
-  if (parsed.tags) await applyAiPageTags(parsed.tags);
+  if (parsed.tags) await applyAiPageTags(parsed.tags, targetPageKey);
   return {
     success: true,
     context: parsed.context,
@@ -1206,10 +1232,10 @@ const getStoredMindmaps = async () => {
   }
 };
 
-const saveMindmap = async (outlineText, title) => {
+const saveMindmap = async (outlineText, title, targetPageKey = pageKey) => {
   if (!storage) return;
   const maps = await getStoredMindmaps();
-  maps[pageKey] = {
+  maps[targetPageKey] = {
     outline: outlineText,
     title: title || document.title || "",
     generatedAt: Date.now(),
@@ -1442,6 +1468,7 @@ const findSpanForTextInIndex = (searchIndex, targetText, takenIntervals, accept 
 };
 
 const applyAutoHighlightTasksBatch = async (tasks, usePreview) => {
+  await domainPolicyLoaded;if(!domainAllowsHighlights())throw new Error(t('sidebar.domainDisabled'));
   const targetPageKey = pageKey;
   const searchIndex = buildNormalizedSearchIndex();
   if (searchIndex) {
@@ -1679,16 +1706,19 @@ const clearPageHighlights = async () => {
 
 // 刪除側欄的單一項目：頁面標記、預覽與 AI 導覽清單都要一起移除，否則會以「不在頁面上」再出現。
 const deleteGuideItem = async ({ text, kind }) => {
+  const deletingKey=pageKey;
   const sameItem = (item) => {
     if (HkParsers.looseKey(item?.text || "") !== HkParsers.looseKey(text || "")) return false;
     return kind === "term" ? item.kind === "term" : item.kind !== "term";
   };
   const removeMarks = (id) => {
+    if(deletingKey!==pageKey)return;
     document.querySelectorAll(`[${HIGHLIGHT_ATTR}="${id}"]`).forEach(unwrapHighlightElement);
   };
-  const entries = await getStoredHighlights();
+  const entries = await getStoredHighlights(deletingKey);
   entries.filter(sameItem).forEach((item) => removeMarks(item.id));
-  if (entries.some(sameItem)) await setStoredHighlights(entries.filter((item) => !sameItem(item)));
+  if (entries.some(sameItem)) await setStoredHighlights(entries.filter((item) => !sameItem(item)),deletingKey);
+  if(deletingKey===pageKey){
   previewData = previewData.filter((item) => {
     if (!sameItem(item.data)) return true;
     removeMarks(item.data.id);
@@ -1699,8 +1729,9 @@ const deleteGuideItem = async ({ text, kind }) => {
     previewUndo = null;
     hidePreviewConfirmBar();
   }
+  }
   const stored = await chrome.storage.local.get("hkGeneratedNotes");
-  const note = stored?.hkGeneratedNotes?.[pageKey];
+  const note = stored?.hkGeneratedNotes?.[deletingKey];
   if (note) {
     const keepTerm = (item) => !sameItem({ ...item, kind: "term" });
     const keepPassage = (item) => !sameItem({ ...item, kind: "passage" });
@@ -1711,14 +1742,15 @@ const deleteGuideItem = async ({ text, kind }) => {
       guideHighlights: (note.guideHighlights || []).filter(keepPassage),
       unlocatedHighlights: (note.unlocatedHighlights || []).filter(keepPassage),
     };
-    highlightPanelState.notesByPage = { ...highlightPanelState.notesByPage, [pageKey]: next };
-    await chrome.storage.local.set({ hkGeneratedNotes: { ...stored.hkGeneratedNotes, [pageKey]: next } });
+    highlightPanelState.notesByPage = { ...highlightPanelState.notesByPage, [deletingKey]: next };
+    await chrome.storage.local.set({ hkGeneratedNotes: { ...stored.hkGeneratedNotes, [deletingKey]: next } });
   }
-  await refreshHighlightPanelIfVisible();
+  if(deletingKey===pageKey)await refreshHighlightPanelIfVisible();
 };
 
 // 刪除這篇文章的全部筆記：標記、脈絡、名詞、地圖、標籤與個人筆記。
 const deletePageNotes = async () => {
+  const deletingKey=pageKey;
   document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach(unwrapHighlightElement);
   previewData = [];
   previewUndo = null;
@@ -1728,15 +1760,17 @@ const deletePageNotes = async () => {
   const stored = await chrome.storage.local.get(keys);
   const updates = {};
   keys.forEach((key) => {
-    if (!stored[key]?.[pageKey]) return;
-    const { [pageKey]: _removed, ...rest } = stored[key];
+    if (!stored[key]?.[deletingKey]) return;
+    const { [deletingKey]: _removed, ...rest } = stored[key];
     updates[key] = rest;
   });
   if (Object.keys(updates).length) await chrome.storage.local.set(updates);
-  await chrome.storage.local.remove(pageKey);
-  const { [pageKey]: _note, ...notes } = highlightPanelState.notesByPage || {};
+  const deskDeleted = await chrome.runtime.sendMessage({type:"HK_DESK_BATCH",operations:[{pageKey:deletingKey,value:null}]});
+  if (!deskDeleted?.success) throw new Error(deskDeleted?.error || t("storage.saveFailed"));
+  await chrome.storage.local.remove(deletingKey);
+  const { [deletingKey]: _note, ...notes } = highlightPanelState.notesByPage || {};
   highlightPanelState.notesByPage = notes;
-  await refreshHighlightPanelIfVisible();
+  if(deletingKey===pageKey)await refreshHighlightPanelIfVisible();
 };
 
 const applyPreviewHighlight = (range, color, reason, extra = "", source = "", kind) => {
@@ -1873,16 +1907,16 @@ const cancelPreviewHighlights = async () => {
 
 // AI 回傳的「標籤」區塊：解析後併入目前頁面既有標籤（聯集，不覆蓋手動加的），
 // 並同步面板狀態讓標籤即時顯示。回傳實際新增的標籤數。
-const applyAiPageTags = async (rawTagsSection) => {
+const applyAiPageTags = async (rawTagsSection, targetPageKey = pageKey) => {
   const aiTags = HkParsers.parsePageTags(rawTagsSection);
   if (!aiTags.length) return 0;
-  const existing = await getPageTags(pageKey);
+  const existing = await getPageTags(targetPageKey);
   const merged = Array.from(new Set([...existing, ...aiTags]));
-  await setPageTags(pageKey, merged);
-  const prevMeta = highlightPanelState.pageMeta?.[pageKey] || {};
+  await setPageTags(targetPageKey, merged);
+  const prevMeta = highlightPanelState.pageMeta?.[targetPageKey] || {};
   highlightPanelState.pageMeta = {
     ...highlightPanelState.pageMeta,
-    [pageKey]: { ...prevMeta, tags: merged },
+    [targetPageKey]: { ...prevMeta, tags: merged },
   };
   return merged.length - existing.length;
 };
@@ -2019,12 +2053,13 @@ const parseTags = (input) => {
   return Array.from(
     new Set(
       input
-        .split(/[,\s]+/)
+        .split(/[,，、\n]+/)
         .map((tag) => tag.trim())
         .filter(Boolean)
     )
   );
 };
+
 
 const isValidPageKey = (key) => {
   if (typeof key !== "string") return false;
@@ -4433,7 +4468,7 @@ const ensureHighlightMenu = () => {
   noteLabel.appendChild(menuTranslateBtn);
   const noteField = document.createElement("textarea");
   noteField.className = "hk-menu-note";
-  noteField.rows = 6;
+  noteField.rows = 3;
   noteField.placeholder = t("detail.notePlaceholder");
   noteWrapper.appendChild(noteLabel);
   noteWrapper.appendChild(noteField);
@@ -4453,6 +4488,16 @@ const ensureHighlightMenu = () => {
   deleteBtn.textContent = t("detail.deleteHighlight");
   deleteBtn.addEventListener("click", handleDeleteHighlight);
 
+  const pinBtn = document.createElement("button");
+  pinBtn.type = "button";
+  pinBtn.className = "hk-menu-desk-btn";
+  pinBtn.setAttribute("aria-label", t("desk.extract"));
+  pinBtn.title = t("desk.extract");
+  pinBtn.appendChild(createDeskExtractIcon());
+  pinBtn.addEventListener("click", () => {
+    if (activeHighlightId) globalThis.HkReadingDeskUI?.pin(activeHighlightId).catch(error => showHkToast(error.message, {isError:true}));
+  });
+  header.appendChild(pinBtn);
   actions.appendChild(saveNoteBtn);
   actions.appendChild(deleteBtn);
   container.appendChild(actions);
@@ -5920,6 +5965,7 @@ const saveHighlight = async (entry) => {
   if (!storage) return;
   const highlights = await getStoredHighlights(entry.url ?? pageKey);
   await setStoredHighlights([...highlights, entry], entry.url ?? pageKey);
+  globalThis.HkReadingDeskUI?.onHighlight(entry);
 };
 
 const updateHighlightEntry = (id, partial, key = pageKey) =>
@@ -5960,9 +6006,12 @@ const findHighlightEntry = async (id, key = pageKey) => {
 
 const restoreHighlights = async () => {
   if (!storage) return { total: 0, visible: 0 };
+  const restoringKey = pageKey;
+  await domainPolicyLoaded;
+  if(restoringKey!==pageKey||!domainAllowsHighlights())return {total:0,visible:0};
   try {
-    const restoringKey = pageKey;
     const saved = await storage.get(restoringKey);
+    if(restoringKey!==pageKey||!domainAllowsHighlights())return {total:0,visible:0};
     const allHighlights = Array.isArray(saved[restoringKey]) ? saved[restoringKey] : [];
     const highlights = allHighlights.filter((item) => Boolean(item?.range));
     const reanchored = new Map();
@@ -6013,17 +6062,10 @@ const restoreHighlights = async () => {
 // 若 pageKey 仍帶查詢字串（查詢決定內容的站，如 youtube ?v=），則嚴格比對正規化網址。
 // SPA 導航時 pageKey 會被重算，所以這裡用函式即時讀「當前」pageKey，
 // 避免初始注入時固定下來的舊判斷套用到新頁。
-const pageKeyHasQuery = () => {
-  try {
-    return Boolean(new URL(pageKey).search);
-  } catch (_e) {
-    return false;
-  }
-};
-const articleIdentity = (url) => {
+const articleIdentity = (url, sourceKey=pageKey) => {
   try {
     const u = new URL(url);
-    return pageKeyHasQuery()
+    return new URL(sourceKey).search
       ? normalizePageKey(url)
       : `${u.origin}${u.pathname}`;
   } catch (_e) {
@@ -6037,33 +6079,34 @@ const LEGACY_MIGRATED_FLAG = "hkLegacyMigrated";
 let legacyMigrationPromise = null;
 const migrateLegacyPageData = () => {
   if (legacyMigrationPromise) return legacyMigrationPromise;
+  const targetPageKey=pageKey;
   legacyMigrationPromise = (async () => {
     if (!storage) return;
     try {
-      const targetId = articleIdentity(pageKey);
+      const targetId = articleIdentity(targetPageKey,targetPageKey);
       if (!targetId) return;
       // 便宜判斷，避免每頁載入都 get(null) 全量掃描：
       // ① 全域已標記「無殘留舊式網址鍵」→ 直接 skip
       // ② 本頁已有標註 → 之前造訪時就已合併過任何舊鍵，無需再掃
-      const pre = await storage.get([pageKey, LEGACY_MIGRATED_FLAG]);
+      const pre = await storage.get([targetPageKey, LEGACY_MIGRATED_FLAG]);
       if (pre[LEGACY_MIGRATED_FLAG]) return;
-      if (Array.isArray(pre[pageKey]) && pre[pageKey].length) return;
+      if (Array.isArray(pre[targetPageKey]) && pre[targetPageKey].length) return;
 
       const all = await storage.get(null);
       const writes = {};
       const removes = [];
 
-      // 1) 標註：頂層以 http(s) 網址為鍵、值為陣列。把同一識別碼的舊鍵併入 pageKey。
-      const merged = Array.isArray(all[pageKey]) ? [...all[pageKey]] : [];
+      // 1) 標註：頂層以 http(s) 網址為鍵、值為陣列。把同一識別碼的舊鍵併入 targetPageKey。
+      const merged = Array.isArray(all[targetPageKey]) ? [...all[targetPageKey]] : [];
       const seenIds = new Set(merged.map((it) => it?.id).filter(Boolean));
       let touchedHighlights = false;
       for (const key of Object.keys(all)) {
-        if (key === pageKey || !/^https?:/i.test(key)) continue;
+        if (key === targetPageKey || !/^https?:/i.test(key)) continue;
         if (!Array.isArray(all[key])) continue;
-        if (articleIdentity(key) !== targetId) continue;
+        if (articleIdentity(key,targetPageKey) !== targetId) continue;
         for (const item of all[key]) {
           const normalized =
-            item && typeof item === "object" ? { ...item, url: pageKey } : item;
+            item && typeof item === "object" ? { ...item, url: targetPageKey } : item;
           if (normalized?.id && seenIds.has(normalized.id)) continue;
           if (normalized?.id) seenIds.add(normalized.id);
           merged.push(normalized);
@@ -6071,7 +6114,7 @@ const migrateLegacyPageData = () => {
         removes.push(key);
         touchedHighlights = true;
       }
-      if (touchedHighlights && merged.length) writes[pageKey] = merged;
+      if (touchedHighlights && merged.length) writes[targetPageKey] = merged;
 
       // 2) 心智圖、3) 生成筆記、4) 頁面 meta（皆為 { [url]: value } 物件）
       const moveSubKey = (storeKey) => {
@@ -6080,9 +6123,9 @@ const migrateLegacyPageData = () => {
         let changed = false;
         const next = { ...map };
         for (const key of Object.keys(map)) {
-          if (key === pageKey || !/^https?:/i.test(key)) continue;
-          if (articleIdentity(key) !== targetId) continue;
-          if (next[pageKey] === undefined) next[pageKey] = map[key];
+          if (key === targetPageKey || !/^https?:/i.test(key)) continue;
+          if (articleIdentity(key,targetPageKey) !== targetId) continue;
+          if (next[targetPageKey] === undefined) next[targetPageKey] = map[key];
           delete next[key];
           changed = true;
         }
@@ -6105,7 +6148,7 @@ const migrateLegacyPageData = () => {
     } catch (error) {
       console.debug("舊版標註資料搬移失敗", error);
     }
-  })();
+  })().finally(()=>{legacyMigrationPromise=null;});
   return legacyMigrationPromise;
 };
 
@@ -6147,8 +6190,11 @@ const attemptRestoreHighlights = async (attempt = 0) => {
 };
 
 const runRestoreAttempt = async (attempt) => {
+  const sourceKey=pageKey,sourceTitle=document.title;
   if (attempt === 0) await migrateLegacyPageData();
+  if(sourceKey!==pageKey)return;
   const { total, visible } = await restoreHighlights();
+  if(sourceKey!==pageKey)return;
   checkPendingFocusHighlight();
   if (!total) {
     orphanHighlightCount = 0;
@@ -6156,7 +6202,8 @@ const runRestoreAttempt = async (attempt) => {
     return;
   }
   // 只有真的有標註的頁面才記標題：單純瀏覽不留下任何紀錄。
-  await ensurePageMetaTitle(pageKey, document.title);
+  await ensurePageMetaTitle(sourceKey,sourceTitle);
+  if(sourceKey!==pageKey)return;
   if (visible >= total) {
     // 全部還原成功（可能是這次或之前重試補上的）→ 清掉殘留的失聯狀態。
     orphanHighlightCount = 0;
@@ -6174,6 +6221,7 @@ const runRestoreAttempt = async (attempt) => {
 };
 
 const applyHighlight = async (color) => {
+  await domainPolicyLoaded;if(!domainAllowsHighlights())throw new Error(t('sidebar.domainDisabled'));
   const selection = window.getSelection();
 
   if (!selection || selection.rangeCount === 0) {
@@ -6212,9 +6260,11 @@ const applyHighlight = async (color) => {
   }
   await ensurePageMetaTitle(pageKey, document.title);
   await refreshHighlightPanelIfVisible();
+  return highlightId;
 };
 
 const handleSelectionIntent = () => {
+  if(!domainAllowsHighlights()){hideFloatingButton();return;}
   const activeEl = document.activeElement;
   const isInsideHighlightUi =
     activeEl instanceof Node &&
@@ -6231,6 +6281,7 @@ const handleSelectionIntent = () => {
     window.clearTimeout(selectionDebounceTimer);
   }
   selectionDebounceTimer = window.setTimeout(() => {
+    if(!domainAllowsHighlights()){hideFloatingButton();return;}
     const selection = window.getSelection();
     const anchorNode = selection?.anchorNode;
     const anchorElement =
@@ -6306,9 +6357,8 @@ const handleHighlightClick = (event) => {
   event.preventDefault();
   event.stopPropagation();
   hideFloatingButton();
-  openHighlightMenu(highlightEl).catch((error) =>
-    console.debug("開啟 highlight 面板失敗", error)
-  );
+  hideNoteTooltip();
+  openHighlightMenu(highlightEl).catch(error=>showHkToast(error.message,{isError:true}));
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -6450,7 +6500,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           const target = { ...pages[0], url: message.pageKey };
           const result = HkParsers.pagesToStorageUpdates([target], await storage.get(null));
           if (message.pageKey !== pageKey) throw new Error(t("sidebar.sourceMismatch"));
+          const deskImports = result.updates.hkReadingDesks;
+          delete result.updates.hkReadingDesks;
           if (Object.keys(result.updates).length) await storage.set(result.updates);
+          if (deskImports && Object.keys(deskImports).length) {
+            const imported = await chrome.runtime.sendMessage({type:"HK_DESK_BATCH",operations:result.imported.filter(pageKey=>deskImports[pageKey]).map(pageKey=>({pageKey,value:deskImports[pageKey]}))});
+            if (!imported?.success) throw new Error(imported?.error || t("storage.saveFailed"));
+          }
           if (result.imported.length && message.pageKey === pageKey) attemptRestoreHighlights();
           sendResponse({ success: true, kind: "page", count: result.imported.length, skipped: result.skipped.length });
           return;
@@ -6615,6 +6671,8 @@ const onUrlChanged = (next) => {
   } catch (_e) {}
 
   pageKey = next;
+  globalThis.HkReadingDeskUI?.navigate();
+  globalThis.HkPageAnnotations?.reload();
   highlightPanelState.activeKey = pageKey;
 
   // 重設失聯狀態：新頁要重新統計，不可沿用舊頁的數字／已通知旗標。
@@ -7012,15 +7070,26 @@ const ensureNoteTooltip = () => {
   el.id = HIGHLIGHT_NOTE_TOOLTIP_ID;
   el.className = "hk-note-tooltip";
   el.setAttribute("role", "tooltip");
+  el.addEventListener("mouseenter", () => clearTimeout(tooltipHideTimer));
+  el.addEventListener("mouseleave", () => {tooltipHideTimer=setTimeout(hideNoteTooltip,160);});
   document.body.appendChild(el);
   highlightNoteTooltip = el;
   return el;
 };
 
-const showNoteTooltip = (text, targetEl) => {
+const showNoteTooltip = (text, targetEl, interactive = false) => {
   if (!text || !targetEl) return;
   const tooltip = ensureNoteTooltip();
-  tooltip.textContent = HkParsers.breakNoteLines(text);
+  tooltip.replaceChildren();
+  tooltip.classList.toggle("is-interactive", interactive);
+  tooltip.setAttribute("role", interactive ? "dialog" : "tooltip");
+  tooltip.setAttribute("aria-label", t("detail.noteLabel"));
+  const noteText=document.createElement("div");noteText.className="hk-note-preview-text";noteText.textContent=HkParsers.breakNoteLines(text);tooltip.appendChild(noteText);
+  if(interactive){
+    const edit=document.createElement("button");edit.type="button";edit.className="hk-note-preview-edit";edit.textContent=t("desk.editThought");
+    edit.addEventListener("click",()=>{hideNoteTooltip();openHighlightMenu(targetEl).catch(error=>showHkToast(error.message,{isError:true}));});
+    tooltip.appendChild(edit);
+  }
 
   // measure while invisible to avoid position flash
   tooltip.style.visibility = "hidden";
@@ -7047,6 +7116,7 @@ const showNoteTooltip = (text, targetEl) => {
     top = rect.top + scrollY - margin - tooltipHeight;
   }
 
+  top=Math.max(scrollY+margin,Math.min(top,scrollY+vpHeight-tooltipHeight-margin));
   tooltip.style.left = `${left}px`;
   tooltip.style.top = `${top}px`;
   tooltip.style.visibility = "visible";
@@ -7203,7 +7273,7 @@ document.addEventListener("mouseout", (event) => {
   if (!from) return;
   const to = event.relatedTarget?.closest?.(`.${HIGHLIGHT_CLASS}`);
   if (to === from) return;
-  tooltipHideTimer = setTimeout(hideNoteTooltip, 60);
+  tooltipHideTimer = setTimeout(hideNoteTooltip, 180);
 });
 
 document.addEventListener("mouseup", handleSelectionIntent);
@@ -7331,7 +7401,13 @@ const mergeBulkImportPayload = async (files) => {
     };
     const bulkPages = HkParsers.normalizeBulkPages(fileTexts.flatMap((text) => bulkPagesOf(text) || []));
     const bulk = HkParsers.pagesToStorageUpdates(bulkPages, await storage.get(null));
+    const deskImports = bulk.updates.hkReadingDesks;
+    delete bulk.updates.hkReadingDesks;
     if (Object.keys(bulk.updates).length) await storage.set(bulk.updates);
+    if (deskImports && Object.keys(deskImports).length) {
+      const imported = await chrome.runtime.sendMessage({type:"HK_DESK_BATCH",operations:bulk.imported.filter(pageKey=>deskImports[pageKey]).map(pageKey=>({pageKey,value:deskImports[pageKey]}))});
+      if (!imported?.success) throw new Error(imported?.error || t("storage.saveFailed"));
+    }
     const allEntries = fileTexts
       .filter((text) => !bulkPagesOf(text))
       .flatMap((text) => parseImportedHighlightsPayload(text));
@@ -7386,3 +7462,147 @@ const handleBulkImportChange = (event) => {
   const files = event.target.files;
   mergeBulkImportPayload(files);
 };
+
+
+// Shared only within this extension's isolated content-script world.
+let inlineThoughtSlot=null,inlineThoughtBlock=null;
+const reserveInlineThought = (id,height) => {
+  if(!id){inlineThoughtSlot?.remove();inlineThoughtSlot=null;inlineThoughtBlock=null;return null;}
+  const mark=[...document.querySelectorAll(`[${HIGHLIGHT_ATTR}="${CSS.escape(id)}"]`)]
+    .map(element=>({element,rect:typeof getHighlightVisualRect==="function"?getHighlightVisualRect(element):element.getBoundingClientRect()}))
+    .filter(item=>item.rect&&item.rect.bottom>16&&item.rect.top<innerHeight-16)
+    .sort((a,b)=>Math.abs(a.rect.top-innerHeight*.44)-Math.abs(b.rect.top-innerHeight*.44))[0]?.element;
+  if(!mark){inlineThoughtSlot?.remove();inlineThoughtSlot=null;inlineThoughtBlock=null;return null;}
+  const block=mark.closest("p,li,blockquote,pre,h1,h2,h3,h4,td")||mark.parentElement;
+  if(!block)return null;
+  if(!inlineThoughtSlot?.isConnected||inlineThoughtSlot.dataset.highlightId!==id||inlineThoughtBlock!==block){
+    inlineThoughtSlot?.remove();
+    inlineThoughtSlot=document.createElement("div");
+    inlineThoughtBlock=block;
+    inlineThoughtSlot.className="hk-inline-thought-slot";
+    inlineThoughtSlot.setAttribute("data-hk-ui","true");
+    inlineThoughtSlot.setAttribute("aria-hidden","true");
+    inlineThoughtSlot.dataset.highlightId=id;
+    inlineThoughtSlot.style.cssText="all:initial;display:block;box-sizing:border-box;width:auto;min-width:0;clear:both;pointer-events:none;grid-column:1 / -1;";
+    if(["LI","TD"].includes(block.tagName)){
+      // Numbered summaries often use flex/grid: append inside the text column,
+      // never beside the counter and copy as an extra narrow layout column.
+      let copy=mark;
+      while(copy.parentElement&&copy.parentElement!==block)copy=copy.parentElement;
+      if(copy!==mark&&!copy.matches?.(".hk-highlight"))copy.append(inlineThoughtSlot);
+      else block.after(inlineThoughtSlot);
+      if(inlineThoughtSlot.getBoundingClientRect().width<Math.min(240,innerWidth-32))block.after(inlineThoughtSlot);
+    }else block.after(inlineThoughtSlot);
+  }
+  if(Number.isFinite(height)||!inlineThoughtSlot.style.height){
+    const reserved=Math.max(48,Number.isFinite(height)?height:0)+16;
+    if(inlineThoughtSlot.style.height!==reserved+"px")inlineThoughtSlot.style.height=reserved+"px";
+  }
+  const rect=inlineThoughtSlot.getBoundingClientRect();
+  return{left:rect.left+12,top:rect.top+8,width:Math.max(120,rect.width-24)};
+};
+globalThis.HkDeskBridge = {
+  inlineAnchor:(id,height)=>reserveInlineThought(id,height),
+  key: () => { synchronizeCurrentLocation(); return pageKey; },
+  highlights: (key) => getStoredHighlights(key),
+  extract: () => applyHighlight(currentColor || DEFAULT_COLOR),
+  deleteHighlights: async (source,ids) => {
+    if(source!==pageKey)throw new Error(t("sidebar.sourceMismatch"));
+    const result=await chrome.runtime.sendMessage({type:"HK_DELETE_PAGE_HIGHLIGHTS",pageKey:source,ids});
+    if(!result?.success)throw new Error(result?.error || t("storage.saveFailed"));
+    if(source===pageKey){
+      const selected=ids===null?null:new Set(ids);
+      if(previewUndo?.pageKey===source){
+        if(selected===null)previewUndo=null;
+        else previewUndo={...previewUndo,entries:(previewUndo.entries||[]).filter(entry=>!selected.has(entry.id))};
+      }
+      const previousPreviewCount=previewData.length;
+      previewData=previewData.filter(item=>item.data?.url!==source || (selected!==null&&!selected.has(item.data?.id)));
+      if(!previewData.length)hidePreviewConfirmBar();
+      else if(previewData.length!==previousPreviewCount)showPreviewConfirmBar(previewData.length);
+      document.querySelectorAll(`[${HIGHLIGHT_ATTR}]`).forEach(mark=>{if(selected===null||selected.has(mark.getAttribute(HIGHLIGHT_ATTR)))unwrapHighlightElement(mark);});
+      hideNoteTooltip();closeHighlightMenu();await refreshHighlightPanelIfVisible();notifyPageChanged();
+    }
+    return result;
+  },
+  restoreDeleted: async(source,undo)=>{
+    const result=await chrome.runtime.sendMessage({type:"HK_RESTORE_DELETED",pageKey:source,undo});
+    if(!result?.success)throw new Error(result?.error||t("storage.saveFailed"));
+    if(source===pageKey){await restoreHighlights();notifyPageChanged();}
+  },
+  saveNote: async (key, id, note) => {
+    if (!await findHighlightEntry(id, key)) throw new Error(t("desk.missingSource"));
+    const updated = await updateHighlightEntry(id, {note}, key);
+    if (!updated) throw new Error(t("desk.missingSource"));
+    if (key === pageKey) setAllMarksMetadata(id, {note});
+  },
+  pageTheme: () => {
+    for(const element of [document.body,document.documentElement]){
+      if(!element)continue;
+      const color=getComputedStyle(element).backgroundColor;
+      const match=/rgba?\((\d+)[, ]+(\d+)[, ]+(\d+)(?:[, /]+([\d.]+))?\)/.exec(color);
+      if(!match || Number(match[4] ?? 1)<.1)continue;
+      return Number(match[1])*.2126+Number(match[2])*.7152+Number(match[3])*.0722<128?'dark':'light';
+    }
+    return 'light';
+  },
+  anchors: ids => ids.flatMap(id => {
+    const marks=[...document.querySelectorAll(`[${HIGHLIGHT_ATTR}="${CSS.escape(id)}"]`)];
+    const anchors=marks.map(mark=>{
+      const rect=getHighlightVisualRect(mark);
+      if(!rect || rect.bottom<0 || rect.top>innerHeight)return null;
+      const block=mark.closest("p,li,blockquote,pre,h1,h2,h3,h4,td") || mark.parentElement;
+      const article=mark.closest("article,.markdown-body,.prose,[role=article]");
+      const column=(article || block)?.getBoundingClientRect() || rect;
+      return {id,rect:{left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom},column:{left:column.left,right:column.right}};
+    }).filter(Boolean).sort((a,b)=>Math.abs(a.rect.top-innerHeight*.44)-Math.abs(b.rect.top-innerHeight*.44));
+    return anchors[0]?[anchors[0]]:[];
+  }),
+  focus: (key, id) => {
+    if (key !== pageKey) return false;
+    if (!document.querySelector(`[${HIGHLIGHT_ATTR}="${CSS.escape(id)}"]`)) return false;
+    focusHighlightElement(id);
+    return true;
+  },
+  copyPrompt: async () => {
+    const source=pageKey;
+    const pageData=await collectGuidePageData();
+    const palette=await refreshPaletteFromStorage();
+    const tags=await collectExistingTagsByUsage();
+    if(source!==pageKey)throw new Error(t("sidebar.sourceMismatch"));
+    const prompt=buildReadingGuidePrompt(pageData,palette,tags);
+    let copied=false;
+    try {await navigator.clipboard.writeText(prompt);copied=true;} catch(_error) {}
+    if(!copied){
+      const field=document.createElement("textarea");field.value=prompt;
+      field.style.cssText="position:fixed;left:-10000px;top:0;";
+      document.documentElement.appendChild(field);
+      try{field.select();copied=document.execCommand("copy");}finally{field.remove();}
+    }
+    if(!copied)throw new Error(t("sidebar.promptCopyError"));
+    await chrome.runtime.sendMessage({type:"HK_DESK_PROMPT_SOURCE"}).catch(()=>{});
+  },
+  openAI: async (provider) => {
+    const result=await chrome.runtime.sendMessage({type:"HK_DESK_OPEN_AI",provider});
+    if(!result?.success)throw new Error(result?.error || t("sidebar.extractError"));
+  },
+  applyReply: async (source,text) => {
+    if(source!==pageKey)throw new Error(t("sidebar.sourceMismatch"));
+    const provider=aiSettings.provider==="gemini-web"?"gemini-web":"chatgpt";
+    const result=await applyReadingGuideResponse(text,provider,provider==="gemini-web"?"gemini-web":"chatgpt-web",source);
+    if(source!==pageKey)throw new Error(t("sidebar.sourceMismatch"));
+    return result;
+  },
+  sidebar: (settings=false) => chrome.runtime.sendMessage({type:"OPEN_SIDE_PANEL",settings}),
+};
+chrome.storage.onChanged.addListener((changes,area)=>{
+  if(area!=='local'||!changes.hkDomainPolicy)return;
+  domainPolicyChanged=true;domainPolicyReady=true;domainPolicy=changes.hkDomainPolicy.newValue||{};
+  if(!domainAllowsHighlights()){
+    window.clearTimeout(restoreTimer);
+    window.clearTimeout(selectionDebounceTimer);
+    document.querySelectorAll(`.${HIGHLIGHT_CLASS}`).forEach(unwrapHighlightElement);
+    hideFloatingButton();hideNoteTooltip();closeHighlightMenu();
+    globalThis.HkPageAnnotations?.refresh();
+  }else attemptRestoreHighlights();
+});

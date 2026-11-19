@@ -2972,3 +2972,151 @@
 .hk-preview-bar-confirm:hover {
   background: #4b4844 !important;
 }
+
+/* Keep selection tools compact even on sites with global button/SVG rules. */
+.hk-floating-toolbar > .hk-floating-tr-btn {
+  box-sizing: border-box;
+  padding: 0;
+  min-width: 30px;
+  flex: 0 0 30px;
+  white-space: nowrap;
+}
+.hk-floating-toolbar > .hk-floating-desk-btn > svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  flex: none;
+  pointer-events: none;
+  fill: none;
+  stroke: currentColor;
+}
+
+/* Keep each action label intact; wrap whole buttons on narrow menus. */
+.hk-highlight-menu .hk-menu-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.hk-highlight-menu .hk-menu-actions > .hk-menu-btn {
+  flex: 1 0 auto;
+  width: auto;
+  min-width: max-content;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  line-height: 1.4;
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 14px;
+}
+
+/* Pulling a quote out is a secondary view action, beside the menu heading. */
+.hk-highlight-menu .hk-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hk-highlight-menu .hk-menu-desk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--hkn-soft);
+  cursor: pointer;
+}
+.hk-highlight-menu .hk-menu-desk-btn:hover {
+  background: var(--hkn-hover);
+  color: var(--hkn-blue);
+}
+.hk-highlight-menu .hk-menu-desk-btn:focus-visible {
+  outline: 2px solid var(--hkn-blue);
+  outline-offset: 2px;
+}
+.hk-highlight-menu .hk-menu-desk-btn > svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  pointer-events: none;
+}
+
+/* Compact highlight editor, bounded by the viewport rather than the host page. */
+.hk-highlight-menu {
+  box-sizing: border-box;
+  width: min(340px, calc(100vw - 24px));
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.hk-highlight-menu > * { flex-shrink: 0; }
+.hk-highlight-menu .hk-menu-note {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  height: 96px;
+  min-height: 80px;
+  max-height: min(240px, 40vh);
+  overflow-y: auto;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: normal;
+  padding: 9px 11px;
+}
+.hk-highlight-menu .hk-menu-status:empty { display: none; }
+
+/* Reading a thought is a quiet preview; editing is an explicit action. */
+.hk-highlight[data-hk-note]:not([data-hk-note=""]) {
+  text-decoration-style: dashed !important;
+}
+.hk-note-tooltip {
+  box-sizing: border-box;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(280px, 40vh);
+  overflow-y: auto;
+  background: #fafbfe;
+  color: #4b5264;
+  border: 1px dashed #9ca9c5;
+  border-radius: 7px;
+  box-shadow: 0 4px 14px #0000000c;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  animation: hk-note-preview-appear 130ms ease-out;
+}
+.hk-note-tooltip.is-interactive { pointer-events: auto; }
+.hk-note-preview-edit {
+  display: block;
+  margin: 8px 0 0;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: #425fba;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.hk-note-preview-edit:focus-visible { outline: 2px solid #425fba; outline-offset: 2px; }
+@keyframes hk-note-preview-appear { from {opacity:0} to {opacity:1} }
+@media(prefers-color-scheme:dark) {
+  .hk-note-tooltip {background:#282c35;color:#dce1ec;border-color:#75829e;}
+  .hk-note-preview-edit {color:#acbfff;}
+}
+@media(prefers-reduced-motion:reduce) { .hk-note-tooltip {animation:none;} }

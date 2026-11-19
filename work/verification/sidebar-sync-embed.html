@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <title data-i18n="manager.pageTitle">Highlight Keeper — 收藏總覽</title>
+    <link rel="stylesheet" href="../../manager.css" />
+  </head>
+  <body>
+    <main class="hk-manager">
+      <header class="hk-manager-header">
+        <div>
+          <h1 data-i18n="manager.heading">收藏總覽</h1>
+          <p data-i18n="manager.subheading">一次匯出/匯入所有頁面的標註，集中管理你的資料。</p>
+        </div>
+        <div class="hk-manager-header-right">
+          <button type="button" id="openBackupTools" class="hk-manager-btn hk-manager-btn-ghost" data-i18n="manager.backupTools">備份與同步</button>
+          <label class="hk-manager-lang">
+            <span data-i18n="popup.langLabel">顯示語言</span>
+            <select id="managerLang">
+              <option value="zh" data-i18n="popup.langZh">繁體中文</option>
+              <option value="en" data-i18n="popup.langEn">English</option>
+            </select>
+          </label>
+          <button type="button" class="hk-manager-close" id="closeManagerBtn">×</button>
+        </div>
+      </header>
+      <details class="hk-manager-backup" style="order: 2"><summary data-i18n="manager.backupTools">備份與同步</summary>
+      <section class="hk-manager-actions">
+        <button type="button" id="downloadAllBtn" class="hk-manager-btn" data-i18n="manager.downloadAll">
+          下載全部筆記
+        </button>
+        <label class="hk-manager-btn hk-manager-import">
+          <span data-i18n="manager.importMulti">匯入多個 JSON</span>
+          <input
+            type="file"
+            id="bulkImportInput"
+            accept="application/json"
+            multiple
+          />
+        </label>
+      </section>
+      <section class="hk-manager-sync" aria-labelledby="githubSyncTitle">
+        <div class="hk-manager-sync-header">
+          <div>
+            <h2 id="githubSyncTitle" data-i18n="manager.githubBackup">GitHub 備份</h2>
+            <p data-i18n="manager.githubDesc">填入 Personal Access Token 與儲存庫資訊，即可一鍵把全部筆記上傳到 GitHub。</p>
+          </div>
+        </div>
+        <div class="hk-manager-sync-fields">
+          <label class="hk-manager-field">
+            <span data-i18n="manager.githubTokenLabel">GitHub Token</span>
+            <input
+              type="password"
+              id="githubToken"
+              class="hk-manager-input"
+              placeholder="ghp_xxx"
+            />
+          </label>
+          <label class="hk-manager-field">
+            <span data-i18n="manager.githubRepoLabel">儲存庫（owner/repo）</span>
+            <input
+              type="text"
+              id="githubRepo"
+              class="hk-manager-input"
+              placeholder="username/highlight-backup"
+            />
+          </label>
+          <label class="hk-manager-field">
+            <span data-i18n="manager.githubBranchLabel">分支</span>
+            <input
+              type="text"
+              id="githubBranch"
+              class="hk-manager-input"
+              placeholder="main"
+            />
+          </label>
+          <label class="hk-manager-field">
+            <span data-i18n="manager.githubPathLabel">檔案路徑</span>
+            <input
+              type="text"
+              id="githubPath"
+              class="hk-manager-input"
+              placeholder="backups/highlight-keeper.json"
+            />
+          </label>
+        </div>
+        <div class="hk-manager-sync-actions">
+          <button type="button" id="githubDownloadBtn" class="hk-manager-btn" data-i18n="manager.githubDownload">
+            從 GitHub 下載
+          </button>
+          <button type="button" id="githubBrowseBtn" class="hk-manager-btn hk-manager-btn-ghost" data-i18n="manager.githubBrowse">
+            分類下載…
+          </button>
+          <button type="button" id="githubUploadBtn" class="hk-manager-btn hk-manager-btn-muted" data-i18n="manager.githubUpload">
+            上傳到 GitHub
+          </button>
+        </div>
+        <p
+          id="githubSyncStatus"
+          class="hk-manager-sync-status"
+          role="status"
+          aria-live="polite"
+        ></p>
+        <div class="hk-manager-autosync">
+          <label class="hk-manager-autosync-toggle">
+            <input type="checkbox" id="autoSyncEnabled" />
+            <span data-i18n="manager.autoSync">自動同步</span>
+          </label>
+          <label class="hk-manager-autosync-interval">
+            <span data-i18n="manager.autoSyncEvery">每</span>
+            <input type="number" id="autoSyncMinutes" class="hk-manager-input" min="1" max="1440" step="1" />
+            <span data-i18n="manager.autoSyncUnit">分鐘</span>
+          </label>
+          <button type="button" id="autoSyncNowBtn" class="hk-manager-btn hk-manager-btn-ghost" data-i18n="manager.autoSyncNow">立即同步</button>
+        </div>
+        <p id="autoSyncStatus" class="hk-manager-autosync-status" role="status" aria-live="polite"></p>
+        <div id="autoSyncConflicts" class="hk-manager-autosync-conflicts" hidden></div>
+        <div id="githubCategoryList" class="hk-manager-github-categories" style="display: none"></div>
+
+      </section>
+      </details>
+      <section class="hk-manager-summary" style="order: 1">
+        <header>
+          <h2 data-i18n="manager.pageListHeading">頁面清單</h2>
+          <span id="pageCount" class="hk-manager-count"></span>
+          <button
+            type="button"
+            id="tagManagerBtn"
+            class="hk-manager-btn hk-manager-btn-ghost hk-manager-merge-btn"
+            data-i18n="manager.tagManager"
+            data-i18n-title="manager.tagManagerHint"
+            title="一次把標籤改名、併入常用標籤或刪除，套用到所有頁面"
+          >
+            標籤整理
+          </button>
+          <button
+            type="button"
+            id="mergeDuplicatesBtn"
+            class="hk-manager-btn hk-manager-btn-ghost hk-manager-merge-btn"
+            data-i18n="manager.mergeDuplicates"
+            data-i18n-title="manager.mergeDuplicatesTitle"
+            title="合併網址正規化後相同的頁面，保留不同路徑及已辨識的內容參數"
+          >
+            整理重複頁面
+          </button>
+        </header>
+      <div class="hk-manager-search-row">
+        <label class="hk-manager-search-label">
+          <span data-i18n="manager.searchLabel">搜尋筆記</span>
+          <input
+            type="search"
+            id="managerSearch"
+            class="hk-manager-search"
+            data-i18n-placeholder="manager.searchPlaceholder"
+            aria-describedby="managerSearchHint"
+            placeholder="搜尋標題、劃線、心得或標籤"
+          />
+        </label>
+        <p id="managerSearchHint" class="hk-search-hint" data-i18n="manager.searchHint">多個關鍵字可用空格分隔。</p>
+      </div>
+        <div class="hk-manager-controls">
+          <label class="hk-manager-sort-label">
+            <span data-i18n="manager.sortLabel">排序</span>
+            <select id="managerSort" class="hk-manager-sort">
+              <option value="updated" data-i18n="manager.sortUpdated">最後更新</option>
+              <option value="count" data-i18n="manager.sortCount">筆記數</option>
+              <option value="title" data-i18n="manager.sortTitle">標題</option>
+            </select>
+          </label>
+          <label class="hk-manager-sort-label">
+            <span data-i18n="manager.domainLabel">網域</span>
+            <select id="managerDomainFilter" class="hk-manager-sort"></select>
+          </label>
+          <button
+            type="button"
+            id="exportCategoryBtn"
+            class="hk-manager-btn hk-manager-btn-ghost hk-manager-export-category"
+            hidden
+          >
+            匯出此分類
+          </button>
+          <div id="managerTagFilter" class="hk-manager-tag-filter"></div>
+          <button type="button" id="clearFiltersBtn" class="hk-manager-btn hk-manager-btn-ghost" data-i18n="manager.resetFilters">清除篩選</button>
+        </div>
+        <div id="pageList" class="hk-manager-list"></div>
+      </section>
+      <section id="managerStatus" class="hk-manager-status" role="status" aria-live="polite"></section>
+    </main>
+
+
+
+
+
+
+
+  <script>if (new URLSearchParams(window.location.search).get("embed") === "sync") {
+  document.documentElement.classList.add("embedded-sync");
+  const backup=document.querySelector(".hk-manager-backup");
+  if(backup){backup.querySelector(":scope > summary")?.remove();backup.replaceWith(...backup.children);}
+
+}
+</script></body>
+</html>

@@ -34,12 +34,37 @@
     const parsed = JSON.parse(rawText);
     const pages = Array.isArray(parsed?.pages) ? parsed.pages : Array.isArray(parsed) ? parsed : null;
     if (!pages) throw new Error("not a backup");
-    const seen = new Set();
-    return root.HkParsers.normalizeBulkPages(pages).filter((page) => {
-      if (seen.has(page.url)) return false;
-      seen.add(page.url);
-      return true;
-    });
+    const record=value=>value&&typeof value==="object"&&!Array.isArray(value);
+    const seen=new Set();
+    for(const page of pages){
+      if(!record(page))throw new Error("invalid page");
+      const url=page.url??page.pageUrl;
+      let parsedUrl;try{parsedUrl=new URL(url);}catch(_error){throw new Error("invalid page URL");}
+      if(typeof url!=="string"||!["http:","https:"].includes(parsedUrl.protocol)||seen.has(url))throw new Error("invalid or duplicate page URL");
+      seen.add(url);
+      if(page.entries!==undefined&&(!Array.isArray(page.entries)||page.entries.some(entry=>!record(entry))))throw new Error("invalid entries");
+      for(const entry of page.entries||[]){
+        if(typeof entry.text!=="string"&&typeof entry.range?.text!=="string")throw new Error("invalid highlight text");
+        for(const field of ["text","id","note","color"])if(entry[field]!=null&&typeof entry[field]!=="string")throw new Error("invalid highlight "+field);
+        if(entry.range!=null&&!record(entry.range))throw new Error("invalid highlight range");
+      }
+      for(const field of ["note","mindmap"])if(page[field]!=null&&!record(page[field]))throw new Error("invalid "+field);
+      if(page.tags!=null&&(!Array.isArray(page.tags)||page.tags.some(tag=>typeof tag!=="string")))throw new Error("invalid tags");
+      if(page.personalNote!==undefined&&typeof page.personalNote!=="string")throw new Error("invalid personal note");
+      if(page.readingDesk!=null){
+        if(!record(page.readingDesk)||!Array.isArray(page.readingDesk.cards))throw new Error("invalid desk");
+        const ids=new Set();
+        for(const card of page.readingDesk.cards){
+          if(!record(card)||typeof card.id!=="string"||!card.id||ids.has(card.id)||!["note","quote"].includes(card.type))throw new Error("invalid desk card");
+          if(card.type==="quote"&&(typeof card.highlightId!=="string"||!card.highlightId))throw new Error("invalid desk source");
+          if(card.text!==undefined&&typeof card.text!=="string")throw new Error("invalid desk text");
+          ids.add(card.id);
+        }
+      }
+    }
+    const normalized=root.HkParsers.normalizeBulkPages(pages);
+    if(normalized.length!==pages.length)throw new Error("incomplete backup");
+    return normalized;
   };
 
   const canonicalJson = (value) => {
@@ -67,6 +92,7 @@
           note: exportNote(page.note),
           mindmap: page.mindmap || null,
           personalNote: page.personalNote || "",
+          ...(page.readingDesk ? { readingDesk: page.readingDesk } : {}),
         })
       )
     );
@@ -202,6 +228,7 @@
     const notes = { ...(all[GENERATED_NOTES_KEY] || {}) };
     const mindmaps = { ...(all[MINDMAP_KEY] || {}) };
     const personal = { ...(all[PERSONAL_NOTES_KEY] || {}) };
+    const desks = { ...(all.hkReadingDesks || {}) };
     const updates = {};
     const removals = [...deleted];
     deleted.forEach((url) => {
@@ -209,6 +236,7 @@
       delete notes[url];
       delete mindmaps[url];
       delete personal[url];
+      delete desks[url];
     });
     pulled.forEach((page) => {
       if (page.entries.length) updates[page.url] = page.entries;
@@ -217,6 +245,7 @@
       const note = exportNote(page.note);
       if (note) notes[page.url] = note;
       else delete notes[page.url];
+      if (page.readingDesk) desks[page.url] = page.readingDesk; else delete desks[page.url];
       if (page.mindmap) mindmaps[page.url] = page.mindmap;
       else delete mindmaps[page.url];
       if (typeof page.personalNote === "string") {
@@ -231,6 +260,7 @@
       [GENERATED_NOTES_KEY]: notes,
       [MINDMAP_KEY]: mindmaps,
       [PERSONAL_NOTES_KEY]: personal,
+      hkReadingDesks: desks,
     });
     if (removals.length) await chrome.storage.local.remove(removals);
   };
@@ -269,7 +299,7 @@
   };
 
   // 只留下內容真的變動的檔案，並刪掉已經沒有對應標籤的分類檔。
-  const filesToCommit = async (settings, files, commitSha) => {
+  const filesToCommit = async (settings, files, commitSha, managedCategoryFiles=[]) => {
     if (!commitSha) return { files, deletions: [] };
     const tree = await githubGet(settings, `/git/trees/${commitSha}?recursive=1`);
     if (tree.truncated) return { files, deletions: [] };
@@ -280,7 +310,7 @@
     }
     const prefix = joinPath(githubDir(settings.path), "categories/");
     const keep = new Set(files.map((file) => file.path));
-    const deletions = [...existing.keys()].filter((path) => path.startsWith(prefix) && !keep.has(path));
+    const deletions = (Array.isArray(managedCategoryFiles)?managedCategoryFiles:[]).filter(path=>typeof path==="string"&&path.startsWith(prefix)&&/^[^/]+\.json$/.test(path.slice(prefix.length))&&existing.has(path)&&!keep.has(path));
     return { files: changed, deletions };
   };
 
@@ -302,7 +332,9 @@
 
   let running = false;
 
-  const runCycle = async ({ manual = false } = {}) => {
+  const runCycle = async (options = {}, locked = false) => {
+    if (root.HkReadingDeskWriteLock && !locked) return root.HkReadingDeskWriteLock(() => runCycle(options, true));
+    const { manual = false } = options;
     if (running) return { status: "busy" };
     running = true;
     try {
@@ -333,6 +365,7 @@
             : root.HkShareLink.isEmptyRepoError(error) ? "repo-empty"
             : error?.code || "",
           errorMessage: error?.message || String(error),
+          errorOperation: error?.operation || "",
           lastRunAt: Date.now(),
         });
       }
@@ -395,6 +428,7 @@
     await writeLocalChanges(pullUrls.map((url) => remoteByUrl.get(url)), deleteLocalUrls, freshAll);
 
     let nextCommitSha = commitSha;
+    let nextCategoryFiles = state.categoryFiles || [];
     if (pushUrls.length || deleteRemoteUrls.length) {
       const merged = new Map(remoteByUrl);
       pushUrls.forEach((url) => merged.set(url, localByUrl.get(url)));
@@ -404,7 +438,8 @@
         .sort((a, b) => a.url.localeCompare(b.url));
       const payload = { type: "highlight-keeper-bulk", version: 2, exportedAt: now, pages };
       const { files, index } = buildCategorizedFiles(settings, payload);
-      const commit = await filesToCommit(settings, files, commitSha);
+      const commit = await filesToCommit(settings, files, commitSha, state.categoryFiles);
+      nextCategoryFiles=files.filter(file=>file.path.startsWith(joinPath(githubDir(settings.path),"categories/"))).map(file=>file.path);
       nextCommitSha = await root.HkShareLink.commitFilesToGithub(
         settings,
         commit.files,
@@ -434,6 +469,7 @@
       conflicts,
       resolutions: {},
       status: conflicts.length ? "conflict" : "ok",
+      categoryFiles: nextCategoryFiles,
       errorCode: "",
       errorMessage: "",
       pulled: pullUrls.length,

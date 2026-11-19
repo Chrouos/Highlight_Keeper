@@ -1,0 +1,22 @@
+const assert=require('node:assert/strict');
+require('../share-link.js');
+const request=HkShareLink.githubApiRequest;
+const ok=()=>({ok:true,json:async()=>({sha:'commit'})});
+(async()=>{
+ let calls=0;
+ global.fetch=async()=>{if(++calls===1)throw new TypeError('Failed to fetch');return ok()};
+ assert.deepEqual(await request('https://api.github.com/repos/o/r','/git/commits/sha','secret'),{sha:'commit'});
+ assert.equal(calls,2,'a transient read failure is retried');
+ calls=0;global.fetch=async()=>{calls++;throw new TypeError('Failed to fetch')};
+ await assert.rejects(request('https://api.github.com/repos/o/r','/git/commits','secret',{method:'POST',body:{}}),e=>e.code==='network-error'&&!e.message.includes('secret'));
+ assert.equal(calls,1,'writes are not blindly retried');
+ calls=0;global.fetch=async()=>{calls++;return{ok:false,status:403,text:async()=>JSON.stringify({message:'Forbidden'})}};
+ await assert.rejects(request('https://api.github.com/repos/o/r','/git/commits/sha','secret'),e=>e.status===403);
+ assert.equal(calls,1,'permission failures are not retried');
+ const vm=require('node:vm'),fs=require('node:fs');let timeouts=0;
+ const sandbox={AbortController,TextEncoder,btoa,setTimeout:fn=>setTimeout(fn,0),clearTimeout,fetch:async(_url,init)=>{timeouts++;return new Promise((_resolve,reject)=>init.signal.addEventListener('abort',()=>reject(new Error('aborted'))));}};
+ vm.runInNewContext(fs.readFileSync(require.resolve('../share-link.js'),'utf8'),sandbox);
+ await assert.rejects(sandbox.HkShareLink.githubApiRequest('https://api.github.com/repos/o/r','/git/commits/sha','secret'),e=>e.code==='network-timeout');
+ assert.equal(timeouts,3,'stalled reads abort and exhaust a bounded retry count');
+ console.log('GitHub network: read retries, non-repeated writes and permission separation passed');
+})().catch(e=>{console.error(e);process.exitCode=1});

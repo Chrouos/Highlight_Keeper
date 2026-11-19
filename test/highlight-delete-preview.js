@@ -1,0 +1,10 @@
+const assert=require('node:assert/strict');const fs=require('node:fs');const vm=require('node:vm');
+const source=fs.readFileSync(require.resolve('../contentScript.js'),'utf8');const url='https://a.test/';let cancelled=0;const removed=[];
+const context={pageKey:url,previewUndo:{pageKey:url,entries:[{id:'a'},{id:'b'}]},previewData:[{data:{id:'preview',url}}],cancelPreviewHighlights:async()=>{cancelled++;throw Error('unrelated preview rollback');},chrome:{runtime:{sendMessage:async()=>({success:true,count:1,ids:['a']})}},document:{querySelectorAll:()=>['a','b','preview'].map(id=>({getAttribute:()=>id}))},HIGHLIGHT_ATTR:'data-highlight-id',unwrapHighlightElement:mark=>removed.push(mark.getAttribute()),hideNoteTooltip(){},closeHighlightMenu(){},refreshHighlightPanelIfVisible:async()=>{},notifyPageChanged(){},hidePreviewConfirmBar(){},showPreviewConfirmBar(){},t:key=>key};
+vm.createContext(context);
+const start = source.indexOf('globalThis.HkDeskBridge = {');
+assert.ok(start >= 0);
+const end = source.indexOf('\n};', start);
+assert.ok(end > start);
+const bridge=vm.runInContext(source.slice(start, end + 3) + ';HkDeskBridge',context);
+(async()=>{await bridge.deleteHighlights(url,['a']);assert.equal(cancelled,0,'delete does not roll back unrelated article edits');assert.deepEqual(removed,['a']);assert.equal(context.previewUndo.entries.some(e=>e.id==='a'),false,'canceling preview cannot resurrect a deleted mark');assert.equal(context.previewData.length,1,'unrelated preview is preserved');await bridge.deleteHighlights(url,null);assert.equal(context.previewData.length,0);assert.equal(context.previewUndo,null);console.log('Deleting highlights preserves unrelated preview edits and prevents resurrection');})().catch(e=>{console.error(e);process.exitCode=1});

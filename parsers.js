@@ -494,7 +494,8 @@
           page.mindmap && typeof page.mindmap === "object" ? page.mindmap : null;
         const hasPersonalNote = typeof page.personalNote === "string";
         const personalNote = hasPersonalNote ? page.personalNote : "";
-        if (!entries.length && !note && !mindmap && !personalNote) return null;
+        const readingDesk = page.readingDesk && typeof page.readingDesk === "object" && Array.isArray(page.readingDesk.cards) ? page.readingDesk : null;
+        if (!entries.length && !note && !mindmap && !personalNote && !readingDesk) return null;
         return {
           url,
           title: typeof page.title === "string" ? page.title : "",
@@ -505,6 +506,7 @@
           note,
           mindmap,
           ...(hasPersonalNote ? { personalNote } : {}),
+          ...(readingDesk ? { readingDesk } : {}),
         };
       })
       .filter(Boolean);
@@ -515,6 +517,7 @@
     notes: "hkGeneratedNotes",
     mindmaps: "hkMindmaps",
     personal: "hkPersonalNotes",
+    desks: "hkReadingDesks",
   };
 
   // AI 筆記裡的 prompt 是整篇文章全文，不需要備份，也不算內容變動。
@@ -529,7 +532,8 @@
     (Array.isArray(all[url]) && all[url].length > 0) ||
     Boolean(all[STORAGE_KEYS.notes]?.[url]) ||
     Boolean(all[STORAGE_KEYS.mindmaps]?.[url]) ||
-    typeof all[STORAGE_KEYS.personal]?.[url]?.text === "string";
+    typeof all[STORAGE_KEYS.personal]?.[url]?.text === "string" ||
+    Boolean(all[STORAGE_KEYS.desks]?.[url]?.cards?.length);
 
   // 從 storage 全部內容組出備份頁面；下載全部與自動同步都用這一份。
   const collectBackupPages = (all) => {
@@ -544,6 +548,7 @@
         ...Object.keys(notes),
         ...Object.keys(mindmaps),
         ...Object.keys(personal),
+        ...Object.keys(all[STORAGE_KEYS.desks] || {}),
       ].filter(isHttpUrl)
     );
     return normalizeBulkPages(
@@ -555,6 +560,7 @@
         note: exportNote(notes[url]),
         mindmap: mindmaps[url] || null,
         ...(typeof personal[url]?.text === "string" ? { personalNote: personal[url].text } : {}),
+        ...(all[STORAGE_KEYS.desks]?.[url] ? { readingDesk: all[STORAGE_KEYS.desks][url] } : {}),
       }))
     );
   };
@@ -565,6 +571,7 @@
     const notes = { ...(all[STORAGE_KEYS.notes] || {}) };
     const mindmaps = { ...(all[STORAGE_KEYS.mindmaps] || {}) };
     const personal = { ...(all[STORAGE_KEYS.personal] || {}) };
+    const desks = { ...(all[STORAGE_KEYS.desks] || {}) };
     const updates = {};
     const skipped = [];
     const imported = [];
@@ -581,12 +588,14 @@
       if (page.note) notes[page.url] = exportNote(page.note);
       if (page.mindmap) mindmaps[page.url] = page.mindmap;
       if (typeof page.personalNote === "string") personal[page.url] = { text: page.personalNote, updatedAt: now };
+      if (page.readingDesk) desks[page.url] = page.readingDesk;
     });
     if (imported.length) {
       updates[STORAGE_KEYS.meta] = meta;
       updates[STORAGE_KEYS.notes] = notes;
       updates[STORAGE_KEYS.mindmaps] = mindmaps;
       updates[STORAGE_KEYS.personal] = personal;
+      updates[STORAGE_KEYS.desks] = desks;
     }
     return { updates, imported, skipped };
   };

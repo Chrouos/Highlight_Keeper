@@ -1,5 +1,8 @@
 if (new URLSearchParams(window.location.search).get("embed") === "sync") {
   document.documentElement.classList.add("embedded-sync");
+  const backup=document.querySelector(".hk-manager-backup");
+  if(backup){backup.querySelector(":scope > summary")?.remove();backup.replaceWith(...backup.children);}
+
 }
 const PAGE_META_KEY = "__hk_page_meta__";
 const DEFAULT_COLOR = "#fff5b8";
@@ -21,9 +24,12 @@ const state = {
   notes: {},
   mindmaps: {},
   personalNotes: {},
+  readingDesks: {},
   searchTerm: "",
   sortBy: "updated",
-  activeTag: "",
+  activeTags: new Set(),
+  page: 1,
+  pageSize: 20,
   activeDomain: "",
   selected: new Set(),
 };
@@ -296,6 +302,7 @@ const fetchAllPages = async () => {
   const notes = all[GENERATED_NOTES_KEY] || {};
   const mindmaps = all[MINDMAP_KEY] || {};
   const personalNotes = all[PERSONAL_NOTES_KEY] || {};
+  state.readingDesks = all.hkReadingDesks || {};
   const pageKeys = new Set([
     ...Object.entries(all)
       .filter(([key, value]) => isValidPageKey(key) && Array.isArray(value))
@@ -305,6 +312,7 @@ const fetchAllPages = async () => {
     ...Object.keys(notes),
     ...Object.keys(mindmaps),
     ...Object.keys(personalNotes),
+    ...Object.keys(state.readingDesks),
   ].filter(isValidPageKey));
   const pages = [...pageKeys]
     .map((url) => {
@@ -317,7 +325,8 @@ const fetchAllPages = async () => {
         latest,
         Number(notes[url]?.generatedAt) || 0,
         Number(mindmaps[url]?.generatedAt) || 0,
-        Number(personalNotes[url]?.updatedAt) || 0
+        Number(personalNotes[url]?.updatedAt) || 0,
+        Number(state.readingDesks[url]?.updatedAt) || 0
       );
       return {
         url,
@@ -340,7 +349,9 @@ const fetchAllPages = async () => {
     if (notes[page.url]?.note) parts.push(notes[page.url].note);
     if (notes[page.url]?.context) parts.push(notes[page.url].context);
     if (personalNotes[page.url]?.text) parts.push(personalNotes[page.url].text);
-    page._search = parts.filter(Boolean).join("\n").toLowerCase();
+    (state.readingDesks[page.url]?.cards || []).forEach(card => { if (card.text) parts.push(card.text); });
+    page._searchText = parts.filter(Boolean).join("\n");
+    page._search = page._searchText.toLowerCase();
   });
   state.pages = pages;
   state.meta = meta;
@@ -358,7 +369,7 @@ const matchesSearch = (page, term) => {
     typeof page._search === "string"
       ? page._search
       : [page.title, page.url].filter(Boolean).join("\n").toLowerCase();
-  return haystack.includes(normalized);
+  return window.HkTagOrganizer.matches(haystack, normalized);
 };
 
 const sortPages = (pages) => {
@@ -393,6 +404,10 @@ const renderTagFilter = () => {
     }
     tags.forEach((tag) => tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1));
   });
+  [...state.activeTags].forEach((tag) => { if (tag !== UNTAGGED_KEY && !tagCounts.has(tag)) state.activeTags.delete(tag); });
+  const oldPicker = tagFilterEl.querySelector("details");
+  const wasOpen = oldPicker?.open || false;
+  const oldQuery = oldPicker?.querySelector("input[type=search]")?.value || "";
   tagFilterEl.innerHTML = "";
   if (!tagCounts.size && !untaggedCount) {
     tagFilterEl.style.display = "none";
@@ -405,49 +420,62 @@ const renderTagFilter = () => {
     chip.className = "hk-manager-filter-chip";
     chip.textContent =
       typeof count === "number" ? `${label}（${count}）` : label;
-    chip.classList.toggle("is-active", state.activeTag === value);
+    chip.classList.toggle("is-active", value ? state.activeTags.has(value) : !state.activeTags.size);
+    chip.setAttribute("aria-pressed", String(value ? state.activeTags.has(value) : !state.activeTags.size));
     chip.addEventListener("click", () => {
-      state.activeTag = state.activeTag === value ? "" : value;
+      if (!value) state.activeTags.clear();
+      else if (state.activeTags.has(value)) state.activeTags.delete(value);
+      else state.activeTags.add(value);
       renderPageList();
     });
     return chip;
   };
   tagFilterEl.appendChild(makeChip(t("manager.filterAll"), ""));
-  // 標籤太多時預設收合：只顯示前段（使用頁數多的排前面），其餘收進「更多」。
-  const TAG_FILTER_VISIBLE = 14;
-  const sortedTags = Array.from(tagCounts.keys()).sort(
-    (a, b) => tagCounts.get(b) - tagCounts.get(a) || a.localeCompare(b)
-  );
-  let visibleTags = sortedTags;
-  const overflow = sortedTags.length - TAG_FILTER_VISIBLE;
-  if (!state.tagFilterExpanded && overflow > 1) {
-    visibleTags = sortedTags.slice(0, TAG_FILTER_VISIBLE);
-    // 目前選中的標籤被收進「更多」時，仍要看得到。
-    if (state.activeTag && sortedTags.includes(state.activeTag) && !visibleTags.includes(state.activeTag)) {
-      visibleTags = [...visibleTags, state.activeTag];
-    }
-  }
-  visibleTags.forEach((tag) =>
-    tagFilterEl.appendChild(makeChip(tag, tag, tagCounts.get(tag)))
-  );
-  if (untaggedCount) {
-    tagFilterEl.appendChild(
-      makeChip(t("manager.filterUntagged"), UNTAGGED_KEY, untaggedCount)
-    );
-  }
-  if (overflow > 1) {
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "hk-manager-filter-chip hk-manager-filter-more";
-    toggle.textContent = state.tagFilterExpanded
-      ? t("manager.tagFilterCollapse")
-      : t("manager.tagFilterMore", { count: sortedTags.length - visibleTags.length });
-    toggle.addEventListener("click", () => {
-      state.tagFilterExpanded = !state.tagFilterExpanded;
-      renderTagFilter();
+  if (untaggedCount) tagFilterEl.appendChild(makeChip(t("manager.filterUntagged"), UNTAGGED_KEY, untaggedCount));
+  const picker = document.createElement("details");
+  picker.className = "hk-tag-picker";
+  const summary = document.createElement("summary");
+  summary.textContent = state.activeTags.size ? t("manager.tagsAny", { count: state.activeTags.size }) : t("manager.chooseTag", { count: tagCounts.size });
+  picker.open = wasOpen;
+  picker.appendChild(summary);
+  const search = document.createElement("input");
+  search.type = "search";
+  search.value = oldQuery;
+  search.className = "hk-manager-input";
+  search.placeholder = t("manager.findTag");
+  search.setAttribute("aria-label", t("manager.findTag"));
+  picker.appendChild(search);
+  const options = document.createElement("div");
+  options.className = "hk-tag-options";
+  picker.appendChild(options);
+  const draw = () => {
+    options.replaceChildren();
+    [...tagCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).filter(([tag]) => window.HkTagOrganizer.matches(tag, search.value)).forEach(([tag, count]) => {
+      const label = document.createElement("label");
+      label.className = "hk-tag-option";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = state.activeTags.has(tag);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) state.activeTags.add(tag); else state.activeTags.delete(tag);
+        renderPageList();
+        [...tagFilterEl.querySelectorAll(".hk-tag-option")].find((item) => item.dataset.tag === tag)?.querySelector("input")?.focus();
+      });
+      label.dataset.tag = tag;
+      const text = document.createElement("span");
+      text.textContent = `${tag}（${count}）`;
+      label.append(checkbox, text);
+      options.appendChild(label);
     });
-    tagFilterEl.appendChild(toggle);
-  }
+    if (!options.childElementCount) options.textContent = t("manager.emptySearch");
+  };
+  search.addEventListener("input", draw);
+  picker.addEventListener("toggle", () => { if (picker.open) search.focus(); });
+  draw();
+  tagFilterEl.appendChild(picker);
+  state.activeTags.forEach((tag) => {
+    if (tag !== UNTAGGED_KEY) tagFilterEl.appendChild(makeChip(`${tag} ×`, tag));
+  });
 };
 
 // 網域下拉：把所有頁面依 hostname 統計，選一個就只看該網站（即時、不另存檔）。
@@ -483,7 +511,7 @@ const renderDomainFilter = () => {
 const renderCategoryExport = () => {
   if (!categoryExportBtn) return;
   const active = Boolean(
-    state.activeTag || state.activeDomain || state.searchTerm
+    state.activeTags.size || state.activeDomain || state.searchTerm
   );
   categoryExportBtn.hidden = !active;
   if (active) {
@@ -553,6 +581,7 @@ const renderSelectionBar = (filtered) => {
   allLabel.className = "hk-manager-select-all";
   const cb = document.createElement("input");
   cb.type = "checkbox";
+  cb.disabled = !filteredUrls.length;
   cb.checked = allChecked;
   cb.indeterminate = !allChecked && someChecked;
   cb.addEventListener("change", () => {
@@ -563,7 +592,7 @@ const renderSelectionBar = (filtered) => {
   const labelText = document.createElement("span");
   labelText.textContent = state.selected.size
     ? t("manager.selectedCount", { count: state.selected.size })
-    : t("manager.selectAll");
+    : t("manager.selectAllResults", { count: filtered.length });
   allLabel.appendChild(cb);
   allLabel.appendChild(labelText);
   bar.appendChild(allLabel);
@@ -589,6 +618,28 @@ const renderSelectionBar = (filtered) => {
       state.selected.clear();
       renderPageList();
     });
+    const tagInput = document.createElement("input");
+    tagInput.className = "hk-manager-input hk-bulk-tag-input";
+    tagInput.placeholder = t("manager.bulkTagPlaceholder");
+    tagInput.setAttribute("aria-label", t("manager.bulkTagPlaceholder"));
+    const addTagsBtn = document.createElement("button");
+    addTagsBtn.type = "button";
+    addTagsBtn.className = "hk-manager-btn hk-manager-btn-muted";
+    addTagsBtn.textContent = t("manager.bulkAddTags");
+    addTagsBtn.addEventListener("click", async () => {
+      const tags = [...new Set(tagInput.value.split(/[,，、\n]+/).map((tag) => tag.trim()).filter(Boolean))];
+      if (!tags.length) { tagInput.focus(); return; }
+      const urls = [...state.selected];
+      addTagsBtn.disabled = true;
+      try {
+        const stored = await chrome.storage.local.get(PAGE_META_KEY);
+        await chrome.storage.local.set({ [PAGE_META_KEY]: window.HkTagOrganizer.addTags(stored[PAGE_META_KEY] || {}, urls, tags) });
+        await refreshManager();
+        setStatus(t("manager.bulkTagsDone", { count: urls.length }));
+      } catch (error) { setStatus(t("manager.errTagsUpdate"), true); }
+      finally { addTagsBtn.disabled = false; }
+    });
+    actions.append(tagInput, addTagsBtn);
     actions.appendChild(exportBtn);
     actions.appendChild(delBtn);
     actions.appendChild(clearBtn);
@@ -596,6 +647,50 @@ const renderSelectionBar = (filtered) => {
   }
 };
 
+const renderPagination = (result) => {
+  let nav = document.getElementById("managerPagination");
+  if (!nav) {
+    nav = document.createElement("nav");
+    nav.id = "managerPagination";
+    nav.className = "hk-manager-pagination";
+    listEl.after(nav);
+  }
+  nav.setAttribute("aria-label", t("manager.pagination"));
+  nav.replaceChildren();
+  const info = document.createElement("span");
+  info.textContent = t("manager.pageRange", result);
+  const label = document.createElement("label");
+  label.textContent = t("manager.perPage");
+  const size = document.createElement("select");
+  size.className = "hk-manager-sort";
+  [20, 50, 100].forEach((count) => {
+    const option = document.createElement("option"); option.value = count; option.textContent = count;
+    size.appendChild(option);
+  });
+  size.value = state.pageSize;
+  size.addEventListener("change", () => { state.pageSize = Number(size.value); state.page = 1; renderPageList(); });
+  label.appendChild(size);
+  const makeButton = (text, page, disabled) => {
+    const button = document.createElement("button"); button.type = "button";
+    button.className = "hk-manager-btn hk-manager-btn-ghost";
+    button.textContent = text; button.disabled = disabled;
+    button.addEventListener("click", () => { state.page = page; renderPageList(); listEl.scrollIntoView({ block: "start" }); });
+    return button;
+  };
+  const current = document.createElement("select");
+  current.className = "hk-manager-sort";
+  current.setAttribute("aria-label", t("manager.pagination"));
+  for (let page = 1; page <= result.pages; page++) {
+    const option = document.createElement("option");
+    option.value = page; option.textContent = `${page} / ${result.pages}`;
+    current.appendChild(option);
+  }
+  current.value = result.page;
+  current.addEventListener("change", () => { state.page = Number(current.value); renderPageList(); listEl.scrollIntoView({ block: "start" }); });
+  nav.append(info, label, makeButton(t("manager.previousPage"), result.page - 1, result.page <= 1), current, makeButton(t("manager.nextPage"), result.page + 1, result.page >= result.pages));
+};
+
+let lastFilterKey = "";
 const renderPageList = () => {
   if (!listEl || !pageCountEl) return;
   listEl.innerHTML = "";
@@ -608,19 +703,26 @@ const renderPageList = () => {
     if (!existingUrls.has(u)) state.selected.delete(u);
   });
   let filtered = sortPages(getFilteredPages());
-  pageCountEl.textContent = t("manager.statusPageCount", { count: filtered.length });
+  pageCountEl.textContent = state.searchTerm.trim() || state.activeTags.size || state.activeDomain
+    ? t("manager.filteredCount", { count: filtered.length, total: state.pages.length })
+    : t("manager.statusPageCount", { count: filtered.length });
+  const filterKey = JSON.stringify([state.searchTerm, [...state.activeTags].sort(), state.activeDomain, state.sortBy]);
+  if (filterKey !== lastFilterKey) { state.page = 1; lastFilterKey = filterKey; }
+  const pagination = window.HkTagOrganizer.paginate(filtered, state.page, state.pageSize);
+  state.page = pagination.page;
+  renderPagination(pagination);
   renderSelectionBar(filtered);
   if (!filtered.length) {
     const empty = document.createElement("p");
     empty.textContent =
-      state.searchTerm || state.activeTag || state.activeDomain
+      state.searchTerm || state.activeTags.size || state.activeDomain
         ? t("manager.emptySearch")
         : t("manager.emptyAll");
     empty.className = "hk-manager-meta";
     listEl.appendChild(empty);
     return;
   }
-  filtered.forEach((page) => {
+  pagination.items.forEach((page) => {
     const card = document.createElement("article");
     card.className = "hk-manager-card";
     if (state.selected.has(page.url)) card.classList.add("is-selected");
@@ -677,6 +779,24 @@ const renderPageList = () => {
     urlLink.textContent = page.url;
     urlLink.addEventListener("click", (event) => event.stopPropagation());
     card.appendChild(urlLink);
+    if (state.searchTerm.trim()) {
+      const excerpt = document.createElement("p");
+      excerpt.className = "hk-manager-excerpt";
+      excerpt.textContent = window.HkTagOrganizer.snippet(page._searchText || page._search, state.searchTerm);
+      card.appendChild(excerpt);
+    }
+    if (page.tags?.length) {
+      const tags = document.createElement("div");
+      tags.className = "hk-manager-card-tags";
+      page.tags.forEach((tag) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = tag;
+        button.addEventListener("click", (event) => { event.stopPropagation(); state.activeTags.add(tag); renderPageList(); });
+        tags.appendChild(button);
+      });
+      card.appendChild(tags);
+    }
     const meta = document.createElement("div");
     meta.className = "hk-manager-meta";
     const updatedText = page.updatedAt
@@ -703,7 +823,8 @@ const hasLocalPageData = (existing, url) =>
   Boolean(existing[PAGE_META_KEY]?.[url]?.tags?.length) ||
   Boolean(existing[GENERATED_NOTES_KEY]?.[url]) ||
   Boolean(existing[MINDMAP_KEY]?.[url]) ||
-  typeof existing[PERSONAL_NOTES_KEY]?.[url]?.text === "string";
+  typeof existing[PERSONAL_NOTES_KEY]?.[url]?.text === "string" ||
+  Boolean(existing.hkReadingDesks?.[url]?.cards?.length);
 
 const deletePage = (url) => deletePages([url]);
 
@@ -713,16 +834,19 @@ const deletePages = async (urls) => {
     GENERATED_NOTES_KEY,
     MINDMAP_KEY,
     PERSONAL_NOTES_KEY,
+    "hkReadingDesks",
   ]);
   const meta = { ...(stored[PAGE_META_KEY] || {}) };
   const notes = { ...(stored[GENERATED_NOTES_KEY] || {}) };
   const maps = { ...(stored[MINDMAP_KEY] || {}) };
   const personalNotes = { ...(stored[PERSONAL_NOTES_KEY] || {}) };
+  const readingDesks = { ...(stored.hkReadingDesks || {}) };
   urls.forEach((url) => {
     delete meta[url];
     delete notes[url];
     delete maps[url];
     delete personalNotes[url];
+    delete readingDesks[url];
   });
   await chrome.storage.local.remove(urls);
   await chrome.storage.local.set({
@@ -731,6 +855,8 @@ const deletePages = async (urls) => {
     [MINDMAP_KEY]: maps,
     [PERSONAL_NOTES_KEY]: personalNotes,
   });
+  const removedDesks = urls.filter(pageKey => stored.hkReadingDesks?.[pageKey]);
+  if (removedDesks.length) await writeDeskBatch(removedDesks.map(pageKey => ({pageKey, value:null})));
 };
 
 // ── 整理重複頁面 ────────────────────────────────────────────────
@@ -788,11 +914,13 @@ const mergeDuplicateGroups = async (groups) => {
     GENERATED_NOTES_KEY,
     MINDMAP_KEY,
     PERSONAL_NOTES_KEY,
+    "hkReadingDesks",
   ]);
   const meta = { ...(stored[PAGE_META_KEY] || {}) };
   const notes = { ...(stored[GENERATED_NOTES_KEY] || {}) };
   const maps = { ...(stored[MINDMAP_KEY] || {}) };
   const personalNotes = { ...(stored[PERSONAL_NOTES_KEY] || {}) };
+  const readingDesks = { ...(stored.hkReadingDesks || {}) };
   const entryUpdates = {};
   const keysToRemove = [];
   let mergedExtra = 0;
@@ -802,7 +930,7 @@ const mergeDuplicateGroups = async (groups) => {
   groups.forEach(({ canonical, pages }) => {
     const urls = pages.map((p) => p.url);
     // 不同版本的筆記或同 ID 標註不可由較新的版本靜默覆蓋。
-    const hasConflict = [notes, maps, personalNotes].some((records) =>
+    const hasConflict = [notes, maps, personalNotes, readingDesks].some((records) =>
       new Set(urls.map((url) => records[url]).filter((value) => value != null).map((value) => JSON.stringify(value))).size > 1
     );
     const entriesById = new Map();
@@ -824,6 +952,7 @@ const mergeDuplicateGroups = async (groups) => {
     let note;
     let mindmap;
     let personalNote;
+    let readingDesk;
     pages.forEach((p) => {
       const m = meta[p.url];
       if (m?.title && !title) title = m.title;
@@ -831,6 +960,7 @@ const mergeDuplicateGroups = async (groups) => {
       if (note === undefined && notes[p.url] != null) note = notes[p.url];
       if (mindmap === undefined && maps[p.url] != null) mindmap = maps[p.url];
       if (personalNote === undefined && personalNotes[p.url] != null) personalNote = personalNotes[p.url];
+      if (readingDesk === undefined && readingDesks[p.url] != null) readingDesk = readingDesks[p.url];
     });
 
     // 先清掉群組內所有舊 key 的附屬資料，再把合併結果寫到主頁面。
@@ -839,6 +969,7 @@ const mergeDuplicateGroups = async (groups) => {
       delete notes[u];
       delete maps[u];
       delete personalNotes[u];
+      delete readingDesks[u];
       if (u !== canonical) keysToRemove.push(u);
     });
     const newMeta = {};
@@ -848,6 +979,7 @@ const mergeDuplicateGroups = async (groups) => {
     if (note !== undefined) notes[canonical] = note;
     if (mindmap !== undefined) maps[canonical] = mindmap;
     if (personalNote !== undefined) personalNotes[canonical] = personalNote;
+    if (readingDesk !== undefined) readingDesks[canonical] = readingDesk;
   });
 
   if (!mergedGroups) return { mergedExtra, mergedGroups, skipped };
@@ -858,6 +990,8 @@ const mergeDuplicateGroups = async (groups) => {
     [MINDMAP_KEY]: maps,
     [PERSONAL_NOTES_KEY]: personalNotes,
   });
+  const deskOperations = [...new Set([...Object.keys(stored.hkReadingDesks || {}), ...Object.keys(readingDesks)])].filter(pageKey => JSON.stringify(stored.hkReadingDesks?.[pageKey]) !== JSON.stringify(readingDesks[pageKey])).map(pageKey => ({pageKey,value:readingDesks[pageKey] || null}));
+  if (deskOperations.length) await writeDeskBatch(deskOperations);
   if (keysToRemove.length) await chrome.storage.local.remove(keysToRemove);
   return { mergedExtra, mergedGroups, skipped };
 };
@@ -939,6 +1073,7 @@ const pageToExportEntry = (page) => ({
   title: state.meta[page.url]?.title || "",
   tags: Array.isArray(page.tags) ? page.tags : [],
   entries: page.entries,
+  ...(state.readingDesks[page.url] ? { readingDesk: state.readingDesks[page.url] } : {}),
   note: window.HkAutoSync.exportNote(state.notes[page.url]),
   mindmap: state.mindmaps[page.url] || null,
   ...(typeof state.personalNotes[page.url]?.text === "string"
@@ -985,7 +1120,7 @@ const pageDomain = (url) => {
 // 把檔名裡不安全的字（路徑分隔字元、控制字元）換掉，保留中文等可讀字。
 const safeFileSlug = (name) =>
   String(name)
-    .replace(/[\/\\:*?"<>| -]+/g, "-")
+    .replace(/[\/\\:*?"<>|\u0000-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60) || "category";
 
@@ -994,15 +1129,7 @@ const getFilteredPages = () => {
   let pages = state.pages.filter((page) =>
     matchesSearch(page, state.searchTerm)
   );
-  if (state.activeTag === UNTAGGED_KEY) {
-    pages = pages.filter(
-      (page) => !Array.isArray(page.tags) || !page.tags.length
-    );
-  } else if (state.activeTag) {
-    pages = pages.filter(
-      (page) => Array.isArray(page.tags) && page.tags.includes(state.activeTag)
-    );
-  }
+  pages = pages.filter((page) => window.HkTagOrganizer.matchesTags(page.tags, [...state.activeTags]));
   if (state.activeDomain) {
     pages = pages.filter((page) => pageDomain(page.url) === state.activeDomain);
   }
@@ -1053,12 +1180,10 @@ const exportFilteredPages = () => {
     setStatus(t("manager.errNoNotesExport"), true);
     return;
   }
-  const label =
-    state.activeTag === UNTAGGED_KEY
-      ? t("manager.filterUntagged")
-      : state.activeTag || state.activeDomain || "filtered";
+  const selectedTags = [...state.activeTags].map((tag) => tag === UNTAGGED_KEY ? t("manager.filterUntagged") : tag);
+  const label = selectedTags.join(" + ") || state.activeDomain || "filtered";
   const payload = buildExportPayloadForPages(pages, {
-    category: state.activeTag === UNTAGGED_KEY ? null : state.activeTag || null,
+    category: selectedTags.length ? selectedTags.join(" + ") : null,
     domain: state.activeDomain || null,
   });
   downloadJson(payload, `highlight-keeper-${safeFileSlug(label)}.json`);
@@ -1638,12 +1763,13 @@ const normalizeTagsInput = (input) => {
   return Array.from(
     new Set(
       input
-        .split(/[,\\s]+/)
+        .split(/[,，、\n]+/)
         .map((tag) => tag.trim())
         .filter(Boolean)
     )
   );
 };
+
 
 // ── 標籤整理：改名／併入／刪除，一次套用到所有頁面 ─────────────────
 // newTag 已存在＝合併（去重）；newTag 空字串＝從所有頁面移除。回傳動到的頁數。
@@ -1670,6 +1796,7 @@ const renameTagEverywhere = async (oldTag, newTag) => {
 };
 
 let tagManagerOverlayEl = null;
+const selectedManagerTags = new Set();
 const ensureTagManagerOverlay = () => {
   if (tagManagerOverlayEl) return tagManagerOverlayEl;
   const overlay = document.createElement("div");
@@ -1758,7 +1885,38 @@ const ensureTagManagerOverlay = () => {
     } catch (_error) { result.textContent = t("manager.tagAiInvalid"); apply.hidden = true; }
     finally { apply.disabled = false; }
   });
-  body.appendChild(assistant);
+  const assistantDetails = document.createElement("details");
+  const assistantSummary = document.createElement("summary");
+  assistantSummary.textContent = t("manager.tagAiHeading");
+  assistantDetails.append(assistantSummary, assistant);
+  body.appendChild(assistantDetails);
+  const tools = document.createElement("div");
+  tools.className = "hk-tag-tools";
+  tools.innerHTML = `<input type="search" id="tagManagerSearch" class="hk-manager-input"><select id="tagManagerSort" class="hk-manager-sort"><option value="rare"></option><option value="popular"></option><option value="name"></option></select><p id="tagManagerSelected" role="status"></p><input id="tagMergeTarget" class="hk-manager-input" list="hk-manager-tagmgr-datalist"><button type="button" id="tagBulkMerge" class="hk-manager-btn"></button>`;
+  tools.querySelector("#tagManagerSearch").placeholder = t("manager.findTag");
+  tools.querySelector("#tagManagerSearch").setAttribute("aria-label", t("manager.findTag"));
+  tools.querySelector("#tagManagerSort").setAttribute("aria-label", t("manager.sortLabel"));
+  ["rare", "popular", "name"].forEach((key) => tools.querySelector(`[value="${key}"]`).textContent = t(`manager.tagSort${key}`));
+  tools.querySelector("#tagMergeTarget").placeholder = t("manager.mergeTarget");
+  tools.querySelector("#tagMergeTarget").setAttribute("aria-label", t("manager.mergeTarget"));
+  tools.querySelector("#tagBulkMerge").textContent = t("manager.mergeSelectedTags");
+  tools.querySelector("#tagManagerSearch").addEventListener("input", renderTagManagerRows);
+  tools.querySelector("#tagManagerSort").addEventListener("change", renderTagManagerRows);
+  tools.querySelector("#tagBulkMerge").addEventListener("click", async () => {
+    const target = tools.querySelector("#tagMergeTarget").value.trim();
+    if (!target || !selectedManagerTags.size) return;
+    if (!await openConfirmDialog({ title: t("manager.mergeSelectedTags"), message: t("manager.mergeTagsConfirm", { count: selectedManagerTags.size, target }), confirmLabel: t("manager.tagMgrApply"), cancelLabel: t("manager.btnCancel") })) return;
+    const button = tools.querySelector("#tagBulkMerge");
+    button.disabled = true;
+    try {
+      const stored = await chrome.storage.local.get(PAGE_META_KEY);
+      await chrome.storage.local.set({ [PAGE_META_KEY]: window.HkTagOrganizer.mergeTags(stored[PAGE_META_KEY] || {}, [...selectedManagerTags], target) });
+      selectedManagerTags.clear();
+      await refreshAfterTagChange();
+    } catch (error) { setStatus(t("manager.errTagsUpdate"), true); }
+    finally { button.disabled = false; }
+  });
+  body.appendChild(tools);
   const list = document.createElement("div");
   list.id = "hk-manager-tagmgr-list";
   const datalist = document.createElement("datalist");
@@ -1819,7 +1977,15 @@ const renderTagManagerRows = () => {
   const sorted = [...counts.entries()].sort(
     (a, b) => a[1] - b[1] || a[0].localeCompare(b[0])
   );
-  sorted.forEach(([name, count]) => {
+  const query = overlay.querySelector("#tagManagerSearch").value;
+  const order = overlay.querySelector("#tagManagerSort").value;
+  [...selectedManagerTags].forEach((tag) => { if (!counts.has(tag)) selectedManagerTags.delete(tag); });
+  overlay.querySelector("#tagManagerSelected").textContent = t("manager.selectedTagCount", { count: selectedManagerTags.size });
+  overlay.querySelector("#tagBulkMerge").disabled = !selectedManagerTags.size;
+  sorted.sort((a, b) => order === "name" ? a[0].localeCompare(b[0]) : order === "popular" ? b[1] - a[1] : a[1] - b[1]);
+  const matchingTags = sorted.filter(([name]) => window.HkTagOrganizer.matches(name, query));
+  if (!matchingTags.length) { const empty = document.createElement("p"); empty.className = "hk-manager-detail-empty"; empty.textContent = t("manager.tagNoMatch"); list.appendChild(empty); }
+  matchingTags.forEach(([name, count]) => {
     const row = document.createElement("div");
     row.className = "hk-manager-tagmgr-row";
 
@@ -1881,6 +2047,16 @@ const renderTagManagerRows = () => {
       }
     });
 
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedManagerTags.has(name);
+    checkbox.setAttribute("aria-label", name);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) selectedManagerTags.add(name); else selectedManagerTags.delete(name);
+      overlay.querySelector("#tagManagerSelected").textContent = t("manager.selectedTagCount", { count: selectedManagerTags.size });
+      overlay.querySelector("#tagBulkMerge").disabled = !selectedManagerTags.size;
+    });
+    row.appendChild(checkbox);
     row.appendChild(label);
     row.appendChild(input);
     row.appendChild(applyBtn);
@@ -2235,6 +2411,7 @@ const applyImportedPageExtras = async (pages) => {
   const noteUpdates = {};
   const mindmapUpdates = {};
   const personalNoteUpdates = {};
+  const deskUpdates = {};
   pages.forEach((page) => {
     const metaEntry = { ...(state.meta[page.url] || {}) };
     let touched = false;
@@ -2247,6 +2424,7 @@ const applyImportedPageExtras = async (pages) => {
       touched = true;
     }
     if (touched) metaUpdates[page.url] = metaEntry;
+    if (page.readingDesk) deskUpdates[page.url] = page.readingDesk;
     if (page.note) noteUpdates[page.url] = page.note;
     if (page.mindmap) mindmapUpdates[page.url] = page.mindmap;
     if (typeof page.personalNote === "string") {
@@ -2256,6 +2434,9 @@ const applyImportedPageExtras = async (pages) => {
   await savePageMetaTitles(metaUpdates);
   await saveNotesAndMindmaps(noteUpdates, mindmapUpdates);
   await savePersonalNotes(personalNoteUpdates);
+  if (Object.keys(deskUpdates).length) {
+    await writeDeskBatch(Object.entries(deskUpdates).map(([pageKey,value]) => ({pageKey,value})));
+  }
 };
 
 const applyGithubBackupPages = async (pages) => {
@@ -2277,6 +2458,7 @@ const applyGithubBackupPages = async (pages) => {
     GENERATED_NOTES_KEY,
     MINDMAP_KEY,
     PERSONAL_NOTES_KEY,
+    "hkReadingDesks",
   ]);
   const overlapping = uniquePages.filter((page) => hasLocalPageData(existing, page.url));
   const toSortedJson = (value) => JSON.stringify(value ?? null);
@@ -2284,6 +2466,7 @@ const applyGithubBackupPages = async (pages) => {
     toSortedJson(currentEntries) === toSortedJson(nextEntries);
   const identical = overlapping.filter((page) =>
     isSameEntries(existing[page.url] || [], page.entries) &&
+    toSortedJson(existing.hkReadingDesks?.[page.url]) === toSortedJson(page.readingDesk) &&
     toSortedJson(window.HkAutoSync.exportNote(existing[GENERATED_NOTES_KEY]?.[page.url])) === toSortedJson(window.HkAutoSync.exportNote(page.note)) &&
     toSortedJson(existing[MINDMAP_KEY]?.[page.url] || null) === toSortedJson(page.mindmap || null) &&
     (typeof page.personalNote !== "string" || existing[PERSONAL_NOTES_KEY]?.[page.url]?.text === page.personalNote) &&
@@ -2360,6 +2543,7 @@ const AUTO_SYNC_CONFLICT_LABELS = {
 
 const autoSyncStatusText = (syncState) => {
   if (syncState.status === "error") {
+    if (["network-error","network-timeout"].includes(syncState.errorCode)) return syncState.errorOperation?t("manager.syncStepFailed",{step:syncState.errorOperation}):t("manager.syncNetworkError");
     if (syncState.errorCode === "remote-moved") return t("manager.syncRetryNext");
     if (syncState.errorCode === "remote-invalid") return t("manager.syncRemoteInvalid");
     if (syncState.errorCode === "repo-empty") return t("manager.syncRepoEmpty");
@@ -2454,6 +2638,7 @@ const renderAutoSyncConflicts = (conflicts) => {
 const renderAutoSyncState = async () => {
   if (!autoSyncStatusEl || !autoSyncConflictsEl) return;
   const syncState = await window.HkAutoSync.readState();
+  if(syncState.status==="error"&&!githubStatusEl?.classList.contains("is-error"))setGithubStatus("");
   autoSyncStatusEl.textContent = autoSyncStatusText(syncState);
   autoSyncStatusEl.classList.toggle(
     "is-error",
@@ -2464,6 +2649,7 @@ const renderAutoSyncState = async () => {
 
 const runAutoSyncNow = async () => {
   autoSyncNowBtn.disabled = true;
+  setGithubStatus("");
   autoSyncStatusEl.textContent = t("manager.syncRunning");
   autoSyncStatusEl.classList.remove("is-error");
   try {
@@ -2694,6 +2880,7 @@ const importMultipleFiles = async (files) => {
     GENERATED_NOTES_KEY,
     MINDMAP_KEY,
     PERSONAL_NOTES_KEY,
+    "hkReadingDesks",
   ]);
   const toImport = [];
   const skipped = [];
@@ -2813,3 +3000,23 @@ const init = async () => {
 };
 
 init();
+
+document.getElementById("clearFiltersBtn")?.addEventListener("click", () => {
+  state.searchTerm = ""; state.activeTags.clear(); state.activeDomain = "";
+  searchInput.value = "";
+  renderPageList();
+});
+
+async function writeDeskBatch(operations) {
+  if (!operations.length) return;
+  const result=await chrome.runtime.sendMessage({type:"HK_DESK_BATCH",operations});
+  if (!result?.success) throw new Error(result?.error || "Could not save reading desk");
+}
+
+document.getElementById("openBackupTools")?.addEventListener("click", () => {
+  const tools = document.querySelector(".hk-manager-backup");
+  if (!tools) return;
+  tools.open = true;
+  tools.scrollIntoView({block:"start",behavior:"smooth"});
+  tools.querySelector("summary")?.focus({preventScroll:true});
+});
